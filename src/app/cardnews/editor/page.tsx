@@ -2107,6 +2107,7 @@ export default function EditorPage() {
   const [isSharing, setIsSharing] = useState(false);
   const [shareToast, setShareToast] = useState<'copied' | 'error' | null>(null);
   const [showSnsModal, setShowSnsModal] = useState(false);
+  const [showCaptionModal, setShowCaptionModal] = useState(false);
 
   // ── Mutable page data state ──
   const [pagesData, setPagesData] = useState<PageData[]>(PAGES_DATA);
@@ -2115,10 +2116,18 @@ export default function EditorPage() {
   const [brandKit, setBrandKit] = useState<{ logo: string; color: string; name: string } | null>(null);
 
   useEffect(() => {
+    // 로컬스토리지 우선, 없으면 API에서 로드
     const saved = localStorage.getItem('brand_kit');
     if (saved) {
-      try { setBrandKit(JSON.parse(saved)); } catch (e) {}
+      try { setBrandKit(JSON.parse(saved)); return; } catch {}
     }
+    fetch('/api/brand-kit').then(r => r.json()).then(({ kit }) => {
+      if (kit) {
+        const loaded = { logo: kit.description || '', color: kit.primary_color || '#6366f1', secondary_color: kit.accent_color || '', font_family: kit.font_style || '', name: kit.layout_style || '' };
+        setBrandKit(loaded);
+        localStorage.setItem('brand_kit', JSON.stringify(loaded));
+      }
+    }).catch(() => {});
   }, []);
 
   // Google Fonts 로드
@@ -2352,17 +2361,15 @@ export default function EditorPage() {
     setIsSharing(true);
     try {
       const merged = pagesData.map(pg => ({ ...pg, bgImage: pageImages[pg.id] ?? pg.bgImage }));
-      const res = await fetch('/api/designs', {
+      const title = `카드뉴스 ${new Date().toLocaleDateString('ko-KR')}`;
+      const res = await fetch('/api/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: `카드뉴스 ${new Date().toLocaleDateString('ko-KR')}`,
-          pagesData: merged,
-        }),
+        body: JSON.stringify({ pages_data: merged, title }),
       });
       const data = await res.json();
-      if (data.design?.id) {
-        const shareUrl = `${window.location.origin}/view/${data.design.id}`;
+      if (data.token) {
+        const shareUrl = `${window.location.origin}/share?t=${data.token}`;
         await navigator.clipboard.writeText(shareUrl);
         setShareToast('copied');
       } else {
@@ -2418,6 +2425,18 @@ export default function EditorPage() {
       setIsUploadingDrop(false);
     }
   };
+
+  // 키보드 단축키: Ctrl+Z / Cmd+Z (실행취소), Ctrl+Y / Cmd+Shift+Z (다시실행)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl) return;
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [undo, redo]);
 
   useEffect(() => {
     const el = canvasWrapRef.current;
@@ -2476,6 +2495,14 @@ export default function EditorPage() {
           pagesData={pagesData}
           captureRefs={captureRefs}
           onClose={() => setShowSnsModal(false)}
+        />
+      )}
+      {/* AI 캡션 생성 모달 */}
+      {showCaptionModal && (
+        <CaptionModal
+          pagesData={pagesData}
+          brandKit={brandKit}
+          onClose={() => setShowCaptionModal(false)}
         />
       )}
 
@@ -2568,6 +2595,14 @@ export default function EditorPage() {
               title="전체화면으로 편집"
             >
               <Maximize2 size={14} /> 전체화면 편집
+            </button>
+            {/* AI 캡션 생성 */}
+            <button
+              onClick={() => setShowCaptionModal(true)}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 rounded-lg hover:from-emerald-600 hover:to-teal-600 active:scale-[0.98] transition-all shadow-sm"
+              title="AI가 인스타그램 캡션과 해시태그를 자동으로 생성합니다"
+            >
+              <Wand2 size={14} /> 캡션 생성
             </button>
             {/* SNS 업로드 */}
             <button
@@ -3631,6 +3666,7 @@ function DownloadModal({
 }) {
   const [ratio, setRatio] = useState<DownloadRatio>('4:5');
   const [format, setFormat] = useState<DownloadFormat>('zip');
+  const [transparentBg, setTransparentBg] = useState(false);
   const [progress, setProgress] = useState('');
   const [done, setDone] = useState(false);
 
@@ -3674,11 +3710,13 @@ function DownloadModal({
     const { toCanvas } = await import('html-to-image');
     const origSrcs = await preloadImagesViaProxy(el);
     try {
-      const canvas = await toCanvas(el, {
+      const opts: Parameters<typeof toCanvas>[1] = {
         pixelRatio: SCALE,
         cacheBust: false,
         skipFonts: false,
-      });
+      };
+      if (transparentBg) opts.backgroundColor = 'transparent';
+      const canvas = await toCanvas(el, opts);
       return canvas;
     } finally {
       restoreImages(origSrcs);
@@ -3851,6 +3889,15 @@ function DownloadModal({
                 </button>
               ))}
             </div>
+            {/* 투명 배경 옵션 (PNG 전용) */}
+            {format === 'png' && (
+              <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+                <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${transparentBg ? 'bg-primary-600 border-primary-600' : 'border-gray-300'}`} onClick={() => setTransparentBg(v => !v)}>
+                  {transparentBg && <Check size={10} className="text-white" />}
+                </div>
+                <span className="text-xs text-gray-600 font-medium">투명 배경 PNG (배경이미지 제외)</span>
+              </label>
+            )}
           </div>
 
           {/* 다운로드 버튼 */}
@@ -4118,6 +4165,146 @@ function SnsUploadModal({
 
           <p className="text-center text-[10px] text-gray-400">이미지 캡처 → CDN 업로드 → SNS 전송 순으로 진행됩니다</p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CaptionModal ─────────────────────────────────────────────────────────────
+function CaptionModal({
+  pagesData,
+  brandKit,
+  onClose,
+}: {
+  pagesData: PageData[];
+  brandKit: { logo: string; color: string; name?: string; font_family?: string } | null;
+  onClose: () => void;
+}) {
+  const [caption, setCaption] = useState('');
+  const [hashtags, setHashtags] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState('');
+
+  const generate = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const cards = pagesData.map(p => ({
+        title: p.title,
+        body: [p.subtitle, ...(p.bullets || [])].filter(Boolean).join(' '),
+      }));
+      const res = await fetch('/api/generate-caption', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cards, brand_name: brandKit?.name }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setCaption(data.caption || '');
+      setHashtags(data.hashtags || []);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '생성 실패');
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { generate(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fullText = caption + (hashtags.length ? '\n\n' + hashtags.map(t => `#${t.replace(/^#/, '')}`).join(' ') : '');
+
+  const copyAll = async () => {
+    await navigator.clipboard.writeText(fullText);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-full max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-emerald-100 rounded-xl flex items-center justify-center">
+              <Wand2 size={15} className="text-emerald-600" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-gray-900">AI 캡션 생성</h2>
+              <p className="text-[11px] text-gray-400">인스타그램용 캡션과 해시태그를 자동으로 만들어 드립니다</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400"><X size={16} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <Loader2 size={28} className="animate-spin text-emerald-500" />
+              <p className="text-sm text-gray-400">AI가 캡션을 작성하는 중...</p>
+            </div>
+          ) : error ? (
+            <div className="py-8 text-center">
+              <p className="text-sm text-red-500 mb-3">{error}</p>
+              <button onClick={generate} className="px-4 py-2 bg-gray-100 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-200">다시 시도</button>
+            </div>
+          ) : (
+            <>
+              {/* Caption */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-bold text-gray-600">캡션</p>
+                  <span className="text-[10px] text-gray-400">{caption.length}자</span>
+                </div>
+                <textarea
+                  value={caption}
+                  onChange={e => setCaption(e.target.value)}
+                  rows={6}
+                  className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                />
+              </div>
+
+              {/* Hashtags */}
+              <div>
+                <p className="text-xs font-bold text-gray-600 mb-2">해시태그 ({hashtags.length}개)</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {hashtags.map((tag, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-medium border border-emerald-100 cursor-pointer hover:bg-emerald-100"
+                      onClick={() => setHashtags(h => h.filter((_, j) => j !== i))}
+                      title="클릭하여 삭제"
+                    >
+                      #{tag.replace(/^#/, '')} <X size={10} />
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Preview */}
+              <div className="bg-gray-50 rounded-xl p-4">
+                <p className="text-[10px] text-gray-400 mb-2 font-medium">미리보기</p>
+                <p className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed">{fullText}</p>
+              </div>
+            </>
+          )}
+        </div>
+
+        {!loading && !error && (
+          <div className="p-4 border-t border-gray-100 flex gap-2 shrink-0">
+            <button
+              onClick={generate}
+              className="flex items-center gap-1.5 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50"
+            >
+              <RefreshCw size={13} /> 재생성
+            </button>
+            <button
+              onClick={copyAll}
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold transition-all active:scale-[0.98]"
+            >
+              {copied ? <><Check size={14} /> 복사됨!</> : <><Copy size={14} /> 전체 복사</>}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

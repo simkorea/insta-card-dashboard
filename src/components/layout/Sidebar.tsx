@@ -19,10 +19,10 @@ import {
   UserCircle2,
   X,
   Home,
-  Clock,
   Calendar,
   MoreHorizontal,
   Sparkles,
+  Palette,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -87,9 +87,15 @@ export default function Sidebar() {
         <div className="my-2 border-t border-gray-100" />
 
         <Link href="/persona"
-          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors mb-2 ${isActive('/persona') ? 'bg-primary-50 text-primary-700' : 'text-gray-700 hover:bg-gray-50'}`}>
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors ${isActive('/persona') ? 'bg-primary-50 text-primary-700' : 'text-gray-700 hover:bg-gray-50'}`}>
           <UserCircle2 size={16} className={isActive('/persona') ? 'text-primary-600' : 'text-gray-400'} />
           <span>브랜드 페르소나</span>
+        </Link>
+
+        <Link href="/brand-kit"
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors mb-2 ${isActive('/brand-kit') ? 'bg-primary-50 text-primary-700' : 'text-gray-700 hover:bg-gray-50'}`}>
+          <Palette size={16} className={isActive('/brand-kit') ? 'text-primary-600' : 'text-gray-400'} />
+          <span>브랜드 키트</span>
           <span className="ml-auto text-[10px] bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded-full font-bold">NEW</span>
         </Link>
 
@@ -168,10 +174,10 @@ export default function Sidebar() {
                 <span>성과 대시보드</span>
               </Link>
 
-              <Link href="/cardnews#schedule"
-                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 font-medium">
-                <CalendarDays size={14} className="text-gray-400" />
-                <span>예약 발행</span>
+              <Link href="/calendar"
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${isActive('/calendar') ? 'bg-primary-50 text-primary-700 font-bold' : 'text-gray-600 hover:bg-gray-50 font-medium'}`}>
+                <CalendarDays size={14} className={isActive('/calendar') ? 'text-primary-600' : 'text-gray-400'} />
+                <span>콘텐츠 캘린더</span>
               </Link>
 
               <Link href="/comments"
@@ -231,8 +237,8 @@ export default function Sidebar() {
   const bottomNavItems = [
     { href: '/', icon: Home, label: '홈', exact: true },
     { href: '/cardnews', icon: Sparkles, label: '만들기', exact: false },
-    { href: '/cardnews', icon: Clock, label: '기록', exact: false, tab: 'history' },
-    { href: '/cardnews', icon: Calendar, label: '예약', exact: false, tab: 'schedule' },
+    { href: '/brand-kit', icon: Palette, label: '브랜드', exact: false },
+    { href: '/calendar', icon: Calendar, label: '캘린더', exact: false },
   ];
 
   return (
