@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export const maxDuration = 60;
+export const maxDuration = 10;
 
 const THREADS_API = 'https://graph.threads.net/v1.0';
 
@@ -69,19 +69,8 @@ async function uploadToThreads(imageUrls: string[], caption: string): Promise<{ 
   try {
     let containerId: string;
 
-    if (imageUrls.length === 1) {
-      containerId = await threadsCreateSingleImage(userId, token, imageUrls[0], caption);
-    } else {
-      const children: string[] = [];
-      for (const url of imageUrls) {
-        const itemId = await threadsCreateCarouselItem(userId, token, url);
-        children.push(itemId);
-        await new Promise(r => setTimeout(r, 300));
-      }
-      // Threads 아이템 처리 대기
-      await new Promise(r => setTimeout(r, 20000));
-      containerId = await threadsCreateCarouselContainer(userId, token, children, caption);
-    }
+    // Hobby 플랜 10초 제한 — 캐러셀은 대기 시간이 길어 단일 이미지(첫 장)만 업로드
+    containerId = await threadsCreateSingleImage(userId, token, imageUrls[0], caption);
 
     const mediaId = await threadsPublish(userId, token, containerId);
     const permalink = await threadsGetPermalink(token, mediaId);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-export const maxDuration = 30;
+export const maxDuration = 10;
 
 async function uploadToLitterbox(buf: ArrayBuffer, filename: string): Promise<string> {
   const form = new FormData();
