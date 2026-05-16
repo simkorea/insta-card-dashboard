@@ -3621,27 +3621,14 @@ function DownloadModal({
 
   const proxyUrl = (url: string) => `/api/proxy-image?url=${encodeURIComponent(url)}`;
 
-  // 이미지 src를 프록시로 교체 후 캡처, 복원
+  // html-to-image로 캡처 (oklab 등 최신 CSS 지원)
   const captureEl = async (el: HTMLDivElement): Promise<HTMLCanvasElement> => {
-    const h2c = (await import('html2canvas')).default;
-    const imgs = el.querySelectorAll<HTMLImageElement>('img');
-    const origSrcs: string[] = [];
-    imgs.forEach(img => {
-      origSrcs.push(img.src);
-      if (img.src && !img.src.startsWith('data:') && !img.src.startsWith('blob:')) {
-        img.src = proxyUrl(img.src);
-      }
+    const { toCanvas } = await import('html-to-image');
+    const canvas = await toCanvas(el, {
+      pixelRatio: SCALE,
+      cacheBust: true,
+      fetchRequestInit: { mode: 'cors' },
     });
-    await new Promise<void>(r => {
-      let loaded = 0;
-      if (imgs.length === 0) { r(); return; }
-      imgs.forEach(img => {
-        if (img.complete) { if (++loaded === imgs.length) r(); }
-        else { img.onload = img.onerror = () => { if (++loaded === imgs.length) r(); }; }
-      });
-    });
-    const canvas = await h2c(el, { scale: SCALE, useCORS: false, allowTaint: false, logging: false });
-    imgs.forEach((img, i) => { img.src = origSrcs[i]; });
     return canvas;
   };
 

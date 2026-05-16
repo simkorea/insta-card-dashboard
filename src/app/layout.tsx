@@ -6,8 +6,13 @@ import Sidebar from "@/components/layout/Sidebar";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Mirr - AI Content Generation",
-  description: "Card News and Blog Post Generation",
+  title: "simple",
+  description: "AI 카드뉴스 & SNS 콘텐츠 자동화",
+  openGraph: {
+    title: "simple",
+    description: "AI 카드뉴스 & SNS 콘텐츠 자동화",
+    siteName: "simple",
+  },
 };
 
 export default function RootLayout({
