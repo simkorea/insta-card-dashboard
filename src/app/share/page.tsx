@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2, ChevronLeft, ChevronRight, Download, ExternalLink } from 'lucide-react';
 
@@ -78,7 +78,7 @@ function CardView({ page }: { page: PageData }) {
   );
 }
 
-export default function SharePage() {
+function ShareContent() {
   const params = useSearchParams();
   const token = params.get('t');
   const [pages, setPages] = useState<PageData[]>([]);
@@ -168,5 +168,17 @@ export default function SharePage() {
         </a>
       </div>
     </div>
+  );
+}
+
+export default function SharePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <Loader2 size={28} className="animate-spin text-white/50" />
+      </div>
+    }>
+      <ShareContent />
+    </Suspense>
   );
 }
