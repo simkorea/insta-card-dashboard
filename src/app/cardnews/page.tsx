@@ -836,7 +836,7 @@ export default function CardNewsPage() {
 
       {/* Top Banner */}
       <div className="flex justify-between items-center px-4 md:px-6 py-3 bg-white border-b border-gray-100">
-        <div className="text-primary-600 font-semibold text-xs flex items-center gap-2 ml-10 md:ml-0">
+        <div className="text-primary-600 font-semibold text-xs flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-primary-600" /> 무료 체험 D-2
         </div>
         <div className="flex gap-1.5 md:gap-2">

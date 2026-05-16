@@ -17,8 +17,12 @@ import {
   FileText,
   Users,
   UserCircle2,
-  Menu,
   X,
+  Home,
+  Clock,
+  Calendar,
+  MoreHorizontal,
+  Sparkles,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -28,12 +32,10 @@ export default function Sidebar() {
   const [managementOpen, setManagementOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // 라우트 변경 시 모바일 메뉴 닫기
   useEffect(() => {
     setMobileOpen(false);
   }, [pathname]);
 
-  // 배경 스크롤 막기
   useEffect(() => {
     if (mobileOpen) {
       document.body.style.overflow = 'hidden';
@@ -53,7 +55,6 @@ export default function Sidebar() {
           <span className="text-white font-black text-xl leading-none">s</span>
         </div>
         <span className="text-xl font-bold tracking-tight text-gray-900">simple</span>
-        {/* 모바일 닫기 버튼 */}
         <button
           onClick={() => setMobileOpen(false)}
           className="ml-auto p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 md:hidden"
@@ -77,8 +78,6 @@ export default function Sidebar() {
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5">
-
-        {/* 홈 대시보드 */}
         <Link href="/"
           className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors mb-1 ${isActive('/') && pathname === '/' ? 'bg-primary-50 text-primary-700' : 'text-gray-700 hover:bg-gray-50'}`}>
           <LayoutDashboard size={16} className={pathname === '/' ? 'text-primary-600' : 'text-gray-400'} />
@@ -87,7 +86,6 @@ export default function Sidebar() {
 
         <div className="my-2 border-t border-gray-100" />
 
-        {/* 브랜드 페르소나 */}
         <Link href="/persona"
           className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors mb-2 ${isActive('/persona') ? 'bg-primary-50 text-primary-700' : 'text-gray-700 hover:bg-gray-50'}`}>
           <UserCircle2 size={16} className={isActive('/persona') ? 'text-primary-600' : 'text-gray-400'} />
@@ -195,7 +193,6 @@ export default function Sidebar() {
 
         <div className="my-2 border-t border-gray-100" />
 
-        {/* 팀 */}
         <Link href="/workspace"
           className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors ${isActive('/workspace') ? 'bg-primary-50 text-primary-700' : 'text-gray-700 hover:bg-gray-50'}`}>
           <Users size={16} className={isActive('/workspace') ? 'text-primary-600' : 'text-gray-400'} />
@@ -230,6 +227,14 @@ export default function Sidebar() {
     </aside>
   );
 
+  // 모바일 하단 네비게이션 항목
+  const bottomNavItems = [
+    { href: '/', icon: Home, label: '홈', exact: true },
+    { href: '/cardnews', icon: Sparkles, label: '만들기', exact: false },
+    { href: '/cardnews', icon: Clock, label: '기록', exact: false, tab: 'history' },
+    { href: '/cardnews', icon: Calendar, label: '예약', exact: false, tab: 'schedule' },
+  ];
+
   return (
     <>
       {/* 데스크탑 사이드바 */}
@@ -237,14 +242,35 @@ export default function Sidebar() {
         {sidebarContent}
       </div>
 
-      {/* 모바일 햄버거 버튼 */}
-      <button
-        onClick={() => setMobileOpen(true)}
-        className="fixed top-3 left-3 z-40 md:hidden w-10 h-10 bg-white border border-gray-200 rounded-xl shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 active:scale-95 transition-all"
-        aria-label="메뉴 열기"
+      {/* 모바일 하단 네비게이션 바 */}
+      <nav
+        className="fixed bottom-0 left-0 right-0 z-50 bg-white border-t border-gray-100 flex md:hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
-        <Menu size={20} />
-      </button>
+        {bottomNavItems.map((item) => {
+          const isItemActive = item.exact
+            ? pathname === item.href
+            : pathname.startsWith(item.href) && item.href !== '/';
+          return (
+            <Link
+              key={`${item.href}-${item.label}`}
+              href={item.href}
+              className={`flex-1 flex flex-col items-center justify-center py-2.5 gap-0.5 transition-colors active:bg-gray-50 ${isItemActive ? 'text-primary-600' : 'text-gray-400'}`}
+            >
+              <item.icon size={21} strokeWidth={isItemActive ? 2.5 : 1.8} />
+              <span className={`text-[10px] font-medium ${isItemActive ? 'text-primary-600' : 'text-gray-400'}`}>{item.label}</span>
+            </Link>
+          );
+        })}
+        {/* 더보기 버튼 — 드로어 열기 */}
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="flex-1 flex flex-col items-center justify-center py-2.5 gap-0.5 text-gray-400 active:bg-gray-50 transition-colors"
+        >
+          <MoreHorizontal size={21} strokeWidth={1.8} />
+          <span className="text-[10px] font-medium">더보기</span>
+        </button>
+      </nav>
 
       {/* 모바일 드로어 오버레이 */}
       {mobileOpen && (
