@@ -1,20 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 export const maxDuration = 10;
 
-async function uploadToLitterbox(buf: ArrayBuffer, filename: string): Promise<string> {
-  const form = new FormData();
-  form.append('reqtype', 'fileupload');
-  form.append('time', '72h');
-  form.append('fileToUpload', new Blob([buf], { type: 'image/jpeg' }), filename);
+async function uploadToSupabase(buf: ArrayBuffer, filename: string): Promise<string> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
-  const res = await fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
-    method: 'POST',
-    body: form,
-  });
-  const url = (await res.text()).trim();
-  if (!url.startsWith('http')) throw new Error(`litterbox 실패: ${url}`);
-  return url;
+  const path = `sns/${filename}`;
+  const { error } = await supabase.storage
+    .from('card-images')
+    .upload(path, buf, { contentType: 'image/jpeg', upsert: true });
+
+  if (error) throw new Error(`Supabase 업로드 실패: ${error.message}`);
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('card-images')
+    .getPublicUrl(path);
+
+  return publicUrl;
 }
 
 async function uploadToImgur(buf: ArrayBuffer): Promise<string> {
@@ -39,11 +44,11 @@ export async function POST(req: NextRequest) {
     if (!file) return NextResponse.json({ error: 'file 필드 없음' }, { status: 400 });
 
     const buf = await file.arrayBuffer();
-    const filename = `card_${Date.now()}.jpg`;
+    const filename = `card_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
 
     let url: string;
     try {
-      url = await uploadToLitterbox(buf, filename);
+      url = await uploadToSupabase(buf, filename);
     } catch {
       url = await uploadToImgur(buf);
     }

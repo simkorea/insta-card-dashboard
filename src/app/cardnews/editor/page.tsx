@@ -4021,13 +4021,14 @@ function SnsUploadModal({
         imageUrls.push(cdnData.url);
       }
 
-      setProgress('SNS 업로드 중... (Threads 캐러셀은 약 30초 소요)');
+      setProgress('SNS 전송 중...');
       const snsRes = await fetch('/api/upload/sns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrls, caption, platforms: Array.from(selected) }),
       });
       const snsData = await snsRes.json();
+      if (snsData.error) throw new Error(snsData.error);
       setResults(snsData.results || {});
       setStatus('done');
       setProgress('');
@@ -4052,7 +4053,7 @@ function SnsUploadModal({
             </div>
             <div>
               <h2 className="text-sm font-bold text-gray-900">SNS 자동 업로드</h2>
-              <p className="text-[11px] text-gray-400">전체 {pagesData.length}장 → 캐러셀로 업로드</p>
+              <p className="text-[11px] text-gray-400">전체 {pagesData.length}장 → Threads·TikTok 업로드</p>
             </div>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400">
