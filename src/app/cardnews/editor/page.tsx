@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   ChevronLeft, ChevronRight, Undo, Redo, ZoomIn, ZoomOut,
   Save, Copy, Trash2, Check, Plus, Search,
@@ -2106,6 +2106,7 @@ export default function EditorPage() {
   const [isUploadingDrop, setIsUploadingDrop] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [shareToast, setShareToast] = useState<'copied' | 'error' | null>(null);
+  const [showSnsModal, setShowSnsModal] = useState(false);
 
   // ── Mutable page data state ──
   const [pagesData, setPagesData] = useState<PageData[]>(PAGES_DATA);
@@ -2469,6 +2470,14 @@ export default function EditorPage() {
           onClose={() => setShowDownloadMenu(false)}
         />
       )}
+      {/* SNS 업로드 모달 */}
+      {showSnsModal && (
+        <SnsUploadModal
+          pagesData={pagesData}
+          captureRefs={captureRefs}
+          onClose={() => setShowSnsModal(false)}
+        />
+      )}
 
       {/* 오프스크린 캡처 영역 (다운로드용) */}
       <div style={{ position: 'fixed', left: '-99999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
@@ -2559,6 +2568,14 @@ export default function EditorPage() {
               title="전체화면으로 편집"
             >
               <Maximize2 size={14} /> 전체화면 편집
+            </button>
+            {/* SNS 업로드 */}
+            <button
+              onClick={() => setShowSnsModal(true)}
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg hover:from-purple-600 hover:to-pink-600 active:scale-[0.98] transition-all shadow-sm"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+              SNS 업로드
             </button>
             {/* 다운로드 모달 */}
             <button
@@ -3822,6 +3839,220 @@ function DownloadModal({
           )}
 
           <p className="text-center text-[10px] text-gray-400">1080px 고해상도로 저장됩니다</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SnsUploadModal ─────────────────────────────────────────────────────────
+type SnsStatus = 'idle' | 'uploading' | 'done' | 'error';
+type SnsResult = { success: boolean; url?: string; error?: string };
+
+const PLATFORMS = [
+  { id: 'instagram', label: 'Instagram', icon: '📸', note: '' },
+  { id: 'threads', label: 'Threads', icon: '🧵', note: '' },
+  { id: 'youtube', label: 'YouTube', icon: '▶️', note: '동영상 전용' },
+  { id: 'tiktok', label: 'TikTok', icon: '🎵', note: '' },
+  { id: 'x', label: 'X', icon: '✕', note: '준비 중' },
+] as const;
+
+function SnsUploadModal({
+  pagesData, captureRefs, onClose,
+}: {
+  pagesData: PageData[];
+  captureRefs: React.MutableRefObject<Record<number, HTMLDivElement | null>>;
+  onClose: () => void;
+}) {
+  const [selected, setSelected] = React.useState<Set<string>>(new Set(['threads']));
+  const [caption, setCaption] = React.useState('');
+  const [status, setStatus] = React.useState<SnsStatus>('idle');
+  const [progress, setProgress] = React.useState('');
+  const [results, setResults] = React.useState<Record<string, SnsResult>>({});
+
+  const toggle = (id: string) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const canvasToJpegBlob = (canvas: HTMLCanvasElement): Promise<Blob> =>
+    new Promise((resolve, reject) => {
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('blob 변환 실패')), 'image/jpeg', 0.85);
+    });
+
+  const handleUpload = async () => {
+    if (selected.size === 0) { alert('플랫폼을 하나 이상 선택하세요'); return; }
+    setStatus('uploading');
+    setResults({});
+
+    try {
+      const { toCanvas } = await import('html-to-image');
+      const SCALE = 1080 / 420;
+      const imageUrls: string[] = [];
+
+      for (let i = 0; i < pagesData.length; i++) {
+        const pg = pagesData[i];
+        const el = captureRefs.current?.[pg.id];
+        if (!el) continue;
+        setProgress(`캡처 중 ${i + 1}/${pagesData.length}...`);
+        const canvas = await toCanvas(el, { pixelRatio: SCALE, cacheBust: true, fetchRequestInit: { mode: 'cors' } });
+        const blob = await canvasToJpegBlob(canvas);
+
+        setProgress(`CDN 업로드 중 ${i + 1}/${pagesData.length}...`);
+        const form = new FormData();
+        form.append('file', blob, `slide_${i + 1}.jpg`);
+        const cdnRes = await fetch('/api/upload-to-cdn', { method: 'POST', body: form });
+        const cdnData = await cdnRes.json();
+        if (!cdnData.url) throw new Error(`CDN 업로드 실패 (${i + 1}번째): ${cdnData.error}`);
+        imageUrls.push(cdnData.url);
+      }
+
+      setProgress('SNS 업로드 중... (Threads 캐러셀은 약 30초 소요)');
+      const snsRes = await fetch('/api/upload/sns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrls, caption, platforms: Array.from(selected) }),
+      });
+      const snsData = await snsRes.json();
+      setResults(snsData.results || {});
+      setStatus('done');
+      setProgress('');
+    } catch (e: any) {
+      setProgress('');
+      setStatus('error');
+      setResults({ _error: { success: false, error: e.message } });
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-full overflow-hidden"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-pink-50">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-gray-900">SNS 자동 업로드</h2>
+              <p className="text-[11px] text-gray-400">전체 {pagesData.length}장 → 캐러셀로 업로드</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* 플랫폼 선택 */}
+          <div>
+            <p className="text-xs font-bold text-gray-600 mb-3">업로드할 플랫폼</p>
+            <div className="grid grid-cols-5 gap-2">
+              {PLATFORMS.map(p => {
+                const isOn = selected.has(p.id);
+                const disabled = !!p.note;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => !disabled && toggle(p.id)}
+                    disabled={disabled}
+                    className={`flex flex-col items-center gap-1.5 py-3 px-1 rounded-xl border-2 transition-all ${
+                      disabled ? 'opacity-40 cursor-not-allowed border-gray-200' :
+                      isOn ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <span className="text-xl">{p.icon}</span>
+                    <span className={`text-[10px] font-bold leading-tight text-center ${isOn && !disabled ? 'text-purple-600' : 'text-gray-500'}`}>
+                      {p.label}
+                    </span>
+                    {disabled && <span className="text-[9px] text-gray-400 text-center leading-tight">{p.note}</span>}
+                    {isOn && !disabled && (
+                      <div className="w-3 h-3 bg-purple-500 rounded-full flex items-center justify-center">
+                        <Check size={8} className="text-white" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 캡션 입력 */}
+          <div>
+            <p className="text-xs font-bold text-gray-600 mb-2">캡션 (선택)</p>
+            <textarea
+              value={caption}
+              onChange={e => setCaption(e.target.value)}
+              placeholder="캡션을 입력하세요. 비워두면 빈 캡션으로 업로드됩니다."
+              rows={3}
+              className="w-full text-sm text-gray-700 border border-gray-200 rounded-xl px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-purple-300 placeholder:text-gray-300"
+            />
+            <p className="text-[10px] text-gray-400 mt-1">Threads 최대 500자 · TikTok 최대 150자</p>
+          </div>
+
+          {/* 결과 표시 */}
+          {status === 'done' && Object.keys(results).length > 0 && (
+            <div className="space-y-2">
+              {Object.entries(results).map(([platform, result]) => {
+                if (platform === '_error') return null;
+                const pInfo = PLATFORMS.find(p => p.id === platform);
+                return (
+                  <div key={platform} className={`flex items-center gap-3 px-4 py-3 rounded-xl ${result.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                    <span className="text-base">{pInfo?.icon || '🌐'}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-xs font-bold ${result.success ? 'text-green-700' : 'text-red-700'}`}>
+                        {pInfo?.label || platform} — {result.success ? '업로드 완료!' : '실패'}
+                      </p>
+                      {result.success && result.url && (
+                        <a href={result.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-green-600 underline truncate block">{result.url}</a>
+                      )}
+                      {!result.success && result.error && (
+                        <p className="text-[11px] text-red-500">{result.error}</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {results._error && (
+                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+                  <p className="text-xs font-bold text-red-700">오류</p>
+                  <p className="text-[11px] text-red-500">{results._error.error}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 업로드 버튼 */}
+          {status === 'uploading' ? (
+            <div className="w-full py-3 bg-purple-50 border border-purple-100 rounded-xl flex items-center justify-center gap-2">
+              <Loader2 size={15} className="text-purple-600 animate-spin" />
+              <span className="text-sm text-purple-700 font-medium">{progress}</span>
+            </div>
+          ) : status === 'done' ? (
+            <button
+              onClick={() => { setStatus('idle'); setResults({}); setProgress(''); }}
+              className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-bold rounded-xl transition-all"
+            >
+              다시 업로드
+            </button>
+          ) : (
+            <button
+              onClick={handleUpload}
+              disabled={selected.size === 0}
+              className="w-full py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 active:scale-[0.98] text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
+              {selected.size > 0 ? `${selected.size}개 플랫폼에 업로드` : '플랫폼 선택하세요'}
+            </button>
+          )}
+
+          <p className="text-center text-[10px] text-gray-400">이미지 캡처 → CDN 업로드 → SNS 전송 순으로 진행됩니다</p>
         </div>
       </div>
     </div>
