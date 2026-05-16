@@ -3636,17 +3636,53 @@ function DownloadModal({
 
   const SCALE = 1080 / 420; // ≈ 2.571 → 출력 1080px 폭
 
-  const proxyUrl = (url: string) => `/api/proxy-image?url=${encodeURIComponent(url)}`;
+  // 외부 이미지를 프록시를 통해 data URL로 변환 (CORS 우회)
+  const preloadImagesViaProxy = async (el: HTMLDivElement): Promise<Map<HTMLImageElement, string>> => {
+    const imgs = Array.from(el.querySelectorAll('img'));
+    const origSrcs = new Map<HTMLImageElement, string>();
+    await Promise.all(imgs.map(async (img) => {
+      const src = img.getAttribute('src') || '';
+      if (!src || src.startsWith('data:') || src.startsWith('/') || src.startsWith(window.location.origin)) return;
+      origSrcs.set(img, src);
+      try {
+        const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(src)}`);
+        const blob = await res.blob();
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        await new Promise<void>((resolve) => {
+          img.onload = () => resolve();
+          img.onerror = () => resolve();
+          img.src = dataUrl;
+        });
+      } catch {
+        origSrcs.delete(img);
+      }
+    }));
+    return origSrcs;
+  };
 
-  // html-to-image로 캡처 (oklab 등 최신 CSS 지원)
+  const restoreImages = (origSrcs: Map<HTMLImageElement, string>) => {
+    origSrcs.forEach((src, img) => { img.src = src; });
+  };
+
+  // html-to-image로 캡처 (외부 이미지 CORS 우회 포함)
   const captureEl = async (el: HTMLDivElement): Promise<HTMLCanvasElement> => {
     const { toCanvas } = await import('html-to-image');
-    const canvas = await toCanvas(el, {
-      pixelRatio: SCALE,
-      cacheBust: true,
-      fetchRequestInit: { mode: 'cors' },
-    });
-    return canvas;
+    const origSrcs = await preloadImagesViaProxy(el);
+    try {
+      const canvas = await toCanvas(el, {
+        pixelRatio: SCALE,
+        cacheBust: false,
+        skipFonts: false,
+      });
+      return canvas;
+    } finally {
+      restoreImages(origSrcs);
+    }
   };
 
   // 비율에 맞게 캔버스 변환
@@ -3893,12 +3929,40 @@ function SnsUploadModal({
       const SCALE = 1080 / 420;
       const imageUrls: string[] = [];
 
+      const preloadProxy = async (el: HTMLDivElement) => {
+        const imgs = Array.from(el.querySelectorAll('img'));
+        const origSrcs = new Map<HTMLImageElement, string>();
+        await Promise.all(imgs.map(async (img) => {
+          const src = img.getAttribute('src') || '';
+          if (!src || src.startsWith('data:') || src.startsWith('/') || src.startsWith(window.location.origin)) return;
+          origSrcs.set(img, src);
+          try {
+            const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(src)}`);
+            const blob = await res.blob();
+            const dataUrl = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            await new Promise<void>((resolve) => {
+              img.onload = () => resolve();
+              img.onerror = () => resolve();
+              img.src = dataUrl;
+            });
+          } catch { origSrcs.delete(img); }
+        }));
+        return origSrcs;
+      };
+
       for (let i = 0; i < pagesData.length; i++) {
         const pg = pagesData[i];
         const el = captureRefs.current?.[pg.id];
         if (!el) continue;
         setProgress(`캡처 중 ${i + 1}/${pagesData.length}...`);
-        const canvas = await toCanvas(el, { pixelRatio: SCALE, cacheBust: true, fetchRequestInit: { mode: 'cors' } });
+        const origSrcs = await preloadProxy(el);
+        const canvas = await toCanvas(el, { pixelRatio: SCALE, cacheBust: false });
+        origSrcs.forEach((src, img) => { img.src = src; });
         const blob = await canvasToJpegBlob(canvas);
 
         setProgress(`CDN 업로드 중 ${i + 1}/${pagesData.length}...`);
