@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createSupabaseServer } from '@/lib/supabase-server';
 
 const BASE_URL = 'https://insta-card-dashboard.vercel.app';
 
@@ -8,11 +8,17 @@ export async function GET(request: NextRequest) {
   const error = request.nextUrl.searchParams.get('error');
 
   if (error || !code) {
-    return NextResponse.redirect(`${BASE_URL}/workspace?instagram=error&msg=${error || 'no_code'}`);
+    return NextResponse.redirect(`${BASE_URL}/sns-settings?instagram=error&msg=${error || 'no_code'}`);
   }
 
   try {
-    // 1. 코드 → 단기 액세스 토큰 교환
+    const supabase = await createSupabaseServer();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.redirect(`${BASE_URL}/login?next=/sns-settings`);
+    }
+
+    // 1. 코드 → 단기 액세스 토큰
     const tokenRes = await fetch('https://api.instagram.com/oauth/access_token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -28,7 +34,7 @@ export async function GET(request: NextRequest) {
 
     if (!tokenData.access_token) {
       const msg = encodeURIComponent(JSON.stringify(tokenData));
-      return NextResponse.redirect(`${BASE_URL}/workspace?instagram=error&msg=${msg}`);
+      return NextResponse.redirect(`${BASE_URL}/sns-settings?instagram=error&msg=${msg}`);
     }
 
     const shortToken = tokenData.access_token as string;
@@ -40,25 +46,24 @@ export async function GET(request: NextRequest) {
     const longData = await longRes.json();
     const accessToken = (longData.access_token as string) || shortToken;
 
-    // 3. /me로 실제 Graph API user ID + 유저명 조회
+    // 3. /me로 user ID + 유저명 조회
     const profileRes = await fetch(
       `https://graph.instagram.com/v21.0/me?fields=id,username&access_token=${accessToken}`
     );
     const profile = await profileRes.json();
     const username = (profile.username as string) || '';
-    // tokenData.user_id 대신 /me에서 반환한 id를 사용 (Graph API 호환)
     const igUserId = (profile.id as string) || String(tokenData.user_id);
 
-    // 4. Supabase 저장
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-    await supabase.from('instagram_settings').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    await supabase.from('instagram_settings').insert({ access_token: accessToken, ig_user_id: igUserId, username });
+    // 4. sns_accounts에 해당 유저의 instagram 저장 (upsert)
+    await supabase
+      .from('sns_accounts')
+      .upsert(
+        { user_id: user.id, platform: 'instagram', access_token: accessToken, platform_user_id: igUserId, username },
+        { onConflict: 'user_id,platform' }
+      );
 
-    return NextResponse.redirect(`${BASE_URL}/workspace?instagram=connected&user=${username}`);
+    return NextResponse.redirect(`${BASE_URL}/sns-settings?instagram=connected&user=${username}`);
   } catch (e: any) {
-    return NextResponse.redirect(`${BASE_URL}/workspace?instagram=error&msg=${encodeURIComponent(e.message)}`);
+    return NextResponse.redirect(`${BASE_URL}/sns-settings?instagram=error&msg=${encodeURIComponent(e.message)}`);
   }
 }
