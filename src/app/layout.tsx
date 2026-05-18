@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import Sidebar from "@/components/layout/Sidebar";
+import ClientLayout from "@/components/layout/ClientLayout";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -23,10 +23,9 @@ export default function RootLayout({
   return (
     <html lang="ko" className="light" style={{ colorScheme: 'light' }} suppressHydrationWarning>
       <body className={`${inter.className} flex h-screen overflow-hidden bg-white text-[var(--foreground)]`} suppressHydrationWarning>
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto bg-white pt-0 pb-16 md:pb-0">
+        <ClientLayout>
           {children}
-        </main>
+        </ClientLayout>
       </body>
     </html>
   );

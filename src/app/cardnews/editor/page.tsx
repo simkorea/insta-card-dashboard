@@ -80,6 +80,11 @@ interface PageData {
   bulletStyle?: TextStyle;
   imageKeyword?: string;
   elements?: CanvasElement[];
+  bgScale?: number;
+  bgPosition?: { x: number; y: number };
+  bgBrightness?: number;
+  bgBrightnessFilter?: number;  // CSS filter brightness % (50-200, default 100)
+  overlayOpacity?: number;       // gradient overlay opacity % (0-100, default 100)
 }
 
 const BUSINESS_THEME_DATA: PageData[] = [
@@ -672,18 +677,41 @@ function ImagePanel({
   currentImageUrl,
   cardContent,
   imageKeyword,
+  initialScale,
+  initialPosition,
+  initialBrightness,
+  initialBrightnessFilter,
+  initialOverlayOpacity,
   onSelectImage,
   onDeselect,
+  onUpdateBgTransform,
+  onUpdateBrightness,
+  onUpdateBrightnessFilter,
+  onUpdateOverlayOpacity,
 }: {
   layer: CanvasLayer;
   currentImageUrl?: string;
   cardContent?: string;
   imageKeyword?: string;
+  initialScale?: number;
+  initialPosition?: { x: number; y: number };
+  initialBrightness?: number;
+  initialBrightnessFilter?: number;
+  initialOverlayOpacity?: number;
   onSelectImage?: (url: string) => void;
   onDeselect: () => void;
+  onUpdateBgTransform?: (scale: number, pos: { x: number; y: number }) => void;
+  onUpdateBrightness?: (brightness: number) => void;
+  onUpdateBrightnessFilter?: (v: number) => void;
+  onUpdateOverlayOpacity?: (v: number) => void;
 }) {
-  const [focusDot, setFocusDot] = useState({ x: 50, y: 60 });
-  const [zoom, setZoom] = useState(60);
+  const [focusDot, setFocusDot] = useState(initialPosition ?? { x: 50, y: 50 });
+  // zoom 0-100 → bgScale 1.0-2.5
+  const scaleToZoom = (s: number) => Math.round(((s - 1) / 1.5) * 100);
+  const [zoom, setZoom] = useState(initialScale ? scaleToZoom(initialScale) : 0);
+  const [brightness, setBrightness] = useState(initialBrightness ?? 0);
+  const [brightnessFilter, setBrightnessFilter] = useState(initialBrightnessFilter ?? 100);
+  const [overlayOpacity, setOverlayOpacity] = useState(initialOverlayOpacity ?? 100);
   const [imgTab, setImgTab] = useState<ImageTab>('상업사용');
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestedQuery, setSuggestedQuery] = useState('');
@@ -696,6 +724,30 @@ function ImagePanel({
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiRatio, setAiRatio] = useState('4:5');
   const [aiCount, setAiCount] = useState(1);
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [aiGeneratedUrls, setAiGeneratedUrls] = useState<string[]>([]);
+  const [aiError, setAiError] = useState('');
+
+  const handleAiGenerate = async () => {
+    if (!aiPrompt.trim() || aiGenerating) return;
+    setAiGenerating(true);
+    setAiError('');
+    setAiGeneratedUrls([]);
+    try {
+      const res = await fetch('/api/generate/ai-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: aiPrompt, ratio: aiRatio, count: aiCount }),
+      });
+      const data = await res.json();
+      if (data.error) { setAiError(data.error); return; }
+      setAiGeneratedUrls(data.urls || []);
+    } catch (e: any) {
+      setAiError(e.message);
+    } finally {
+      setAiGenerating(false);
+    }
+  };
   const [isUploadingAsset, setIsUploadingAsset] = useState(false);
   // Unsplash 추천 이미지 상태
   const [unsplashPhotos, setUnsplashPhotos] = useState<UnsplashPhoto[]>([]);
@@ -804,10 +856,34 @@ function ImagePanel({
 
   const handleFocusClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    setFocusDot({
+    const newPos = {
       x: Math.round(((e.clientX - rect.left) / rect.width) * 100),
       y: Math.round(((e.clientY - rect.top) / rect.height) * 100),
-    });
+    };
+    setFocusDot(newPos);
+    const scale = 1 + (zoom / 100) * 1.5;
+    onUpdateBgTransform?.(scale, newPos);
+  };
+
+  const handleZoomChange = (val: number) => {
+    setZoom(val);
+    const scale = 1 + (val / 100) * 1.5;
+    onUpdateBgTransform?.(scale, focusDot);
+  };
+
+  const handleBrightnessChange = (val: number) => {
+    setBrightness(val);
+    onUpdateBrightness?.(val);
+  };
+
+  const handleBrightnessFilterChange = (val: number) => {
+    setBrightnessFilter(val);
+    onUpdateBrightnessFilter?.(val);
+  };
+
+  const handleOverlayOpacityChange = (val: number) => {
+    setOverlayOpacity(val);
+    onUpdateOverlayOpacity?.(val);
   };
 
   // 에셋 마운트 시 localStorage에서 복원
@@ -933,9 +1009,10 @@ function ImagePanel({
               >
                 <img
                   src={currentImageUrl || 'https://images.unsplash.com/photo-1517935706615-2717063c2225?w=600&q=70'}
-                  alt="focus"
+                  alt="초점 설정"
                   className="w-full h-full object-cover pointer-events-none"
                   draggable={false}
+                  onError={e => { (e.target as HTMLImageElement).src = 'https://images.unsplash.com/photo-1517935706615-2717063c2225?w=600&q=70'; }}
                 />
                 <div className="absolute top-0 bottom-0 w-px bg-white/80 pointer-events-none" style={{ left: `${focusDot.x}%` }} />
                 <div className="absolute left-0 right-0 h-px bg-white/80 pointer-events-none" style={{ top: `${focusDot.y}%` }} />
@@ -949,17 +1026,17 @@ function ImagePanel({
               <div className="flex flex-col items-center gap-1.5 w-12 shrink-0 pt-1">
                 <div className="flex items-center gap-1">
                   <Search size={10} className="text-gray-500" />
-                  <span className="text-[10px] text-gray-500 font-medium">확대/축소</span>
+                  <span className="text-[10px] text-gray-500 font-medium">확대</span>
                 </div>
                 <div className="flex-1 flex items-center justify-center">
                   <input
                     type="range" min={0} max={100} value={zoom}
-                    onChange={e => setZoom(Number(e.target.value))}
+                    onChange={e => handleZoomChange(Number(e.target.value))}
                     className="h-24 accent-primary-600"
                     style={{ writingMode: 'vertical-lr', direction: 'rtl', width: '6px' }}
                   />
                 </div>
-                <span className="text-[10px] text-gray-500 font-medium bg-gray-100 px-1.5 py-0.5 rounded">cover</span>
+                <span className="text-[10px] text-gray-500 font-mono bg-gray-100 px-1 py-0.5 rounded">{(1 + (zoom / 100) * 1.5).toFixed(1)}x</span>
                 <div className="flex flex-col gap-1 mt-1">
                   <button
                     onClick={() => setShowCropModal(true)}
@@ -967,9 +1044,84 @@ function ImagePanel({
                     <Maximize2 size={11} />
                   </button>
                   <button className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500" title="맞춤"><Minimize2 size={11} /></button>
-                  <button onClick={() => setFocusDot({ x: 50, y: 50 })} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500" title="초기화"><RotateCcw size={11} /></button>
+                  <button onClick={() => { const pos = { x: 50, y: 50 }; setFocusDot(pos); setZoom(0); onUpdateBgTransform?.(1, pos); }} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500" title="초기화"><RotateCcw size={11} /></button>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* 배경 밝기 조절 */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-700">배경 밝기</span>
+              <span className="text-[11px] text-gray-400 font-mono">{brightness}%</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400">밝게</span>
+              <input
+                type="range" min={0} max={90} value={brightness}
+                onChange={e => handleBrightnessChange(Number(e.target.value))}
+                className="flex-1 accent-gray-700 h-1.5"
+              />
+              <span className="text-[10px] text-gray-400">어둡게</span>
+            </div>
+            <div className="flex gap-2 mt-2">
+              {[0, 20, 40, 60, 75].map(v => (
+                <button key={v} onClick={() => handleBrightnessChange(v)}
+                  className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${brightness === v ? 'bg-gray-800 text-white border-gray-800' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                  {v === 0 ? '원본' : `${v}%`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 이미지 밝기 (CSS filter) */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-700">이미지 밝기</span>
+              <span className="text-[11px] text-gray-400 font-mono">{brightnessFilter}%</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400">어둡게</span>
+              <input
+                type="range" min={30} max={250} value={brightnessFilter}
+                onChange={e => handleBrightnessFilterChange(Number(e.target.value))}
+                className="flex-1 accent-yellow-500 h-1.5"
+              />
+              <span className="text-[10px] text-gray-400">밝게</span>
+            </div>
+            <div className="flex gap-1.5 mt-2">
+              {[50, 75, 100, 150, 200].map(v => (
+                <button key={v} onClick={() => handleBrightnessFilterChange(v)}
+                  className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${brightnessFilter === v ? 'bg-yellow-500 text-white border-yellow-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                  {v === 100 ? '원본' : `${v}%`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 오버레이 투명도 */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-700">오버레이 투명도</span>
+              <span className="text-[11px] text-gray-400 font-mono">{overlayOpacity}%</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400">투명</span>
+              <input
+                type="range" min={0} max={100} value={overlayOpacity}
+                onChange={e => handleOverlayOpacityChange(Number(e.target.value))}
+                className="flex-1 accent-blue-500 h-1.5"
+              />
+              <span className="text-[10px] text-gray-400">불투명</span>
+            </div>
+            <div className="flex gap-1.5 mt-2">
+              {[0, 30, 60, 80, 100].map(v => (
+                <button key={v} onClick={() => handleOverlayOpacityChange(v)}
+                  className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${overlayOpacity === v ? 'bg-blue-500 text-white border-blue-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                  {v === 100 ? '최대' : v === 0 ? '없음' : `${v}%`}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -1400,19 +1552,49 @@ function ImagePanel({
                   </div>
 
                   {/* Generate button */}
-                  <button className="w-full py-3 bg-primary-600 rounded-xl text-sm font-bold text-white hover:bg-primary-700 active:scale-[0.98] transition-all shadow-sm flex items-center justify-center gap-2">
-                    <Wand2 size={15} />
-                    생성하기 ({aiCount * 5} 크레딧)
+                  <button
+                    onClick={handleAiGenerate}
+                    disabled={aiGenerating || !aiPrompt.trim()}
+                    className="w-full py-3 bg-primary-600 rounded-xl text-sm font-bold text-white hover:bg-primary-700 active:scale-[0.98] transition-all shadow-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {aiGenerating ? (
+                      <>
+                        <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                        생성 중... (최대 30초)
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 size={15} />
+                        생성하기 ({aiCount * 5} 크레딧)
+                      </>
+                    )}
                   </button>
 
-                  {/* History */}
-                  <button className="w-full flex items-center justify-between py-2 text-sm text-gray-500 hover:text-gray-700">
-                    <div className="flex items-center gap-2">
-                      <RefreshCw size={13} />
-                      <span className="text-[12px] font-medium">이전 AI 이미지</span>
+                  {/* Error */}
+                  {aiError && (
+                    <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{aiError}</p>
+                  )}
+
+                  {/* Generated results */}
+                  {aiGeneratedUrls.length > 0 && (
+                    <div>
+                      <p className="text-[11px] font-semibold text-gray-600 mb-2">생성된 이미지 — 클릭하여 적용</p>
+                      <div className={`grid gap-2 ${aiGeneratedUrls.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                        {aiGeneratedUrls.map((url, i) => (
+                          <button
+                            key={i}
+                            onClick={() => onSelectImage?.(url)}
+                            className="relative aspect-square rounded-lg overflow-hidden border-2 border-transparent hover:border-primary-500 transition-all group"
+                          >
+                            <img src={url} alt={`AI 생성 이미지 ${i + 1}`} className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                              <span className="opacity-0 group-hover:opacity-100 text-white text-xs font-bold bg-black/50 px-2 py-1 rounded-full transition-opacity">적용</span>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    <span className="text-[11px] text-primary-600 font-semibold">새로고침</span>
-                  </button>
+                  )}
                 </div>
               )}
             </div>
@@ -1946,12 +2128,13 @@ interface AIChatMessage {
   content: string;
 }
 
-function AIPanel({ pageData, onApplyChanges }: {
+function AIPanel({ pageData, onApplyChanges, messages, setMessages }: {
   pageData: PageData;
   onApplyChanges: (changes: Partial<PageData>) => void;
+  messages: AIChatMessage[];
+  setMessages: React.Dispatch<React.SetStateAction<AIChatMessage[]>>;
 }) {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<AIChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const quickActions = ['더 밝게', '더 어둡게', '따뜻한 톤', '차가운 톤', '폰트 크게', '폰트 작게'];
@@ -2099,7 +2282,10 @@ export default function EditorPage() {
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   const [canvasW, setCanvasW] = useState(420);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showSaveLocalModal, setShowSaveLocalModal] = useState(false);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
+  const [lastCaption, setLastCaption] = useState('');
+  const [lastHashtags, setLastHashtags] = useState<string[]>([]);
   const [isFullscreenEdit, setIsFullscreenEdit] = useState(false);
   const captureRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -2108,6 +2294,10 @@ export default function EditorPage() {
   const [shareToast, setShareToast] = useState<'copied' | 'error' | null>(null);
   const [showSnsModal, setShowSnsModal] = useState(false);
   const [showCaptionModal, setShowCaptionModal] = useState(false);
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [mobileActiveTab, setMobileActiveTab] = useState<'edit' | 'element' | 'ai'>('edit');
+  const [mobilePanelExpanded, setMobilePanelExpanded] = useState(false);
+  const [aiMessages, setAiMessages] = useState<AIChatMessage[]>([]);
 
   // ── Mutable page data state ──
   const [pagesData, setPagesData] = useState<PageData[]>(PAGES_DATA);
@@ -2140,12 +2330,23 @@ export default function EditorPage() {
     document.head.appendChild(link);
   }, []);
 
-  // 마운트 시 데이터 로드 (우선순위: editingDesign > cardNewsData > 기본값)
+  // 마운트 시 데이터 로드 (우선순위: editingDesign > cardnews_import_templates > cardNewsData > 기본값)
   useEffect(() => {
     try {
       const editingRaw = localStorage.getItem('editingDesign');
       if (editingRaw) {
         const parsed = JSON.parse(editingRaw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setPagesData(parsed);
+          historyRef.current = [parsed];
+          historyIdxRef.current = 0;
+          return;
+        }
+      }
+      const importRaw = localStorage.getItem('cardnews_import_templates');
+      if (importRaw) {
+        localStorage.removeItem('cardnews_import_templates');
+        const parsed = JSON.parse(importRaw);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setPagesData(parsed);
           historyRef.current = [parsed];
@@ -2469,6 +2670,14 @@ export default function EditorPage() {
         />
       )}
 
+      {/* 내 카드뉴스 로컬 저장 모달 */}
+      {showSaveLocalModal && (
+        <SaveLocalModal
+          pagesData={pagesData}
+          onClose={() => setShowSaveLocalModal(false)}
+        />
+      )}
+
       {/* 디자인 저장 모달 */}
       {showSaveModal && (
         <SaveDesignModal
@@ -2494,6 +2703,7 @@ export default function EditorPage() {
         <SnsUploadModal
           pagesData={pagesData}
           captureRefs={captureRefs}
+          initialCaption={lastCaption ? `${lastCaption}${lastHashtags.length ? '\n\n' + lastHashtags.map(t => `#${t.replace(/^#/, '')}`).join(' ') : ''}` : ''}
           onClose={() => setShowSnsModal(false)}
         />
       )}
@@ -2502,6 +2712,7 @@ export default function EditorPage() {
         <CaptionModal
           pagesData={pagesData}
           brandKit={brandKit}
+          onCaptionGenerated={(cap, tags) => { setLastCaption(cap); setLastHashtags(tags); }}
           onClose={() => setShowCaptionModal(false)}
         />
       )}
@@ -2520,121 +2731,99 @@ export default function EditorPage() {
       </div>
 
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200 bg-white z-20 shrink-0">
-        <div className="flex items-center gap-3">
-          <Link href="/cardnews" className="text-gray-800 font-bold text-sm hover:text-primary-600">{currentPage}페이지 편집</Link>
-          <div className="flex items-center gap-1 text-gray-500 text-sm">
-            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} className="p-1 hover:bg-gray-100 rounded"><ChevronLeft size={15} /></button>
-            <span className="font-medium px-1">{currentPage} / {totalPages}</span>
-            <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} className="p-1 hover:bg-gray-100 rounded"><ChevronRight size={15} /></button>
+      <div className="border-b border-gray-200 bg-white z-20 shrink-0">
+        {/* 메인 헤더 행 */}
+        <div className="flex items-center justify-between px-3 md:px-6 py-2 md:py-3">
+          {/* Left */}
+          <div className="flex items-center gap-2">
+            <Link href="/cardnews" className="flex items-center gap-1 text-gray-700 font-bold text-sm hover:text-primary-600">
+              <ChevronLeft size={16} className="md:hidden" />
+              <span className="hidden md:inline">{currentPage}페이지 편집</span>
+            </Link>
+            <div className="flex items-center gap-0.5 text-gray-500 text-sm">
+              <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} className="p-1.5 hover:bg-gray-100 rounded-lg"><ChevronLeft size={14} /></button>
+              <span className="font-semibold px-1 text-xs tabular-nums">{currentPage} / {totalPages}</span>
+              <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} className="p-1.5 hover:bg-gray-100 rounded-lg"><ChevronRight size={14} /></button>
+            </div>
+            <div className="flex items-center gap-0.5 bg-gray-100 p-1 rounded-lg">
+              <button onClick={undo} title="실행취소 (Ctrl+Z)" className="p-1.5 hover:bg-white rounded text-gray-400"><Undo size={14} /></button>
+              <button onClick={redo} title="다시실행 (Ctrl+Y)" className="p-1.5 hover:bg-white rounded text-gray-400"><Redo size={14} /></button>
+            </div>
+          </div>
+          {/* Right */}
+          <div className="flex items-center gap-1.5 md:gap-3">
+            {/* 데스크탑 전용 */}
+            <div className="hidden md:flex items-center gap-1.5 bg-gray-100 rounded-lg px-3 py-1.5">
+              <button className="text-gray-400 hover:text-gray-700"><ZoomOut size={14} /></button>
+              <div className="relative w-20 h-1.5 bg-gray-300 rounded-full mx-1">
+                <div className="absolute left-0 top-0 h-full bg-primary-500 rounded-full" style={{ width: '60%' }} />
+                <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary-600 rounded-full shadow-sm" style={{ left: 'calc(60% - 6px)' }} />
+              </div>
+              <button className="text-gray-400 hover:text-gray-700"><ZoomIn size={14} /></button>
+              <span className="text-xs font-semibold text-gray-600 ml-1 w-9 text-right">100%</span>
+            </div>
+            <div className="hidden md:flex items-center gap-2">
+              <button onClick={() => setIsPanelOpen(v => !v)} className="p-2 text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-primary-600 transition-colors">
+                {isPanelOpen ? (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/><polyline points="19 9 15 12 19 15"/></svg>
+                ) : (
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/><polyline points="11 9 15 12 11 15"/></svg>
+                )}
+              </button>
+              <div className="w-px h-5 bg-gray-200" />
+              <button onClick={handleShare} disabled={isSharing} className={`flex items-center gap-1.5 px-3 py-2 text-sm font-semibold rounded-lg transition-all ${shareToast === 'copied' ? 'bg-green-50 text-green-600 border border-green-200' : shareToast === 'error' ? 'bg-red-50 text-red-600 border border-red-200' : 'text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-primary-400 hover:text-primary-600'} disabled:opacity-60`}>
+                {isSharing ? <Loader2 size={14} className="animate-spin" /> : shareToast === 'copied' ? <Check size={14} /> : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>}
+                {shareToast === 'copied' ? '링크 복사됨!' : shareToast === 'error' ? '실패' : '공유 링크'}
+              </button>
+              <button onClick={() => setShowSaveLocalModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"><FolderOpen size={14} /> 내 카드뉴스 저장</button>
+              <button onClick={() => setShowSaveModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"><Save size={14} /> 디자인 저장</button>
+              <button onClick={() => setIsFullscreenEdit(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-primary-50 hover:border-primary-400 hover:text-primary-600 transition-colors"><Maximize2 size={14} /> 전체화면 편집</button>
+              <button onClick={() => setShowCaptionModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 rounded-lg hover:from-emerald-600 hover:to-teal-600 active:scale-[0.98] transition-all shadow-sm"><Wand2 size={14} /> 캡션 생성</button>
+              <button onClick={() => setShowSnsModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg hover:from-purple-600 hover:to-pink-600 active:scale-[0.98] transition-all shadow-sm">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg> SNS 업로드
+              </button>
+              <button onClick={() => setShowDownloadMenu(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 다운로드
+              </button>
+            </div>
+            {/* 모바일 저장 버튼 */}
+            <button onClick={handleSaveAndClose} disabled={isSavingClose} className="flex items-center gap-1.5 px-3 md:px-4 py-2 text-sm font-semibold text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-60 shadow-sm">
+              {isSavingClose ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+              <span>저장</span>
+            </button>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-0.5 bg-gray-100 p-1 rounded-lg">
-            <button onClick={undo} title="실행취소 (Ctrl+Z)" className="p-1.5 hover:bg-white rounded text-gray-400"><Undo size={15} /></button>
-            <button onClick={redo} title="다시실행 (Ctrl+Y)" className="p-1.5 hover:bg-white rounded text-gray-400"><Redo size={15} /></button>
-          </div>
-          <div className="flex items-center gap-1.5 bg-gray-100 rounded-lg px-3 py-1.5">
-            <button className="text-gray-400 hover:text-gray-700"><ZoomOut size={14} /></button>
-            <div className="relative w-20 h-1.5 bg-gray-300 rounded-full mx-1">
-              <div className="absolute left-0 top-0 h-full bg-primary-500 rounded-full" style={{ width: '60%' }} />
-              <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary-600 rounded-full shadow-sm" style={{ left: 'calc(60% - 6px)' }} />
-            </div>
-            <button className="text-gray-400 hover:text-gray-700"><ZoomIn size={14} /></button>
-            <span className="text-xs font-semibold text-gray-600 ml-1 w-9 text-right">100%</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsPanelOpen(v => !v)}
-              className="p-2 text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-primary-600 transition-colors"
-              title={isPanelOpen ? '패널 닫기' : '패널 열기'}
-            >
-              {isPanelOpen ? (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/><polyline points="19 9 15 12 19 15"/>
-                </svg>
-              ) : (
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/><polyline points="11 9 15 12 11 15"/>
-                </svg>
-              )}
-            </button>
-            <div className="w-px h-5 bg-gray-200" />
-            {/* 공유 링크 */}
-            <button
-              onClick={handleShare}
-              disabled={isSharing}
-              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-semibold rounded-lg transition-all ${
-                shareToast === 'copied'
-                  ? 'bg-green-50 text-green-600 border border-green-200'
-                  : shareToast === 'error'
-                  ? 'bg-red-50 text-red-600 border border-red-200'
-                  : 'text-gray-600 border border-gray-200 hover:bg-gray-50 hover:border-primary-400 hover:text-primary-600'
-              } disabled:opacity-60`}
-            >
-              {isSharing ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : shareToast === 'copied' ? (
-                <Check size={14} />
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
-              )}
-              {shareToast === 'copied' ? '링크 복사됨!' : shareToast === 'error' ? '실패' : '공유 링크'}
-            </button>
-            {/* 디자인 저장 */}
-            <button
-              onClick={() => setShowSaveModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 hover:border-primary-400 hover:text-primary-600 transition-colors"
-            >
-              <Save size={14} /> 디자인 저장
-            </button>
-            {/* 전체화면 편집 */}
-            <button
-              onClick={() => setIsFullscreenEdit(true)}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-primary-50 hover:border-primary-400 hover:text-primary-600 transition-colors"
-              title="전체화면으로 편집"
-            >
-              <Maximize2 size={14} /> 전체화면 편집
-            </button>
-            {/* AI 캡션 생성 */}
-            <button
-              onClick={() => setShowCaptionModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 rounded-lg hover:from-emerald-600 hover:to-teal-600 active:scale-[0.98] transition-all shadow-sm"
-              title="AI가 인스타그램 캡션과 해시태그를 자동으로 생성합니다"
-            >
-              <Wand2 size={14} /> 캡션 생성
-            </button>
-            {/* SNS 업로드 */}
-            <button
-              onClick={() => setShowSnsModal(true)}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg hover:from-purple-600 hover:to-pink-600 active:scale-[0.98] transition-all shadow-sm"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
-              SNS 업로드
-            </button>
-            {/* 다운로드 모달 */}
-            <button
-              onClick={() => setShowDownloadMenu(true)}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              다운로드
-            </button>
-            <button
-              onClick={handleSaveAndClose}
-              disabled={isSavingClose}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-semibold text-white bg-primary-600 rounded-lg hover:bg-primary-700 disabled:opacity-60 shadow-sm"
-            >
-              {isSavingClose ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-              저장 후 닫기
-            </button>
-          </div>
+
+        {/* 모바일 전용 액션 툴바 */}
+        <div className="md:hidden flex items-center gap-2 px-3 pb-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+          <button onClick={() => setIsFullscreenEdit(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 whitespace-nowrap shrink-0 active:bg-gray-100">
+            <Maximize2 size={15} /> 전체편집
+          </button>
+          <button onClick={() => setShowCaptionModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700 whitespace-nowrap shrink-0 active:bg-emerald-100">
+            <Wand2 size={15} /> AI 캡션
+          </button>
+          <button onClick={() => setShowSnsModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-xs font-semibold text-white whitespace-nowrap shrink-0 active:opacity-90">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg> SNS 업로드
+          </button>
+          <button onClick={() => setShowDownloadMenu(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 whitespace-nowrap shrink-0 active:bg-gray-100">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 다운로드
+          </button>
+          <button onClick={handleShare} disabled={isSharing} className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 whitespace-nowrap shrink-0 active:bg-gray-100">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+            {shareToast === 'copied' ? '복사됨!' : '공유링크'}
+          </button>
+          <button onClick={() => setShowSaveLocalModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700 whitespace-nowrap shrink-0 active:bg-emerald-100">
+            <FolderOpen size={13} /> 내저장
+          </button>
+          <button onClick={() => setShowSaveModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 whitespace-nowrap shrink-0 active:bg-gray-100">
+            <Save size={13} /> 디자인저장
+          </button>
         </div>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left toolbar */}
-        <div className="w-14 border-r border-gray-200 bg-white flex flex-col items-center py-4 gap-3 shrink-0 z-10">
+        {/* Left toolbar - 데스크탑 전용 */}
+        <div className="hidden md:flex w-14 border-r border-gray-200 bg-white flex-col items-center py-4 gap-3 shrink-0 z-10">
           {[{ icon: <span className="font-serif text-base font-bold">T</span>, label: '텍스트' }, { icon: <ImagePlusIcon size={18} />, label: '이미지' }, { icon: <ShapesIcon size={18} />, label: '도형' }, { icon: <LayoutTemplateIcon size={18} />, label: '레이아웃' }, { icon: <Film size={18} />, label: '영상' }].map(item => (
             <button key={item.label} title={item.label} className="w-10 h-10 rounded-xl hover:bg-primary-50 hover:text-primary-600 flex items-center justify-center text-gray-500 transition-colors">{item.icon}</button>
           ))}
@@ -2668,7 +2857,7 @@ export default function EditorPage() {
               </div>
             </div>
           )}
-          <div className="flex-1 overflow-auto flex items-center justify-center p-8">
+          <div className="flex-1 overflow-auto flex items-center justify-center p-2 md:p-8">
             <div
               ref={canvasElemRef}
               className="relative bg-white shadow-2xl flex-shrink-0 overflow-hidden"
@@ -2680,10 +2869,20 @@ export default function EditorPage() {
               {/* Background image layer */}
               <div
                 onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[0]); }}
-                className={`absolute inset-0 cursor-pointer transition-all ${selectedLayer?.id === 0 ? 'ring-2 ring-primary-500' : 'hover:ring-2 hover:ring-primary-300/60'}`}
+                className={`absolute inset-0 cursor-pointer transition-all overflow-hidden ${selectedLayer?.id === 0 ? 'ring-2 ring-primary-500' : 'hover:ring-2 hover:ring-primary-300/60'}`}
               >
-                <img src={currentBgImage} alt="배경" className="w-full h-full object-cover" />
-                <div className="absolute inset-0" style={{ background: pageData.overlay }} />
+                <img src={currentBgImage} alt="배경" className="w-full h-full object-cover"
+                  style={{
+                    transform: `scale(${pageData.bgScale ?? 1})`,
+                    transformOrigin: `${pageData.bgPosition?.x ?? 50}% ${pageData.bgPosition?.y ?? 50}%`,
+                    filter: `brightness(${(pageData.bgBrightnessFilter ?? 100) / 100})`,
+                    transition: 'transform 0.1s ease',
+                  }}
+                />
+                <div className="absolute inset-0" style={{ background: pageData.overlay, opacity: (pageData.overlayOpacity ?? 100) / 100 }} />
+                {(pageData.bgBrightness ?? 0) > 0 && (
+                  <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${(pageData.bgBrightness ?? 0) / 100})` }} />
+                )}
                 {brandKit?.logo && (
                   <div className="absolute top-[4%] right-[4%] z-10 opacity-80 pointer-events-none">
                     <img src={brandKit.logo} className="h-4 object-contain" style={{ height: `${(16 * canvasW) / 420}px` }} />
@@ -2888,27 +3087,27 @@ export default function EditorPage() {
           </div>
 
           {/* Thumbnails — 페이지별 다른 이미지 */}
-          <div className="h-28 bg-white border-t border-gray-200 flex items-center justify-center gap-3 shrink-0 px-4 z-10">
+          <div className="h-20 md:h-28 bg-white border-t border-gray-200 flex items-center gap-2 md:gap-3 shrink-0 px-3 md:px-4 z-10 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
             {pagesData.map(pg => (
               <div
                 key={pg.id}
                 onClick={e => { e.stopPropagation(); handlePageChange(pg.id); }}
-                className={`relative w-14 h-[72px] rounded-lg border-2 overflow-hidden cursor-pointer transition-all ${currentPage === pg.id ? 'border-primary-600 shadow-md ring-2 ring-primary-100' : 'border-gray-200 hover:border-gray-400'}`}
+                className={`relative shrink-0 w-10 h-[52px] md:w-14 md:h-[72px] rounded-lg border-2 overflow-hidden cursor-pointer transition-all ${currentPage === pg.id ? 'border-primary-600 shadow-md ring-2 ring-primary-100' : 'border-gray-200 hover:border-gray-400'}`}
               >
                 <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=120')} alt={`${pg.id}p`} className="w-full h-full object-cover" loading="lazy" />
                 <div className="absolute inset-0" style={{ background: pg.overlay }} />
-                <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-4 h-4 bg-black/60 rounded-full flex items-center justify-center text-[9px] text-white font-bold">{pg.id}</div>
+                <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-4 bg-black/60 rounded-full flex items-center justify-center text-[9px] text-white font-bold">{pg.id}</div>
               </div>
             ))}
-            <button className="w-14 h-[72px] rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 transition-colors">
-              <Plus size={18} />
+            <button className="shrink-0 w-10 h-[52px] md:w-14 md:h-[72px] rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 transition-colors">
+              <Plus size={16} />
             </button>
           </div>
         </div>
 
-        {/* Right Panel */}
+        {/* Right Panel - 데스크탑 전용 */}
         <div
-          className="border-l border-gray-200 bg-white flex flex-col shrink-0 overflow-hidden"
+          className="hidden md:flex border-l border-gray-200 bg-white flex-col shrink-0 overflow-hidden"
           style={{ width: isPanelOpen ? 380 : 0, transition: 'width 0.25s ease' }}
           onClick={e => e.stopPropagation()}
         >
@@ -2924,7 +3123,7 @@ export default function EditorPage() {
             </button>
           </div>
           <div className="flex-1 overflow-hidden flex flex-col">
-            {activeTab === 'ai' && <AIPanel pageData={pageData} onApplyChanges={(changes) => updatePageData(currentPage, changes)} />}
+            {activeTab === 'ai' && <AIPanel pageData={pageData} onApplyChanges={(changes) => updatePageData(currentPage, changes)} messages={aiMessages} setMessages={setAiMessages} />}
             {activeTab === 'element' && (
               <div className="flex-1 overflow-hidden">
                 <ElementPanel
@@ -2944,8 +3143,17 @@ export default function EditorPage() {
                   currentImageUrl={currentBgImage}
                   cardContent={cardTextContent}
                   imageKeyword={pageData.imageKeyword}
+                  initialScale={pageData.bgScale}
+                  initialPosition={pageData.bgPosition}
+                  initialBrightness={pageData.bgBrightness}
+                  initialBrightnessFilter={pageData.bgBrightnessFilter}
+                  initialOverlayOpacity={pageData.overlayOpacity}
                   onSelectImage={handleSelectImage}
                   onDeselect={handleDeselect}
+                  onUpdateBgTransform={(scale, pos) => updatePageData(currentPage, { bgScale: scale, bgPosition: pos })}
+                  onUpdateBrightness={b => updatePageData(currentPage, { bgBrightness: b })}
+                  onUpdateBrightnessFilter={v => updatePageData(currentPage, { bgBrightnessFilter: v })}
+                  onUpdateOverlayOpacity={v => updatePageData(currentPage, { overlayOpacity: v })}
                 />
               </div>
             )}
@@ -2957,6 +3165,89 @@ export default function EditorPage() {
                   onUpdate={(content, style) => updatePageField(currentPage, selectedLayer.id, content, style)}
                 />
               </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 모바일 하단 패널 */}
+      <div className="md:hidden shrink-0 bg-white border-t border-gray-200 z-30" onClick={e => e.stopPropagation()}>
+        {/* 탭 바 */}
+        <div className="flex border-b border-gray-100">
+          {([
+            { key: 'edit', label: '편집', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" /></svg> },
+            { key: 'element', label: '요소', icon: <ShapesIcon size={14} /> },
+            { key: 'ai', label: 'AI', icon: <Wand2 size={14} /> },
+          ] as const).map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                if (mobileActiveTab === tab.key && mobilePanelOpen) {
+                  setMobilePanelOpen(false);
+                } else {
+                  setMobileActiveTab(tab.key);
+                  setMobilePanelOpen(true);
+                  if (tab.key === 'element') setSelectedLayer(null);
+                }
+              }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-bold border-b-2 transition-colors ${mobileActiveTab === tab.key && mobilePanelOpen ? (tab.key === 'ai' ? 'border-primary-600 text-primary-600' : tab.key === 'element' ? 'border-purple-600 text-purple-600' : 'border-gray-900 text-gray-900') : 'border-transparent text-gray-400'}`}
+            >
+              {tab.icon} {tab.label}
+              {mobileActiveTab === tab.key && mobilePanelOpen && <ChevronDown size={12} />}
+            </button>
+          ))}
+        </div>
+
+        {/* 슬라이드업 패널 콘텐츠 */}
+        <div style={{ height: mobilePanelOpen ? (mobilePanelExpanded ? '85vh' : '55vh') : 0, overflow: 'hidden', transition: 'height 0.3s ease' }}>
+          {mobilePanelOpen && (
+            <div className="flex justify-center py-1 border-b border-gray-100">
+              <button
+                onClick={() => setMobilePanelExpanded(v => !v)}
+                className="flex items-center gap-1 text-[10px] text-gray-400 px-3 py-0.5 hover:text-gray-600"
+              >
+                {mobilePanelExpanded ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
+                {mobilePanelExpanded ? '축소' : '확장'}
+              </button>
+            </div>
+          )}
+          <div className="h-full overflow-y-auto">
+            {mobileActiveTab === 'ai' && <AIPanel pageData={pageData} onApplyChanges={(changes) => updatePageData(currentPage, changes)} messages={aiMessages} setMessages={setAiMessages} />}
+            {mobileActiveTab === 'element' && (
+              <ElementPanel
+                onAdd={addElement}
+                selectedElement={selectedElementId ? (pageData.elements || []).find(e => e.id === selectedElementId) ?? null : null}
+                onUpdateElement={updateElement}
+                onDeleteElement={deleteElement}
+              />
+            )}
+            {mobileActiveTab === 'edit' && !selectedLayer && <DefaultPanel layers={pageLayers} onSelectLayer={(layer) => { handleSelectLayer(layer); setMobilePanelOpen(true); }} />}
+            {mobileActiveTab === 'edit' && selectedLayer?.type === 'image' && (
+              <ImagePanel
+                key={`m-${currentPage}-${selectedLayer.id}`}
+                layer={selectedLayer}
+                currentImageUrl={currentBgImage}
+                cardContent={cardTextContent}
+                imageKeyword={pageData.imageKeyword}
+                initialScale={pageData.bgScale}
+                initialPosition={pageData.bgPosition}
+                initialBrightness={pageData.bgBrightness}
+                initialBrightnessFilter={pageData.bgBrightnessFilter}
+                initialOverlayOpacity={pageData.overlayOpacity}
+                onSelectImage={handleSelectImage}
+                onDeselect={handleDeselect}
+                onUpdateBgTransform={(scale, pos) => updatePageData(currentPage, { bgScale: scale, bgPosition: pos })}
+                onUpdateBrightness={b => updatePageData(currentPage, { bgBrightness: b })}
+                onUpdateBrightnessFilter={v => updatePageData(currentPage, { bgBrightnessFilter: v })}
+                onUpdateOverlayOpacity={v => updatePageData(currentPage, { overlayOpacity: v })}
+              />
+            )}
+            {mobileActiveTab === 'edit' && selectedLayer?.type === 'text' && (
+              <TextPanel
+                layer={selectedLayer}
+                onDeselect={handleDeselect}
+                onUpdate={(content, style) => updatePageField(currentPage, selectedLayer.id, content, style)}
+              />
             )}
           </div>
         </div>
@@ -3125,6 +3416,7 @@ function FullscreenEditor({
   const [fsPage, setFsPage] = useState(initialPage);
   const [selectedLayer, setSelectedLayer] = useState<CanvasLayerWithSrc | null>(null);
   const [activeTab, setActiveTab] = useState<'edit' | 'ai' | 'element'>('edit');
+  const [aiMessages, setAiMessages] = useState<AIChatMessage[]>([]);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
   const [draggingElemId, setDraggingElemId] = useState<string | null>(null);
@@ -3276,10 +3568,20 @@ function FullscreenEditor({
               {/* Background image */}
               <div
                 onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[0]); }}
-                className={`absolute inset-0 cursor-pointer transition-all ${selectedLayer?.id === 0 ? 'ring-2 ring-primary-500' : 'hover:ring-2 hover:ring-primary-300/60'}`}
+                className={`absolute inset-0 cursor-pointer transition-all overflow-hidden ${selectedLayer?.id === 0 ? 'ring-2 ring-primary-500' : 'hover:ring-2 hover:ring-primary-300/60'}`}
               >
-                <img src={currentBgImage} alt="배경" className="w-full h-full object-cover" />
-                <div className="absolute inset-0" style={{ background: pageData.overlay }} />
+                <img src={currentBgImage} alt="배경" className="w-full h-full object-cover"
+                  style={{
+                    transform: `scale(${pageData.bgScale ?? 1})`,
+                    transformOrigin: `${pageData.bgPosition?.x ?? 50}% ${pageData.bgPosition?.y ?? 50}%`,
+                    filter: `brightness(${(pageData.bgBrightnessFilter ?? 100) / 100})`,
+                    transition: 'transform 0.1s ease',
+                  }}
+                />
+                <div className="absolute inset-0" style={{ background: pageData.overlay, opacity: (pageData.overlayOpacity ?? 100) / 100 }} />
+                {(pageData.bgBrightness ?? 0) > 0 && (
+                  <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${(pageData.bgBrightness ?? 0) / 100})` }} />
+                )}
                 {brandLogo && (
                   <div className="absolute top-[4%] right-[4%] z-10 opacity-80 pointer-events-none">
                     <img src={brandLogo} className="h-4 object-contain" style={{ height: `${(16 * canvasW) / 420}px` }} />
@@ -3483,7 +3785,7 @@ function FullscreenEditor({
             </button>
           </div>
           <div className="flex-1 overflow-hidden flex flex-col">
-            {activeTab === 'ai' && <AIPanel pageData={pagesData[fsPage - 1]} onApplyChanges={(changes) => onApplyPageChanges(fsPage, changes)} />}
+            {activeTab === 'ai' && <AIPanel pageData={pagesData[fsPage - 1]} onApplyChanges={(changes) => onApplyPageChanges(fsPage, changes)} messages={aiMessages} setMessages={setAiMessages} />}
             {activeTab === 'element' && (
               <div className="flex-1 overflow-hidden">
                 <ElementPanel
@@ -3503,8 +3805,17 @@ function FullscreenEditor({
                   currentImageUrl={currentBgImage}
                   cardContent={cardTextContent}
                   imageKeyword={pagesData[fsPage - 1]?.imageKeyword}
+                  initialScale={pagesData[fsPage - 1]?.bgScale}
+                  initialPosition={pagesData[fsPage - 1]?.bgPosition}
+                  initialBrightness={pagesData[fsPage - 1]?.bgBrightness}
+                  initialBrightnessFilter={pagesData[fsPage - 1]?.bgBrightnessFilter}
+                  initialOverlayOpacity={pagesData[fsPage - 1]?.overlayOpacity}
                   onSelectImage={url => onSelectImage(url, fsPage)}
                   onDeselect={handleDeselect}
+                  onUpdateBgTransform={(scale, pos) => onApplyPageChanges(fsPage, { bgScale: scale, bgPosition: pos })}
+                  onUpdateBrightness={b => onApplyPageChanges(fsPage, { bgBrightness: b })}
+                  onUpdateBrightnessFilter={v => onApplyPageChanges(fsPage, { bgBrightnessFilter: v })}
+                  onUpdateOverlayOpacity={v => onApplyPageChanges(fsPage, { overlayOpacity: v })}
                 />
               </div>
             )}
@@ -3517,6 +3828,103 @@ function FullscreenEditor({
                 />
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SaveLocalModal ───────────────────────────────────────────────────────────
+const MY_CARDNEWS_KEY = 'my_saved_cardnews';
+
+interface SavedCardNews {
+  id: string;
+  name: string;
+  createdAt: string;
+  pages: PageData[];
+}
+
+function loadSavedCardNews(): SavedCardNews[] {
+  try {
+    const raw = localStorage.getItem(MY_CARDNEWS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+function saveCardNewsToLocal(name: string, pages: PageData[]): void {
+  const list = loadSavedCardNews();
+  const next: SavedCardNews = {
+    id: `cn_${Date.now()}`,
+    name,
+    createdAt: new Date().toISOString(),
+    pages,
+  };
+  const updated = [next, ...list].slice(0, 20);
+  localStorage.setItem(MY_CARDNEWS_KEY, JSON.stringify(updated));
+}
+
+function SaveLocalModal({ pagesData, onClose }: { pagesData: PageData[]; onClose: () => void }) {
+  const [name, setName] = useState(`카드뉴스 ${new Date().toLocaleDateString('ko-KR')}`);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSave = () => {
+    if (!name.trim()) { setError('이름을 입력해주세요'); return; }
+    try {
+      saveCardNewsToLocal(name.trim(), pagesData);
+      setSaved(true);
+      setTimeout(onClose, 1200);
+    } catch (e: any) {
+      setError('저장 중 오류가 발생했습니다: ' + e.message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[420px] max-w-full" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-emerald-100 rounded-xl flex items-center justify-center">
+              <FolderOpen size={16} className="text-emerald-600" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-gray-900">내 카드뉴스 저장</h2>
+              <p className="text-[11px] text-gray-400">이 기기에 저장됩니다 (최대 20개)</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400"><X size={16} /></button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-2">이름</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => { setName(e.target.value); setError(''); }}
+              onKeyDown={e => e.key === 'Enter' && handleSave()}
+              placeholder="카드뉴스 이름"
+              autoFocus
+              className={`w-full border rounded-xl px-4 py-3 text-sm outline-none transition-all ${error ? 'border-red-400 ring-1 ring-red-200' : 'border-gray-200 focus:border-emerald-400 focus:ring-1 focus:ring-emerald-100'}`}
+            />
+            {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
+          </div>
+
+          <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-xl border border-gray-100 text-xs text-gray-500">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            <span>{pagesData.length}장 저장 · 나중에 카드뉴스 생성 탭에서 불러올 수 있습니다</span>
+          </div>
+
+          <div className="flex gap-3">
+            <button onClick={onClose} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50">취소</button>
+            <button
+              onClick={handleSave}
+              disabled={saved}
+              className={`flex-1 py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 transition-all shadow-sm ${saved ? 'bg-emerald-500' : 'bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98]'}`}
+            >
+              {saved ? <><Check size={14} /> 저장 완료!</> : <><FolderOpen size={14} /> 저장하기</>}
+            </button>
           </div>
         </div>
       </div>
@@ -3941,14 +4349,15 @@ const PLATFORMS = [
 ] as const;
 
 function SnsUploadModal({
-  pagesData, captureRefs, onClose,
+  pagesData, captureRefs, onClose, initialCaption = '',
 }: {
   pagesData: PageData[];
   captureRefs: React.MutableRefObject<Record<number, HTMLDivElement | null>>;
   onClose: () => void;
+  initialCaption?: string;
 }) {
   const [selected, setSelected] = React.useState<Set<string>>(new Set(['threads']));
-  const [caption, setCaption] = React.useState('');
+  const [caption, setCaption] = React.useState(initialCaption);
   const [status, setStatus] = React.useState<SnsStatus>('idle');
   const [progress, setProgress] = React.useState('');
   const [results, setResults] = React.useState<Record<string, SnsResult>>({});
@@ -4108,8 +4517,18 @@ function SnsUploadModal({
             <p className="text-[10px] text-gray-400 mt-1">Threads 최대 500자 · TikTok 최대 150자</p>
           </div>
 
+          {/* 완료 배너 */}
+          {status === 'done' && (
+            <div className="flex items-center gap-2.5 px-4 py-3 bg-green-50 border border-green-200 rounded-xl">
+              <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center shrink-0">
+                <Check size={13} className="text-white" />
+              </div>
+              <p className="text-sm font-bold text-green-700">업로드 완료! 각 플랫폼에서 확인하세요.</p>
+            </div>
+          )}
+
           {/* 결과 표시 */}
-          {status === 'done' && Object.keys(results).length > 0 && (
+          {(status === 'done' || status === 'error') && Object.keys(results).length > 0 && (
             <div className="space-y-2">
               {Object.entries(results).map(([platform, result]) => {
                 if (platform === '_error') return null;
@@ -4153,6 +4572,14 @@ function SnsUploadModal({
             >
               다시 업로드
             </button>
+          ) : status === 'error' ? (
+            <button
+              onClick={() => { setStatus('idle'); setResults({}); setProgress(''); }}
+              className="w-full py-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+            >
+              <RefreshCw size={14} />
+              다시 시도하기
+            </button>
           ) : (
             <button
               onClick={handleUpload}
@@ -4175,10 +4602,12 @@ function SnsUploadModal({
 function CaptionModal({
   pagesData,
   brandKit,
+  onCaptionGenerated,
   onClose,
 }: {
   pagesData: PageData[];
   brandKit: { logo: string; color: string; name?: string; font_family?: string } | null;
+  onCaptionGenerated?: (caption: string, hashtags: string[]) => void;
   onClose: () => void;
 }) {
   const [caption, setCaption] = useState('');
@@ -4204,6 +4633,7 @@ function CaptionModal({
       if (data.error) throw new Error(data.error);
       setCaption(data.caption || '');
       setHashtags(data.hashtags || []);
+      onCaptionGenerated?.(data.caption || '', data.hashtags || []);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '생성 실패');
     }

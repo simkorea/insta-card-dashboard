@@ -1,23 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-export const maxDuration = 10;
+export const maxDuration = 60;
+
+const IG_API = 'https://graph.instagram.com/v21.0';
 
 const THREADS_API = 'https://graph.threads.net/v1.0';
 
 // ── Threads ──────────────────────────────────────────────────────────────────
-
-async function threadsCreateCarouselItem(userId: string, token: string, imageUrl: string): Promise<string> {
-  const params = new URLSearchParams({
-    media_type: 'IMAGE',
-    image_url: imageUrl,
-    is_carousel_item: 'true',
-    access_token: token,
-  });
-  const res = await fetch(`${THREADS_API}/${userId}/threads?${params}`, { method: 'POST' });
-  const data = await res.json();
-  if (!res.ok) throw new Error(`carousel item 생성 실패: ${JSON.stringify(data)}`);
-  return data.id as string;
-}
 
 async function threadsCreateSingleImage(userId: string, token: string, imageUrl: string, caption: string): Promise<string> {
   const params = new URLSearchParams({
@@ -32,16 +22,16 @@ async function threadsCreateSingleImage(userId: string, token: string, imageUrl:
   return data.id as string;
 }
 
-async function threadsCreateCarouselContainer(userId: string, token: string, children: string[], caption: string): Promise<string> {
+async function threadsCreateCarouselItem(userId: string, token: string, imageUrl: string): Promise<string> {
   const params = new URLSearchParams({
-    media_type: 'CAROUSEL',
-    children: children.join(','),
-    text: caption.slice(0, 500),
+    media_type: 'IMAGE',
+    image_url: imageUrl,
+    is_carousel_item: 'true',
     access_token: token,
   });
   const res = await fetch(`${THREADS_API}/${userId}/threads?${params}`, { method: 'POST' });
   const data = await res.json();
-  if (!res.ok) throw new Error(`캐러셀 컨테이너 실패: ${JSON.stringify(data)}`);
+  if (!res.ok) throw new Error(`캐러셀 아이템 실패: ${JSON.stringify(data)}`);
   return data.id as string;
 }
 
@@ -69,8 +59,30 @@ async function uploadToThreads(imageUrls: string[], caption: string): Promise<{ 
   try {
     let containerId: string;
 
-    // Hobby 플랜 10초 제한 — 캐러셀은 대기 시간이 길어 단일 이미지(첫 장)만 업로드
-    containerId = await threadsCreateSingleImage(userId, token, imageUrls[0], caption);
+    if (imageUrls.length === 1) {
+      containerId = await threadsCreateSingleImage(userId, token, imageUrls[0], caption);
+    } else {
+      // 캐러셀: 최대 20장, 아이템 컨테이너 병렬 생성
+      const urls = imageUrls.slice(0, 20);
+      const itemIds = await Promise.all(urls.map(url => threadsCreateCarouselItem(userId, token, url)));
+
+      // 아이템 처리 완료 대기 (충분히 기다려야 container not found 오류 방지)
+      await new Promise(r => setTimeout(r, 5000));
+
+      const carouselParams = new URLSearchParams({
+        media_type: 'CAROUSEL',
+        children: itemIds.join(','),
+        text: caption.slice(0, 500),
+        access_token: token,
+      });
+      const carouselRes = await fetch(`${THREADS_API}/${userId}/threads?${carouselParams}`, { method: 'POST' });
+      const carousel = await carouselRes.json();
+      if (!carouselRes.ok) throw new Error(`캐러셀 컨테이너 실패: ${JSON.stringify(carousel)}`);
+      containerId = carousel.id;
+
+      // 캐러셀 컨테이너도 처리 완료 대기 후 publish
+      await new Promise(r => setTimeout(r, 3000));
+    }
 
     const mediaId = await threadsPublish(userId, token, containerId);
     const permalink = await threadsGetPermalink(token, mediaId);
@@ -78,6 +90,11 @@ async function uploadToThreads(imageUrls: string[], caption: string): Promise<{ 
   } catch (e: any) {
     return { success: false, error: e.message };
   }
+}
+
+const VERCEL_BASE = 'https://insta-card-dashboard.vercel.app';
+function toProxyUrl(imageUrl: string): string {
+  return `${VERCEL_BASE}/api/img?url=${encodeURIComponent(imageUrl)}`;
 }
 
 // ── TikTok ───────────────────────────────────────────────────────────────────
@@ -112,17 +129,18 @@ async function uploadToTikTok(imageUrls: string[], caption: string): Promise<{ s
   if (refreshed) accessToken = refreshed;
 
   try {
+    const photos = imageUrls.slice(0, 35).map(toProxyUrl);
+    // PULL_FROM_URL: TikTok이 외부 URL에서 직접 이미지를 가져오는 방식
     const body = {
       post_info: {
-        title: caption.slice(0, 150),
+        title: caption.slice(0, 2200) || ' ',
         privacy_level: 'SELF_ONLY',
-        disable_duet: false,
-        disable_comment: false,
-        disable_stitch: false,
+        brand_content_toggle: false,
+        brand_organic_toggle: false,
       },
       source_info: {
-        source: 'URL_UPLOAD',
-        photo_images: imageUrls.slice(0, 35),
+        source: 'PULL_FROM_URL',
+        photo_images: photos,
         photo_cover_index: 0,
       },
       media_type: 'PHOTO',
@@ -142,20 +160,102 @@ async function uploadToTikTok(imageUrls: string[], caption: string): Promise<{ s
     if (data.error?.code === 'ok' || data.data?.publish_id) {
       return { success: true, url: 'https://www.tiktok.com/' };
     }
-    return { success: false, error: `TikTok 오류: ${data.error?.message || JSON.stringify(data)}` };
+    if (data.error?.code === 'access_token_invalid' || data.error?.code === 'token_expired') {
+      return { success: false, error: 'TikTok 토큰이 만료되었습니다. TikTok 계정을 재연동해 주세요.' };
+    }
+    if (data.error?.code === 'permission_denied') {
+      return { success: false, error: 'TikTok 앱에 사진 게시 권한이 없습니다. TikTok 개발자 콘솔에서 photo.publish 권한을 추가하세요.' };
+    }
+    if (data.error?.code === 'url_ownership_unverified') {
+      return { success: false, error: 'TikTok URL 소유권 미인증: TikTok 개발자 콘솔(developers.tiktok.com) → 앱 설정 → Content Posting API → URL 소유권 인증에서 "insta-card-dashboard.vercel.app" 도메인을 등록하세요.' };
+    }
+    return { success: false, error: `TikTok 오류 (${data.error?.code}): ${data.error?.message || JSON.stringify(data)}` };
   } catch (e: any) {
     return { success: false, error: e.message };
   }
 }
 
 // ── Instagram ─────────────────────────────────────────────────────────────────
-// instagrapi(Python)를 서버에서 직접 호출할 수 없으므로,
-// Meta Graph API 방식이 필요합니다. (별도 Instagram Business 토큰 필요)
-async function uploadToInstagram(_imageUrls: string[], _caption: string): Promise<{ success: boolean; url?: string; error?: string }> {
-  return {
-    success: false,
-    error: 'Instagram은 Meta Graph API Business 토큰이 별도로 필요합니다. (현재 미지원)',
-  };
+async function uploadToInstagram(imageUrls: string[], caption: string): Promise<{ success: boolean; url?: string; error?: string }> {
+  try {
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+    const { data: settings } = await supabase
+      .from('instagram_settings')
+      .select('access_token, ig_user_id')
+      .limit(1)
+      .maybeSingle();
+
+    if (!settings?.access_token || !settings?.ig_user_id) {
+      return { success: false, error: 'Instagram 연동 설정이 없습니다. SNS 계정 연동-관리 메뉴에서 먼저 설정하세요.' };
+    }
+
+    const { access_token, ig_user_id } = settings;
+    const urls = imageUrls.slice(0, 10);
+    const authHeader = { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' };
+
+    let containerId: string;
+
+    if (urls.length === 1) {
+      // 단일 이미지
+      const res = await fetch(`${IG_API}/${ig_user_id}/media`, {
+        method: 'POST',
+        headers: authHeader,
+        body: JSON.stringify({ image_url: urls[0], caption, media_type: 'IMAGE' }),
+      });
+      const data = await res.json();
+      if (data.error) return { success: false, error: `Instagram: ${data.error.message} (code:${data.error.code})` };
+      containerId = data.id;
+      await new Promise(r => setTimeout(r, 3000));
+    } else {
+      // 캐러셀: 하위 컨테이너 병렬 생성
+      const childResults = await Promise.all(
+        urls.map(url =>
+          fetch(`${IG_API}/${ig_user_id}/media`, {
+            method: 'POST',
+            headers: authHeader,
+            body: JSON.stringify({ image_url: url, is_carousel_item: true }),
+          }).then(r => r.json())
+        )
+      );
+      const failed = childResults.find(d => d.error);
+      if (failed) return { success: false, error: `Instagram 하위 컨테이너 오류: ${failed.error.message} (code:${failed.error.code})` };
+
+      const childIds = childResults.map(d => d.id).filter(Boolean);
+
+      const carouselRes = await fetch(`${IG_API}/${ig_user_id}/media`, {
+        method: 'POST',
+        headers: authHeader,
+        body: JSON.stringify({ media_type: 'CAROUSEL', children: childIds.join(','), caption }),
+      });
+      const carousel = await carouselRes.json();
+      if (carousel.error) return { success: false, error: `Instagram 캐러셀 오류: ${carousel.error.message} (code:${carousel.error.code})` };
+      containerId = carousel.id;
+      await new Promise(r => setTimeout(r, 2000));
+    }
+
+    // 상태 확인
+    const statusRes = await fetch(`${IG_API}/${containerId}?fields=status_code`, { headers: authHeader });
+    const statusData = await statusRes.json();
+    if (statusData.status_code && statusData.status_code !== 'FINISHED') {
+      return { success: false, error: `Instagram 이미지 처리 중 (${statusData.status_code}). 잠시 후 다시 시도하세요.` };
+    }
+
+    // 발행
+    const pubRes = await fetch(`${IG_API}/${ig_user_id}/media_publish`, {
+      method: 'POST',
+      headers: authHeader,
+      body: JSON.stringify({ creation_id: containerId }),
+    });
+    const pubData = await pubRes.json();
+    if (pubData.error) return { success: false, error: `Instagram 발행 실패: ${pubData.error.message} (code:${pubData.error.code})` };
+
+    return { success: true, url: `https://www.instagram.com/p/${pubData.id}/` };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
 }
 
 // ── YouTube ───────────────────────────────────────────────────────────────────

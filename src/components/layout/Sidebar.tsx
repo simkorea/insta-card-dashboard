@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   PenTool,
   LayoutDashboard,
@@ -23,14 +23,26 @@ import {
   MoreHorizontal,
   Sparkles,
   Palette,
+  LogOut,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useAuth } from '@/components/providers/AuthProvider';
+import { createSupabaseBrowser } from '@/lib/supabase-browser';
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const { user } = useAuth();
   const [contentOpen, setContentOpen] = useState(true);
   const [managementOpen, setManagementOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const handleLogout = async () => {
+    const supabase = createSupabaseBrowser();
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
+  };
 
   useEffect(() => {
     setMobileOpen(false);
@@ -209,26 +221,28 @@ export default function Sidebar() {
 
       {/* Bottom Actions */}
       <div className="p-4 border-t border-gray-100 bg-gray-50/50">
-        <button className="w-full flex items-center justify-center gap-2 py-2 mb-2 rounded-lg border border-primary-200 text-primary-600 text-xs font-bold hover:bg-primary-50 bg-white shadow-sm">
+        <Link href="/sns-settings" className="w-full flex items-center justify-center gap-2 py-2 mb-2 rounded-lg border border-primary-200 text-primary-600 text-xs font-bold hover:bg-primary-50 bg-white shadow-sm">
           <Share2 size={14} /> SNS 계정 연동·관리
-        </button>
-        <button className="w-full flex items-center justify-center gap-2 py-2 mb-4 rounded-lg bg-gray-900 text-white text-xs font-bold hover:bg-black shadow-sm">
+        </Link>
+        <button className="w-full flex items-center justify-center gap-2 py-2 mb-3 rounded-lg bg-gray-900 text-white text-xs font-bold hover:bg-black shadow-sm">
           <Gift size={14} /> 친구 초대하고 혜택받기
         </button>
 
-        <div className="text-[10px] text-gray-500 font-medium space-y-1.5">
-          <div className="flex justify-between items-center">
-            <span>free-trial</span>
-            <div className="flex gap-2">
-              <span>AI 60</span>
-              <span>0/5 SNS 계정</span>
+        {user && (
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[10px] text-gray-400 truncate">{user.email}</p>
+              <p className="text-[10px] text-gray-400">free-trial · AI 60</p>
             </div>
+            <button
+              onClick={handleLogout}
+              title="로그아웃"
+              className="shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+            >
+              <LogOut size={14} />
+            </button>
           </div>
-          <div className="flex justify-between items-center text-gray-400">
-            <span className="flex items-center gap-1"><span className="text-yellow-500">⭐</span> 퀘스트</span>
-            <span>0/3</span>
-          </div>
-        </div>
+        )}
       </div>
     </aside>
   );
@@ -290,6 +304,7 @@ export default function Sidebar() {
       <div className={`fixed inset-y-0 left-0 z-50 md:hidden flex h-full transition-transform duration-300 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         {sidebarContent}
       </div>
+
     </>
   );
 }

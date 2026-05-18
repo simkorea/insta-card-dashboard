@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { ImagePlus, ChevronLeft, Search, RefreshCw, MessageSquare, Settings, ChevronUp, ChevronDown, UploadCloud, Trash2, Pencil, Loader2, Calendar, Clock, Copy, Check, X, Send, RefreshCcw, Images } from 'lucide-react';
+import { ImagePlus, ChevronLeft, Search, RefreshCw, MessageSquare, Settings, ChevronUp, ChevronDown, UploadCloud, Trash2, Pencil, Loader2, Calendar, Clock, Copy, Check, X, Send, RefreshCcw, Images, Sparkles, Wand2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 // ─── 슬라이드 렌더러 (카로셀 캡처용) ────────────────────────────────────────
 const CAPTURE_FONTS_URL =
@@ -167,6 +168,7 @@ const ratioOptions = [
 ];
 
 export default function CardNewsPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<'create' | 'learn' | 'history' | 'schedule' | 'analytics'>('create');
   const [step, setStep] = useState(1);
   const [templates, setTemplates] = useState<any[]>([]);
@@ -194,7 +196,7 @@ export default function CardNewsPage() {
   const [quickSlideAuto, setQuickSlideAuto] = useState(true);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
-  const [inputMode, setInputMode] = useState<'text' | 'url' | 'trend'>('text');
+  const [inputMode, setInputMode] = useState<'text' | 'url' | 'trend' | 'smart'>('text');
   const [urlInput, setUrlInput] = useState('');
   const [trendInput, setTrendInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -204,6 +206,13 @@ export default function CardNewsPage() {
   const [resultTab, setResultTab] = useState<'card' | 'blog'>('card');
   const [trendRecommendations, setTrendRecommendations] = useState<string[]>([]);
   const [isFetchingTrends, setIsFetchingTrends] = useState(false);
+
+  // Smart AI 자동 생성
+  const [smartKeyword, setSmartKeyword] = useState('');
+  const [smartCategory, setSmartCategory] = useState('부동산');
+  const [smartSlideCount, setSmartSlideCount] = useState(7);
+  const [smartGenerating, setSmartGenerating] = useState(false);
+  const [smartStep, setSmartStep] = useState('');
 
   // Tab: 브랜드 키트 (Brand Kit)
   const [brandKit, setBrandKit] = useState<{ logo: string; color: string; name: string; useAutoAccent: boolean }>({
@@ -287,6 +296,37 @@ export default function CardNewsPage() {
       setTimeout(() => setStyleSaved(false), 3000);
     } catch { /* ignore */ } finally {
       setIsSavingStyle(false);
+    }
+  };
+
+  // 내 카드뉴스 (localStorage)
+  interface SavedCardNews { id: string; name: string; createdAt: string; pages: any[]; }
+  const MY_CARDNEWS_KEY = 'my_saved_cardnews';
+  const [savedCardNews, setSavedCardNews] = useState<SavedCardNews[]>([]);
+  const [deletingLocalId, setDeletingLocalId] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(MY_CARDNEWS_KEY);
+      if (raw) setSavedCardNews(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleOpenLocalCardNews = (cn: SavedCardNews) => {
+    localStorage.setItem('cardnews_import_templates', JSON.stringify(cn.pages));
+    router.push('/cardnews/editor');
+  };
+
+  const handleDeleteLocalCardNews = (id: string) => {
+    setDeletingLocalId(id);
+    try {
+      const raw = localStorage.getItem(MY_CARDNEWS_KEY);
+      const list: SavedCardNews[] = raw ? JSON.parse(raw) : [];
+      const updated = list.filter(cn => cn.id !== id);
+      localStorage.setItem(MY_CARDNEWS_KEY, JSON.stringify(updated));
+      setSavedCardNews(updated);
+    } catch { /* ignore */ } finally {
+      setDeletingLocalId(null);
     }
   };
 
@@ -710,6 +750,40 @@ export default function CardNewsPage() {
     }
   };
 
+  const handleSmartGenerate = async () => {
+    if (!smartKeyword.trim()) return;
+    setSmartGenerating(true);
+    setSmartStep('주제 분석 중...');
+    try {
+      const steps = ['주제 분석 중...', '슬라이드 기획 중...', '콘텐츠 작성 중...', '이미지 검색 중...'];
+      let si = 0;
+      const stepTimer = setInterval(() => {
+        si = (si + 1) % steps.length;
+        setSmartStep(steps[si]);
+      }, 2000);
+
+      const res = await fetch('/api/generate/smart-cardnews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: smartKeyword, category: smartCategory, slideCount: smartSlideCount }),
+      });
+      clearInterval(stepTimer);
+
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      setSmartStep('에디터 준비 중...');
+      localStorage.removeItem('editingDesign');
+      localStorage.setItem('cardnews_import_templates', JSON.stringify(data.pages));
+      router.push('/cardnews/editor');
+    } catch (e: any) {
+      alert('생성 실패: ' + e.message);
+    } finally {
+      setSmartGenerating(false);
+      setSmartStep('');
+    }
+  };
+
   const handleGenerateUnified = async (type: 'url' | 'trend' | 'text') => {
     setIsGenerating(true);
     try {
@@ -1006,7 +1080,96 @@ export default function CardNewsPage() {
 
         {/* --- 탭: 생성기록 --- */}
         {activeTab === 'history' && (
-          <div>
+          <div className="space-y-10">
+
+            {/* ─── 내 카드뉴스 (로컬 저장) ─────────────────────────────── */}
+            <div>
+              <div className="flex items-center justify-between mb-4 mt-2">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800">내 카드뉴스</h2>
+                  <p className="text-sm text-gray-400 mt-0.5">에디터에서 "내 카드뉴스 저장"한 작업물</p>
+                </div>
+                <span className="text-xs text-gray-400 bg-gray-100 px-2.5 py-1 rounded-full font-semibold">이 기기에만 저장됨</span>
+              </div>
+
+              {savedCardNews.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-gray-400 border-2 border-dashed border-gray-100 rounded-2xl">
+                  <div className="text-4xl mb-3">🗂️</div>
+                  <p className="text-sm font-semibold text-gray-500">아직 저장된 카드뉴스가 없습니다</p>
+                  <p className="text-[12px] text-gray-400 mt-1">에디터 상단 "내 카드뉴스 저장" 버튼으로 저장하세요</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                  {savedCardNews.map(cn => {
+                    const firstPage = cn.pages[0] || null;
+                    const slideCount = cn.pages.length;
+                    const createdAt = cn.createdAt
+                      ? new Date(cn.createdAt).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
+                      : '';
+                    return (
+                      <div key={cn.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
+                        <div
+                          className="relative bg-gray-900 overflow-hidden cursor-pointer"
+                          style={{ height: 176 }}
+                          onClick={() => handleOpenLocalCardNews(cn)}
+                        >
+                          <MiniCardPreview page={firstPage} />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors duration-200 flex items-center justify-center">
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 text-gray-900 text-xs font-bold px-3 py-1.5 rounded-full shadow flex items-center gap-1.5">
+                              <Pencil size={11} /> 편집하기
+                            </div>
+                          </div>
+                          <div className="absolute top-2.5 right-2.5 bg-black/60 text-white text-[11px] font-bold px-2 py-0.5 rounded-full z-10">
+                            {slideCount}장
+                          </div>
+                          {slideCount > 1 && (
+                            <div className="absolute bottom-0 left-0 right-0 flex gap-0.5 px-1.5 pb-1.5 pt-4 bg-gradient-to-t from-black/60 to-transparent z-10">
+                              {cn.pages.slice(0, 6).map((pg: any, i: number) => (
+                                <div key={i} style={{ flex: 1, height: 18, borderRadius: 2, overflow: 'hidden', background: '#333', border: '1px solid rgba(255,255,255,0.2)' }}>
+                                  {pg.bgImage && (
+                                    // eslint-disable-next-line @next/next/no-img-element
+                                    <img src={pg.bgImage.replace('w=800', 'w=60')} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.9 }} loading="lazy" />
+                                  )}
+                                </div>
+                              ))}
+                              {slideCount > 6 && (
+                                <div style={{ width: 18, height: 18, borderRadius: 2, background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <span style={{ color: '#fff', fontSize: 8, fontWeight: 700 }}>+{slideCount - 6}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="p-3.5">
+                          <h3 className="font-bold text-sm text-gray-800 truncate mb-0.5">{cn.name}</h3>
+                          <p className="text-[11px] text-gray-400 mb-3">{createdAt}</p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleOpenLocalCardNews(cn)}
+                              className="flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+                            >
+                              <Pencil size={12} /> 편집
+                            </button>
+                            <button
+                              onClick={() => handleDeleteLocalCardNews(cn.id)}
+                              disabled={deletingLocalId === cn.id}
+                              className="flex items-center justify-center w-9 h-9 rounded-lg border border-red-100 text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-40"
+                              title="삭제"
+                            >
+                              {deletingLocalId === cn.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ─── 카드뉴스 생성기록 (Supabase) ──────────────────────────── */}
+            <div>
             <div className="flex items-center justify-between mb-6 mt-2">
               <div>
                 <h2 className="text-lg font-bold text-gray-800">카드뉴스 생성기록</h2>
@@ -1160,6 +1323,7 @@ export default function CardNewsPage() {
                 })}
               </div>
             )}
+            </div>
           </div>
         )}
 
@@ -1525,19 +1689,23 @@ export default function CardNewsPage() {
                   <ChevronLeft size={18} /> <span>다른 방법으로 시작하기</span>
                 </div>
 
-                <div className="flex gap-4 mb-6 border-b border-gray-100">
-                  <button 
-                    onClick={() => setInputMode('text')} 
-                    className={`pb-3 text-sm font-bold border-b-2 transition-colors ${inputMode === 'text' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                <div className="flex gap-3 mb-6 border-b border-gray-100 overflow-x-auto">
+                  <button
+                    onClick={() => setInputMode('text')}
+                    className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${inputMode === 'text' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
                   >📝 텍스트로 시작</button>
-                  <button 
-                    onClick={() => setInputMode('url')} 
-                    className={`pb-3 text-sm font-bold border-b-2 transition-colors ${inputMode === 'url' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                  <button
+                    onClick={() => setInputMode('url')}
+                    className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${inputMode === 'url' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
                   >🔗 기사 URL로 시작</button>
-                  <button 
-                    onClick={() => setInputMode('trend')} 
-                    className={`pb-3 text-sm font-bold border-b-2 transition-colors ${inputMode === 'trend' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                  <button
+                    onClick={() => setInputMode('trend')}
+                    className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${inputMode === 'trend' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
                   >🔍 키워드 트렌드로 시작</button>
+                  <button
+                    onClick={() => setInputMode('smart')}
+                    className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap flex items-center gap-1 ${inputMode === 'smart' ? 'border-violet-600 text-violet-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                  ><Wand2 size={14} /> AI 완전 자동 생성</button>
                 </div>
 
                 {inputMode === 'text' && (
@@ -1716,6 +1884,96 @@ export default function CardNewsPage() {
                           {isGenerating ? '검색 중...' : '✨ 트렌드 수집 및 생성'}
                         </button>
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {inputMode === 'smart' && (
+                  <div className="space-y-5">
+                    {/* 헤더 */}
+                    <div className="bg-gradient-to-br from-violet-600 to-indigo-600 rounded-2xl p-5 text-white">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Sparkles size={18} />
+                        <p className="font-black text-base">AI 완전 자동 카드뉴스</p>
+                      </div>
+                      <p className="text-violet-200 text-xs">키워드 하나만 입력하면 AI가 기획·작성·이미지까지 7장을 완성합니다</p>
+                    </div>
+
+                    {/* 카테고리 선택 */}
+                    <div>
+                      <p className="text-xs font-bold text-gray-500 mb-2">카테고리</p>
+                      <div className="flex flex-wrap gap-2">
+                        {['부동산', '세금/금융', '재테크', '비즈니스', '라이프스타일', '건강', '교육', 'IT/트렌드'].map(cat => (
+                          <button key={cat} onClick={() => setSmartCategory(cat)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${smartCategory === cat ? 'bg-violet-600 text-white border-violet-600 shadow-md' : 'border-gray-200 text-gray-600 hover:border-violet-300 hover:text-violet-600 bg-white'}`}>
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 키워드 입력 */}
+                    <div>
+                      <p className="text-xs font-bold text-gray-500 mb-2">주제 키워드</p>
+                      <div className="flex gap-2">
+                        <input
+                          type="text" value={smartKeyword}
+                          onChange={e => setSmartKeyword(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && !smartGenerating && handleSmartGenerate()}
+                          placeholder="예: 다주택자 양도세, 전세사기 예방, 금리 인상"
+                          className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-violet-400"
+                        />
+                        <button onClick={handleSmartGenerate}
+                          disabled={smartGenerating || !smartKeyword.trim()}
+                          className="px-5 py-3 bg-violet-600 hover:bg-violet-700 text-white rounded-xl font-bold text-sm disabled:opacity-40 transition-all flex items-center gap-2 whitespace-nowrap shadow-md">
+                          {smartGenerating
+                            ? <><Loader2 size={15} className="animate-spin" />{smartStep}</>
+                            : <><Sparkles size={15} />AI 생성</>}
+                        </button>
+                      </div>
+                      {/* 추천 키워드 */}
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        {(smartCategory === '부동산' ? ['다주택자 양도세', '재건축 투자 전략', '전세사기 예방법', '청약 당첨 꿀팁', '아파트 시세 분석'] :
+                          smartCategory === '세금/금융' ? ['종합소득세 절세', '금융소득 분리과세', '연말정산 전략', '상속세 개편', '증여세 줄이기'] :
+                          smartCategory === '재테크' ? ['월급쟁이 재테크', 'ETF 투자 입문', '배당주 포트폴리오', '달러 환전 타이밍', '적금 vs 펀드'] :
+                          ['AI 자동화 트렌드', '사이드잡 수익화', '디지털 노마드 준비', '온라인 창업 아이템', '소셜미디어 마케팅']
+                        ).map(kw => (
+                          <button key={kw} onClick={() => setSmartKeyword(kw)}
+                            className="text-[11px] px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-full text-gray-600 hover:bg-violet-50 hover:border-violet-300 hover:text-violet-600 transition-colors">
+                            {kw}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 슬라이드 수 */}
+                    <div className="flex items-center gap-4">
+                      <p className="text-xs font-bold text-gray-500">슬라이드 수</p>
+                      <div className="flex items-center bg-gray-100 rounded-xl p-1 gap-1">
+                        {[5, 6, 7, 8, 9, 10].map(n => (
+                          <button key={n} onClick={() => setSmartSlideCount(n)}
+                            className={`w-8 h-7 rounded-lg text-xs font-bold transition-all ${smartSlideCount === n ? 'bg-violet-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-200'}`}>
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-xs text-gray-400">장</span>
+                    </div>
+
+                    {/* 생성 단계 안내 */}
+                    <div className="grid grid-cols-4 gap-2 pt-1">
+                      {[
+                        { icon: '🔍', label: '주제 분석', desc: 'AI 앵글 선택' },
+                        { icon: '📋', label: '슬라이드 기획', desc: '구조 자동 설계' },
+                        { icon: '✍️', label: '콘텐츠 작성', desc: '제목·본문 생성' },
+                        { icon: '🎨', label: '에디터 오픈', desc: '바로 편집 시작' },
+                      ].map(s => (
+                        <div key={s.label} className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+                          <div className="text-lg mb-1">{s.icon}</div>
+                          <p className="text-[10px] font-bold text-gray-700">{s.label}</p>
+                          <p className="text-[9px] text-gray-400 mt-0.5">{s.desc}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
