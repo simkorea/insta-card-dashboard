@@ -1,9 +1,7 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -55,14 +53,13 @@ ${brandCtx}
   ]
 }`;
 
-    const result = await model.generateContent(prompt);
-    let text = result.response.text();
+    let text = await generateWithRetry(prompt);
     if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
     else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
 
     const data = JSON.parse(text);
     return NextResponse.json(data);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: toKoreanError(error) }, { status: 500 });
   }
 }

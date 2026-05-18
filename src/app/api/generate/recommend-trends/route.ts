@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry } from '@/lib/gemini';
 import { NextResponse } from 'next/server';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 export async function GET() {
   try {
@@ -12,8 +9,7 @@ export async function GET() {
 
 응답은 반드시 JSON 배열 형태로만 하세요. 예: ["키워드1", "키워드2", ...]`;
 
-    const result = await model.generateContent(prompt);
-    let text = result.response.text();
+    let text = await generateWithRetry(prompt);
     if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
     else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
 

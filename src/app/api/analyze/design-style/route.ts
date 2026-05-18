@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { NextRequest, NextResponse } from 'next/server';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,7 +26,7 @@ export async function POST(req: NextRequest) {
   "contentRatio": "image-heavy | text-heavy | balanced"
 }`;
 
-      const result = await model.generateContent({
+      let text = (await generateWithRetry({
         contents: [{
           role: 'user',
           parts: [
@@ -37,9 +34,7 @@ export async function POST(req: NextRequest) {
             { text: prompt },
           ],
         }],
-      });
-
-      let text = result.response.text().trim();
+      })).trim();
       if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
       else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
       return JSON.parse(text);
@@ -97,6 +92,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ profile });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: toKoreanError(e) }, { status: 500 });
   }
 }

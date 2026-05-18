@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { NextRequest, NextResponse } from 'next/server';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 export const maxDuration = 30;
 
@@ -53,8 +50,7 @@ ${industry ? `- 업종: ${industry}` : ''}
   "hashtags": ["태그1", "태그2", "태그3", ...]
 }`;
 
-    const result = await model.generateContent(prompt);
-    let text = result.response.text().trim();
+    let text = (await generateWithRetry(prompt)).trim();
     if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
     else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
 
@@ -64,6 +60,6 @@ ${industry ? `- 업종: ${industry}` : ''}
       hashtags: Array.isArray(parsed.hashtags) ? parsed.hashtags.map((t: string) => t.replace(/^#/, '')) : [],
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: toKoreanError(e) }, { status: 500 });
   }
 }

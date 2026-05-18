@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { NextResponse } from 'next/server';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 export async function POST(request: Request) {
   try {
@@ -53,8 +50,7 @@ export async function POST(request: Request) {
 
 내용: ${inputContent}`;
 
-    const result = await model.generateContent(prompt);
-    let text = result.response.text();
+    let text = await generateWithRetry(prompt);
 
     try {
       if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
@@ -68,6 +64,6 @@ export async function POST(request: Request) {
       }, { status: 500 });
     }
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: toKoreanError(error) }, { status: 500 });
   }
 }

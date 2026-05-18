@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 export async function GET() {
   const { data, error } = await supabase
@@ -47,8 +44,7 @@ ${personaCtx}
 
 각 템플릿은 50-150자, 자연스럽고 진정성 있게, {이름} 같은 변수 자리표시자 활용 가능`;
 
-      const result = await model.generateContent(prompt);
-      let text = result.response.text();
+      let text = await generateWithRetry(prompt);
       if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
       else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
       const generated = JSON.parse(text);
@@ -65,7 +61,7 @@ ${personaCtx}
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ template: data });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: toKoreanError(err) }, { status: 500 });
   }
 }
 

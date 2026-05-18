@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { NextResponse } from 'next/server';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 export async function POST(request: Request) {
   try {
@@ -44,10 +41,9 @@ ${urlContent}
 3. 글자 수 제한: 각 장(슬라이드)마다 텍스트는 3문장 이내, 총 100자를 넘지 않도록 아주 간결하게 핵심만 작성할 것.
 4. 불필요한 설명 없이 즉시 사용할 수 있는 대본 텍스트만 반환할 것.`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const text = await generateWithRetry(prompt);
     return NextResponse.json({ text });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: toKoreanError(error) }, { status: 500 });
   }
 }

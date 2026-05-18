@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry } from '@/lib/gemini';
 import { NextRequest, NextResponse } from 'next/server';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,8 +36,8 @@ Topic → Query examples (use as guidance):
 
 Return ONLY the English query words, nothing else:`;
 
-      const result = await model.generateContent(prompt);
-      const query = result.response.text()
+      const text = await generateWithRetry(prompt);
+      const query = text
         .trim()
         .replace(/^["']|["']$/g, '')
         .split('\n')[0];

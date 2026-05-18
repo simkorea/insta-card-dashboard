@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { NextResponse } from 'next/server';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 export async function POST(request: Request) {
   try {
@@ -45,14 +42,13 @@ ${JSON.stringify(pageData, null, 2)}
   "message": "수정 내용을 한국어로 짧게 설명 (1-2문장)"
 }`;
 
-    const result = await model.generateContent(prompt);
-    let text = result.response.text();
+    let text = await generateWithRetry(prompt);
     if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
     else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
 
     const data = JSON.parse(text);
     return NextResponse.json(data);
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: toKoreanError(error) }, { status: 500 });
   }
 }

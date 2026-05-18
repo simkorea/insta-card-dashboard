@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 
 export async function POST(req: Request) {
   try {
@@ -25,13 +23,7 @@ export async function POST(req: Request) {
   ]
 }`;
 
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-      systemInstruction,
-    });
-
-    const result = await model.generateContent(prompt);
-    let rawContent = result.response.text().trim();
+    let rawContent = (await generateWithRetry(prompt, { systemInstruction })).trim();
 
     if (rawContent.startsWith('```json')) {
       rawContent = rawContent.replace(/^```json/, '').replace(/```$/, '').trim();
@@ -44,6 +36,6 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error('Error generating card news:', error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: toKoreanError(error) }, { status: 500 });
   }
 }

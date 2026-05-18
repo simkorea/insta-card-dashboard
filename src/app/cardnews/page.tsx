@@ -1,8 +1,9 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
-import { ImagePlus, ChevronLeft, Search, RefreshCw, MessageSquare, Settings, ChevronUp, ChevronDown, UploadCloud, Trash2, Pencil, Loader2, Calendar, Clock, Copy, Check, X, Send, RefreshCcw, Images, Sparkles, Wand2 } from 'lucide-react';
+import { ImagePlus, ChevronLeft, Search, RefreshCw, MessageSquare, Settings, ChevronUp, ChevronDown, UploadCloud, Trash2, Pencil, Loader2, Calendar, Clock, Copy, Check, X, Send, RefreshCcw, Images, Sparkles, Wand2, Globe, Lock, Download, Upload, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
+import { friendlyError } from '@/lib/errors';
 
 // ─── 슬라이드 렌더러 (카로셀 캡처용) ────────────────────────────────────────
 const CAPTURE_FONTS_URL =
@@ -308,6 +309,11 @@ export default function CardNewsPage() {
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
   const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
   const [deletingLocalId, setDeletingLocalId] = useState<string | null>(null);
+  const [togglingPublicId, setTogglingPublicId] = useState<string | null>(null);
+  const [communityTemplates, setCommunityTemplates] = useState<any[]>([]);
+  const [isLoadingCommunity, setIsLoadingCommunity] = useState(false);
+  const [usingCommunityId, setUsingCommunityId] = useState<string | null>(null);
+  const importFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     try {
@@ -355,6 +361,7 @@ export default function CardNewsPage() {
     if (activeTab === 'history') {
       fetchDesigns();
       fetchUserTemplates();
+      fetchCommunityTemplates();
     }
   }, [activeTab]);
 
@@ -366,12 +373,96 @@ export default function CardNewsPage() {
       if (!user) return;
       const { data } = await supabase
         .from('user_templates')
-        .select('id, name, category, pages, created_at')
+        .select('id, name, category, pages, is_public, use_count, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
       setUserTemplates(data || []);
     } catch { /* ignore */ } finally {
       setIsLoadingTemplates(false);
+    }
+  };
+
+  const fetchCommunityTemplates = async () => {
+    setIsLoadingCommunity(true);
+    try {
+      const supabase = createSupabaseBrowser();
+      const { data } = await supabase
+        .from('user_templates')
+        .select('id, name, category, pages, author_email, use_count, created_at')
+        .eq('is_public', true)
+        .order('use_count', { ascending: false })
+        .limit(20);
+      setCommunityTemplates(data || []);
+    } catch { /* ignore */ } finally {
+      setIsLoadingCommunity(false);
+    }
+  };
+
+  const handleTogglePublic = async (tpl: any) => {
+    setTogglingPublicId(tpl.id);
+    try {
+      const supabase = createSupabaseBrowser();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const newPublic = !tpl.is_public;
+      const updates: any = { is_public: newPublic };
+      if (newPublic) updates.author_email = user.email;
+      await supabase.from('user_templates').update(updates).eq('id', tpl.id).eq('user_id', user.id);
+      setUserTemplates(prev => prev.map(t => t.id === tpl.id ? { ...t, is_public: newPublic } : t));
+      if (newPublic) fetchCommunityTemplates();
+    } catch { /* ignore */ } finally {
+      setTogglingPublicId(null);
+    }
+  };
+
+  const handleExportTemplate = (tpl: any) => {
+    const exportData = { name: tpl.name, category: tpl.category, pages: tpl.pages, version: '1.0' };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${tpl.name.replace(/[^a-zA-Z0-9가-힣]/g, '_')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFromFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const json = JSON.parse(ev.target?.result as string);
+        if (!json.pages || !Array.isArray(json.pages)) { alert('올바른 템플릿 파일이 아닙니다.'); return; }
+        const supabase = createSupabaseBrowser();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { alert('로그인이 필요합니다.'); return; }
+        const name = json.name || `가져온 템플릿 ${new Date().toLocaleDateString('ko-KR')}`;
+        const category = json.category || '내 템플릿';
+        await supabase.from('user_templates').upsert(
+          { user_id: user.id, name, category, pages: json.pages, is_public: false },
+          { onConflict: 'user_id,name' }
+        );
+        await fetchUserTemplates();
+        alert(`"${name}" 템플릿을 가져왔습니다.`);
+      } catch { alert('파일을 읽는 중 오류가 발생했습니다.'); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleUseCommunityTemplate = async (tpl: any) => {
+    setUsingCommunityId(tpl.id);
+    try {
+      const supabase = createSupabaseBrowser();
+      await supabase.from('user_templates').update({ use_count: (tpl.use_count || 0) + 1 }).eq('id', tpl.id);
+      localStorage.setItem('cardnews_import_templates', JSON.stringify(tpl.pages));
+      localStorage.removeItem('editingDesign');
+      localStorage.removeItem('cardNewsData');
+      window.location.href = '/cardnews/editor';
+    } catch {
+      localStorage.setItem('cardnews_import_templates', JSON.stringify(tpl.pages));
+      window.location.href = '/cardnews/editor';
     }
   };
 
@@ -818,7 +909,7 @@ export default function CardNewsPage() {
       localStorage.setItem('cardnews_import_templates', JSON.stringify(data.pages));
       router.push('/cardnews/editor');
     } catch (e: any) {
-      alert('생성 실패: ' + e.message);
+      alert('생성 실패: ' + friendlyError(e));
     } finally {
       setSmartGenerating(false);
       setSmartStep('');
@@ -877,7 +968,7 @@ export default function CardNewsPage() {
         if (type !== 'text') setInputMode('text');
         setStep(2); // 기획안 확인 단계로 이동
       } else {
-        alert('생성에 실패했습니다: ' + (data.error || '알 수 없는 오류'));
+        alert('생성에 실패했습니다: ' + friendlyError(data.error || '알 수 없는 오류'));
       }
     } catch (e) {
       alert('생성 중 오류가 발생했습니다.');
@@ -1128,11 +1219,21 @@ export default function CardNewsPage() {
               <div className="flex items-center justify-between mb-4 mt-2">
                 <div>
                   <h2 className="text-lg font-bold text-gray-800">⭐ 내 템플릿</h2>
-                  <p className="text-sm text-gray-400 mt-0.5">에디터에서 "템플릿 저장"한 레이아웃 · 클릭하면 바로 편집 시작</p>
+                  <p className="text-sm text-gray-400 mt-0.5">에디터에서 "템플릿 저장"한 레이아웃 · 공유하면 커뮤니티에 공개됩니다</p>
                 </div>
-                <button onClick={fetchUserTemplates} disabled={isLoadingTemplates} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50">
-                  <RefreshCw size={12} className={isLoadingTemplates ? 'animate-spin' : ''} /> 새로고침
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* JSON 가져오기 */}
+                  <input ref={importFileRef} type="file" accept=".json" className="hidden" onChange={handleImportFromFile} />
+                  <button
+                    onClick={() => importFileRef.current?.click()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+                  >
+                    <Upload size={12} /> JSON 가져오기
+                  </button>
+                  <button onClick={fetchUserTemplates} disabled={isLoadingTemplates} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50">
+                    <RefreshCw size={12} className={isLoadingTemplates ? 'animate-spin' : ''} /> 새로고침
+                  </button>
+                </div>
               </div>
 
               {isLoadingTemplates ? (
@@ -1163,8 +1264,15 @@ export default function CardNewsPage() {
                           <div className="absolute top-2 left-2 bg-violet-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
                             {tpl.category}
                           </div>
-                          <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
-                            {tpl.pages?.length || 0}장
+                          <div className="absolute top-2 right-2 flex items-center gap-1">
+                            {tpl.is_public && (
+                              <span className="bg-emerald-500/90 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                                <Globe size={8} /> 공개
+                              </span>
+                            )}
+                            <span className="bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                              {tpl.pages?.length || 0}장
+                            </span>
                           </div>
                         </div>
                         <div className="p-3">
@@ -1177,6 +1285,24 @@ export default function CardNewsPage() {
                             >
                               사용하기
                             </button>
+                            {/* 공유 토글 */}
+                            <button
+                              onClick={() => handleTogglePublic(tpl)}
+                              disabled={togglingPublicId === tpl.id}
+                              title={tpl.is_public ? '커뮤니티 공유 중단' : '커뮤니티에 공유'}
+                              className={`w-7 h-7 rounded-lg border flex items-center justify-center disabled:opacity-40 transition-colors ${tpl.is_public ? 'border-emerald-200 text-emerald-500 bg-emerald-50 hover:bg-emerald-100' : 'border-gray-200 text-gray-400 hover:bg-gray-50'}`}
+                            >
+                              {togglingPublicId === tpl.id ? <Loader2 size={10} className="animate-spin" /> : tpl.is_public ? <Globe size={11} /> : <Lock size={11} />}
+                            </button>
+                            {/* JSON 내보내기 */}
+                            <button
+                              onClick={() => handleExportTemplate(tpl)}
+                              title="JSON으로 내보내기"
+                              className="w-7 h-7 rounded-lg border border-gray-200 text-gray-400 hover:bg-gray-50 flex items-center justify-center transition-colors"
+                            >
+                              <Download size={11} />
+                            </button>
+                            {/* 삭제 */}
                             <button
                               onClick={() => handleDeleteUserTemplate(tpl.id)}
                               disabled={deletingTemplateId === tpl.id}
@@ -1185,6 +1311,76 @@ export default function CardNewsPage() {
                               {deletingTemplateId === tpl.id ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
                             </button>
                           </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ─── 커뮤니티 템플릿 ──────────────────────────────────────── */}
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    <Users size={18} className="text-emerald-500" /> 커뮤니티 템플릿
+                  </h2>
+                  <p className="text-sm text-gray-400 mt-0.5">다른 사용자가 공유한 템플릿 · 클릭하면 바로 편집 가능</p>
+                </div>
+                <button onClick={fetchCommunityTemplates} disabled={isLoadingCommunity} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50">
+                  <RefreshCw size={12} className={isLoadingCommunity ? 'animate-spin' : ''} /> 새로고침
+                </button>
+              </div>
+
+              {isLoadingCommunity ? (
+                <div className="flex items-center justify-center py-10"><Loader2 size={20} className="animate-spin text-gray-300" /></div>
+              ) : communityTemplates.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-gray-400 border-2 border-dashed border-emerald-100 rounded-2xl bg-emerald-50/20">
+                  <Users size={28} className="text-emerald-200 mb-2" />
+                  <p className="text-sm font-semibold text-gray-500">아직 공유된 템플릿이 없습니다</p>
+                  <p className="text-[12px] text-gray-400 mt-1">내 템플릿의 <Globe size={10} className="inline" /> 버튼을 눌러 커뮤니티에 공유해보세요</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {communityTemplates.map(tpl => {
+                    const firstPage = tpl.pages?.[0] || null;
+                    return (
+                      <div key={tpl.id} className="bg-white border border-emerald-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
+                        <div
+                          className="relative bg-gray-900 overflow-hidden cursor-pointer"
+                          style={{ height: 140 }}
+                          onClick={() => handleUseCommunityTemplate(tpl)}
+                        >
+                          <MiniCardPreview page={firstPage} />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 text-gray-900 text-xs font-bold px-3 py-1.5 rounded-full shadow">
+                              {usingCommunityId === tpl.id ? '불러오는 중...' : '편집 시작'}
+                            </div>
+                          </div>
+                          <div className="absolute top-2 left-2 bg-emerald-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            {tpl.category}
+                          </div>
+                          <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                            {tpl.pages?.length || 0}장
+                          </div>
+                        </div>
+                        <div className="p-3">
+                          <p className="font-bold text-xs text-gray-800 truncate mb-0.5">{tpl.name}</p>
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[10px] text-gray-400 truncate">{tpl.author_email?.split('@')[0] || '익명'}</p>
+                            {(tpl.use_count || 0) > 0 && (
+                              <span className="text-[10px] text-gray-400">{tpl.use_count}회 사용</span>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => handleUseCommunityTemplate(tpl)}
+                            disabled={usingCommunityId === tpl.id}
+                            className="w-full py-1.5 text-[11px] font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                          >
+                            {usingCommunityId === tpl.id ? <Loader2 size={10} className="animate-spin" /> : null}
+                            이 템플릿 사용하기
+                          </button>
                         </div>
                       </div>
                     );
@@ -3015,7 +3211,7 @@ function HistoryDownloadModal({
       }
     } catch (e: any) {
       setProgress('');
-      alert('다운로드 실패: ' + e.message);
+      alert('다운로드 실패: ' + friendlyError(e));
     }
   };
 

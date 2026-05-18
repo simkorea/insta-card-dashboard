@@ -12,6 +12,7 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
+import { friendlyError } from '@/lib/errors';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TextStyle {
@@ -689,6 +690,7 @@ function ImagePanel({
   onUpdateBrightness,
   onUpdateBrightnessFilter,
   onUpdateOverlayOpacity,
+  onApplySettingsAll,
 }: {
   layer: CanvasLayer;
   currentImageUrl?: string;
@@ -705,6 +707,7 @@ function ImagePanel({
   onUpdateBrightness?: (brightness: number) => void;
   onUpdateBrightnessFilter?: (v: number) => void;
   onUpdateOverlayOpacity?: (v: number) => void;
+  onApplySettingsAll?: (settings: { bgBrightness: number; bgBrightnessFilter: number; overlayOpacity: number }) => void;
 }) {
   const [focusDot, setFocusDot] = useState(initialPosition ?? { x: 50, y: 50 });
   // zoom 0-100 → bgScale 1.0-2.5
@@ -741,10 +744,10 @@ function ImagePanel({
         body: JSON.stringify({ prompt: aiPrompt, ratio: aiRatio, count: aiCount }),
       });
       const data = await res.json();
-      if (data.error) { setAiError(data.error); return; }
+      if (data.error) { setAiError(friendlyError(data.error)); return; }
       setAiGeneratedUrls(data.urls || []);
     } catch (e: any) {
-      setAiError(e.message);
+      setAiError(friendlyError(e));
     } finally {
       setAiGenerating(false);
     }
@@ -1125,6 +1128,17 @@ function ImagePanel({
               ))}
             </div>
           </div>
+
+          {/* 모든 슬라이드에 설정 일괄 적용 */}
+          {onApplySettingsAll && (
+            <button
+              onClick={() => onApplySettingsAll({ bgBrightness: brightness, bgBrightnessFilter: brightnessFilter, overlayOpacity })}
+              className="w-full py-2 bg-amber-50 border border-amber-300 text-amber-700 rounded-xl text-xs font-bold hover:bg-amber-100 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              이 밝기·오버레이를 모든 슬라이드에 적용
+            </button>
+          )}
 
           {/* AI 추천 이미지 (imageKeyword가 있을 때만 표시) */}
           {(aiRecommendPhotos.length > 0 || aiRecommendLoading) && (
@@ -1895,10 +1909,11 @@ const GOOGLE_FONTS_URL =
   '&display=swap';
 
 // ─── Text Panel ───────────────────────────────────────────────────────────────
-function TextPanel({ layer, onDeselect, onUpdate }: {
+function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll }: {
   layer: CanvasLayer;
   onDeselect: () => void;
   onUpdate: (content: string, style: TextStyle) => void;
+  onApplyStyleAll?: (layerId: number, style: TextStyle) => void;
 }) {
   const [fontSize, setFontSize] = useState(layer.style?.fontSize ?? 38);
   const [fontWeight, setFontWeight] = useState(WEIGHT_LABEL[layer.style?.fontWeight ?? '900'] ?? 'B');
@@ -2050,20 +2065,40 @@ function TextPanel({ layer, onDeselect, onUpdate }: {
           </div>
         </div>
 
-        <button
-          onClick={() => onUpdate(textContent, {
-            fontSize,
-            fontWeight: WEIGHT_MAP[fontWeight] ?? '900',
-            fontFamily,
-            color: selectedColor,
-            letterSpacing,
-            lineHeight,
-            align,
-          })}
-          className="w-full py-2.5 bg-primary-600 text-white rounded-xl text-sm font-bold hover:bg-primary-700 active:scale-[0.98] transition-all shadow-sm"
-        >
-          변경 적용
-        </button>
+        {/* 적용 버튼 영역 */}
+        <div className="space-y-2">
+          <button
+            onClick={() => onUpdate(textContent, {
+              fontSize,
+              fontWeight: WEIGHT_MAP[fontWeight] ?? '900',
+              fontFamily,
+              color: selectedColor,
+              letterSpacing,
+              lineHeight,
+              align,
+            })}
+            className="w-full py-2.5 bg-primary-600 text-white rounded-xl text-sm font-bold hover:bg-primary-700 active:scale-[0.98] transition-all shadow-sm"
+          >
+            변경 적용
+          </button>
+          {onApplyStyleAll && (
+            <button
+              onClick={() => onApplyStyleAll(layer.id, {
+                fontSize,
+                fontWeight: WEIGHT_MAP[fontWeight] ?? '900',
+                fontFamily,
+                color: selectedColor,
+                letterSpacing,
+                lineHeight,
+                align,
+              })}
+              className="w-full py-2.5 bg-amber-50 border border-amber-300 text-amber-700 rounded-xl text-sm font-bold hover:bg-amber-100 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              모든 슬라이드에 스타일 적용
+            </button>
+          )}
+        </div>
 
         <div className="border-t border-gray-100 pt-3">
           <p className="text-[11px] font-semibold text-gray-500 mb-2">요소 추가</p>
@@ -2301,10 +2336,30 @@ export default function EditorPage() {
   const [mobilePanelExpanded, setMobilePanelExpanded] = useState(false);
   const [aiMessages, setAiMessages] = useState<AIChatMessage[]>([]);
 
+  // ── 자동 저장 ──
+  const [autoSaveTime, setAutoSaveTime] = useState<string | null>(null);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── 슬라이드 드래그 순서 변경 ──
+  const [dragThumbId, setDragThumbId] = useState<number | null>(null);
+  const [dragOverThumbId, setDragOverThumbId] = useState<number | null>(null);
+
+  // ── 요소 복사·붙여넣기 ──
+  const copiedElementRef = useRef<CanvasElement | null>(null);
+  const [clipboardToast, setClipboardToast] = useState(false);
+
+  // ── 전체 보기 모드 ──
+  const [showGridView, setShowGridView] = useState(false);
+
+  // ── 정렬 가이드 ──
+  const [guideLines, setGuideLines] = useState<{ x?: number; y?: number }[]>([]);
+
   // ── Mutable page data state ──
   const [pagesData, setPagesData] = useState<PageData[]>(PAGES_DATA);
   const historyRef = useRef<PageData[][]>([PAGES_DATA]);
   const historyIdxRef = useRef(0);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
   const [brandKit, setBrandKit] = useState<{ logo: string; color: string; name: string } | null>(null);
 
   useEffect(() => {
@@ -2395,10 +2450,20 @@ export default function EditorPage() {
     }
   }, []);
 
+  const syncUndoRedo = useCallback(() => {
+    setCanUndo(historyIdxRef.current > 0);
+    setCanRedo(historyIdxRef.current < historyRef.current.length - 1);
+  }, []);
+
   const pushHistory = useCallback((next: PageData[]) => {
     historyRef.current = historyRef.current.slice(0, historyIdxRef.current + 1);
     historyRef.current.push(next);
+    if (historyRef.current.length > 50) {
+      historyRef.current = historyRef.current.slice(historyRef.current.length - 50);
+    }
     historyIdxRef.current = historyRef.current.length - 1;
+    setCanUndo(true);
+    setCanRedo(false);
   }, []);
 
   // layerId 1=title, 2=subtitle, 3+=bullets[layerId-3] / style은 선택 적용
@@ -2424,6 +2489,8 @@ export default function EditorPage() {
     if (historyIdxRef.current > 0) {
       historyIdxRef.current--;
       setPagesData(historyRef.current[historyIdxRef.current]);
+      setCanUndo(historyIdxRef.current > 0);
+      setCanRedo(true);
     }
   }, []);
 
@@ -2431,6 +2498,8 @@ export default function EditorPage() {
     if (historyIdxRef.current < historyRef.current.length - 1) {
       historyIdxRef.current++;
       setPagesData(historyRef.current[historyIdxRef.current]);
+      setCanUndo(true);
+      setCanRedo(historyIdxRef.current < historyRef.current.length - 1);
     }
   }, []);
 
@@ -2465,6 +2534,107 @@ export default function EditorPage() {
     });
   }, [currentPage, pushHistory]);
 
+  // ── 일괄 편집 ───────────────────────────────────────────────────────────────
+  // 텍스트 스타일을 모든 페이지의 동일 레이어에 적용 (내용은 유지)
+  const applyStyleToAllPages = useCallback((layerId: number, style: TextStyle) => {
+    setPagesData(prev => {
+      const next = prev.map(p => {
+        if (layerId === 1) return { ...p, titleStyle: { ...(p.titleStyle || {}), ...style } };
+        if (layerId === 2) return { ...p, subtitleStyle: { ...(p.subtitleStyle || {}), ...style } };
+        if (layerId >= 3) return { ...p, bulletStyle: { ...(p.bulletStyle || {}), ...style } };
+        return p;
+      });
+      pushHistory(next);
+      return next;
+    });
+  }, [pushHistory]);
+
+  // 이미지 설정(밝기·오버레이)을 모든 페이지에 적용
+  const applyImageSettingsToAllPages = useCallback((settings: { bgBrightness: number; bgBrightnessFilter: number; overlayOpacity: number }) => {
+    setPagesData(prev => {
+      const next = prev.map(p => ({ ...p, ...settings }));
+      pushHistory(next);
+      return next;
+    });
+  }, [pushHistory]);
+
+  // ── 슬라이드 관리 ───────────────────────────────────────────────────────────
+  const duplicatePage = useCallback((pageId: number) => {
+    setPagesData(prev => {
+      const idx = prev.findIndex(p => p.id === pageId);
+      if (idx === -1) return prev;
+      const maxId = Math.max(...prev.map(p => p.id));
+      const clone = { ...prev[idx], id: maxId + 1 };
+      const next = [...prev.slice(0, idx + 1), clone, ...prev.slice(idx + 1)];
+      pushHistory(next);
+      return next;
+    });
+  }, [pushHistory]);
+
+  const deletePage = useCallback((pageId: number) => {
+    setPagesData(prev => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter(p => p.id !== pageId);
+      pushHistory(next);
+      return next;
+    });
+    setCurrentPage(p => {
+      const remaining = pagesData.filter(pg => pg.id !== pageId);
+      return Math.min(p, remaining.length || 1);
+    });
+  }, [pushHistory, pagesData]);
+
+  // ── 슬라이드 드래그 순서 변경 ─────────────────────────────────────────────
+  const handleThumbDragStart = useCallback((e: React.DragEvent, pageId: number) => {
+    e.dataTransfer.effectAllowed = 'move';
+    setDragThumbId(pageId);
+  }, []);
+
+  const handleThumbDragOver = useCallback((e: React.DragEvent, pageId: number) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverThumbId(pageId);
+  }, []);
+
+  const handleThumbDrop = useCallback((e: React.DragEvent, targetId: number) => {
+    e.preventDefault();
+    if (dragThumbId === null || dragThumbId === targetId) { setDragThumbId(null); setDragOverThumbId(null); return; }
+    setPagesData(prev => {
+      const fromIdx = prev.findIndex(p => p.id === dragThumbId);
+      const toIdx = prev.findIndex(p => p.id === targetId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      pushHistory(next);
+      return next;
+    });
+    setDragThumbId(null);
+    setDragOverThumbId(null);
+  }, [dragThumbId, pushHistory]);
+
+  const addBlankPage = useCallback(() => {
+    setPagesData(prev => {
+      const maxId = Math.max(...prev.map(p => p.id));
+      const last = prev[prev.length - 1];
+      const blank: PageData = {
+        id: maxId + 1,
+        bgImage: last.bgImage,
+        bgLabel: '새 페이지',
+        overlay: last.overlay,
+        title: '새 제목',
+        subtitle: '',
+        layout: 'center',
+        titleStyle: last.titleStyle,
+        subtitleStyle: last.subtitleStyle,
+        elements: [],
+      };
+      const next = [...prev, blank];
+      pushHistory(next);
+      return next;
+    });
+  }, [pushHistory]);
+
   const deleteElement = useCallback((id: string) => {
     setPagesData(prev => {
       const next = prev.map(p => p.id !== currentPage ? p : {
@@ -2488,12 +2658,25 @@ export default function EditorPage() {
     setDragPos({ x: elem.x, y: elem.y });
   };
 
+  // 정렬 가이드 스냅 포인트 (%, 3% 이내면 스냅)
+  const SNAP_POINTS = [25, 33.33, 50, 66.67, 75];
+  const SNAP_THRESHOLD = 3;
+  const snapToGuide = (val: number): { snapped: number; guides: number[] } => {
+    for (const pt of SNAP_POINTS) {
+      if (Math.abs(val - pt) < SNAP_THRESHOLD) return { snapped: pt, guides: [pt] };
+    }
+    return { snapped: val, guides: [] };
+  };
+
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
     if (!draggingElemId || !dragStartRef.current) return;
     const { startX, startY, origX, origY, cw, ch } = dragStartRef.current;
-    const newX = Math.max(5, Math.min(95, origX + ((e.clientX - startX) / cw) * 100));
-    const newY = Math.max(5, Math.min(95, origY + ((e.clientY - startY) / ch) * 100));
+    const rawX = Math.max(5, Math.min(95, origX + ((e.clientX - startX) / cw) * 100));
+    const rawY = Math.max(5, Math.min(95, origY + ((e.clientY - startY) / ch) * 100));
+    const { snapped: newX, guides: xGuides } = snapToGuide(rawX);
+    const { snapped: newY, guides: yGuides } = snapToGuide(rawY);
     setDragPos({ x: newX, y: newY });
+    setGuideLines([...xGuides.map(g => ({ x: g })), ...yGuides.map(g => ({ y: g }))]);
   };
 
   const handleCanvasMouseUp = () => {
@@ -2502,6 +2685,7 @@ export default function EditorPage() {
     }
     setDraggingElemId(null);
     setDragPos(null);
+    setGuideLines([]);
     dragStartRef.current = null;
   };
 
@@ -2630,16 +2814,60 @@ export default function EditorPage() {
   };
 
   // 키보드 단축키: Ctrl+Z / Cmd+Z (실행취소), Ctrl+Y / Cmd+Shift+Z (다시실행)
+  // textarea/input 포커스 시에는 브라우저 기본 동작 허용
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey;
       if (!ctrl) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
+
+  // ── 자동 저장 (30초마다) ────────────────────────────────────────────────────
+  useEffect(() => {
+    autoSaveTimerRef.current = setInterval(() => {
+      try {
+        const merged = pagesData.map(pg => ({ ...pg, bgImage: pageImages[pg.id] ?? pg.bgImage }));
+        localStorage.setItem('cardnews_autosave', JSON.stringify({ pages: merged, savedAt: Date.now() }));
+        const t = new Date();
+        setAutoSaveTime(`${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}:${String(t.getSeconds()).padStart(2,'0')}`);
+      } catch { /* ignore */ }
+    }, 30000);
+    return () => { if (autoSaveTimerRef.current) clearInterval(autoSaveTimerRef.current); };
+  }, [pagesData, pageImages]);
+
+  // ── 요소 복사(Ctrl+C) / 붙여넣기(Ctrl+V) ───────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+      if (!ctrl) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      if (e.key === 'c' && selectedElementId) {
+        const elem = (pagesData.find(p => p.id === currentPage)?.elements || []).find(el => el.id === selectedElementId);
+        if (elem) { copiedElementRef.current = elem; setClipboardToast(true); setTimeout(() => setClipboardToast(false), 1500); }
+      }
+      if (e.key === 'v' && copiedElementRef.current) {
+        e.preventDefault();
+        const src = copiedElementRef.current;
+        const newElem: CanvasElement = { ...src, id: `el_${Date.now()}`, x: Math.min(95, src.x + 5), y: Math.min(95, src.y + 5) };
+        setPagesData(prev => {
+          const next = prev.map(p => p.id !== currentPage ? p : { ...p, elements: [...(p.elements || []), newElem] });
+          pushHistory(next);
+          return next;
+        });
+        setSelectedElementId(newElem.id);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedElementId, currentPage, pagesData, pushHistory]);
 
   useEffect(() => {
     const el = canvasWrapRef.current;
@@ -2658,6 +2886,61 @@ export default function EditorPage() {
 
   return (
     <div className="flex flex-col h-screen bg-white" onClick={handleDeselect}>
+      {/* 클립보드 토스트 */}
+      {clipboardToast && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999] bg-gray-900 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-xl flex items-center gap-2 pointer-events-none">
+          <Copy size={12} /> 요소 복사됨 — Ctrl+V로 붙여넣기
+        </div>
+      )}
+
+      {/* 전체 보기 모달 */}
+      {showGridView && (
+        <div className="fixed inset-0 z-[9998] bg-black/80 flex flex-col" onClick={() => setShowGridView(false)}>
+          <div className="flex items-center justify-between px-6 py-4 bg-gray-900/80 border-b border-white/10">
+            <h2 className="text-white font-bold text-sm">전체 슬라이드 보기</h2>
+            <div className="flex items-center gap-3">
+              <span className="text-gray-400 text-xs">클릭하면 해당 슬라이드로 이동</span>
+              <button onClick={() => setShowGridView(false)} className="p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white"><X size={16} /></button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 max-w-6xl mx-auto">
+              {pagesData.map((pg, idx) => (
+                <div
+                  key={pg.id}
+                  onClick={() => { setCurrentPage(pg.id); setShowGridView(false); }}
+                  className={`relative rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-105 hover:shadow-2xl ${currentPage === pg.id ? 'ring-3 ring-primary-400 scale-105' : 'ring-1 ring-white/20'}`}
+                  style={{ aspectRatio: '4/5' }}
+                >
+                  <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=300')} alt="" className="w-full h-full object-cover" />
+                  <div className="absolute inset-0" style={{ background: pg.overlay }} />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
+                    {pg.title && <p className="text-white text-[10px] font-bold leading-tight drop-shadow line-clamp-3">{pg.title}</p>}
+                  </div>
+                  <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 bg-black/60 text-white text-[9px] font-bold px-2 py-0.5 rounded-full">{idx + 1}</div>
+                  {currentPage === pg.id && (
+                    <div className="absolute top-1.5 right-1.5 w-4 h-4 bg-primary-500 rounded-full flex items-center justify-center">
+                      <Check size={10} className="text-white" />
+                    </div>
+                  )}
+                </div>
+              ))}
+              {/* 슬라이드 추가 */}
+              <div
+                onClick={() => { addBlankPage(); setShowGridView(false); }}
+                className="relative rounded-xl border-2 border-dashed border-white/20 flex items-center justify-center cursor-pointer hover:border-primary-400 hover:bg-white/5 transition-all"
+                style={{ aspectRatio: '4/5' }}
+              >
+                <div className="text-center">
+                  <Plus size={24} className="text-white/40 mx-auto mb-1" />
+                  <span className="text-white/40 text-[10px]">슬라이드 추가</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 전체화면 편집 모드 */}
       {isFullscreenEdit && (
         <FullscreenEditor
@@ -2754,9 +3037,38 @@ export default function EditorPage() {
               <span className="font-semibold px-1 text-xs tabular-nums">{currentPage} / {totalPages}</span>
               <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} className="p-1.5 hover:bg-gray-100 rounded-lg"><ChevronRight size={14} /></button>
             </div>
+            {/* 전체 보기 버튼 */}
+            <button
+              onClick={() => setShowGridView(true)}
+              title="전체 슬라이드 보기"
+              className="hidden md:flex items-center gap-1 px-2 py-1.5 text-[11px] font-semibold text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+              <span className="hidden lg:inline">전체 보기</span>
+            </button>
+            {/* 자동 저장 표시 */}
+            {autoSaveTime && (
+              <span className="hidden md:flex items-center gap-1 text-[10px] text-gray-400">
+                <Check size={10} className="text-emerald-400" /> {autoSaveTime} 저장됨
+              </span>
+            )}
             <div className="flex items-center gap-0.5 bg-gray-100 p-1 rounded-lg">
-              <button onClick={undo} title="실행취소 (Ctrl+Z)" className="p-1.5 hover:bg-white rounded text-gray-400"><Undo size={14} /></button>
-              <button onClick={redo} title="다시실행 (Ctrl+Y)" className="p-1.5 hover:bg-white rounded text-gray-400"><Redo size={14} /></button>
+              <button
+                onClick={undo}
+                disabled={!canUndo}
+                title="되돌리기 (Ctrl+Z)"
+                className={`p-1.5 rounded transition-colors ${canUndo ? 'hover:bg-white text-gray-600 hover:text-gray-900 hover:shadow-sm' : 'text-gray-300 cursor-not-allowed'}`}
+              >
+                <Undo size={14} />
+              </button>
+              <button
+                onClick={redo}
+                disabled={!canRedo}
+                title="다시실행 (Ctrl+Y)"
+                className={`p-1.5 rounded transition-colors ${canRedo ? 'hover:bg-white text-gray-600 hover:text-gray-900 hover:shadow-sm' : 'text-gray-300 cursor-not-allowed'}`}
+              >
+                <Redo size={14} />
+              </button>
             </div>
           </div>
           {/* Right */}
@@ -2879,6 +3191,12 @@ export default function EditorPage() {
               onMouseUp={handleCanvasMouseUp}
               onMouseLeave={handleCanvasMouseUp}
             >
+              {/* 정렬 가이드 라인 */}
+              {guideLines.map((g, i) => (
+                g.x !== undefined
+                  ? <div key={i} className="absolute top-0 bottom-0 pointer-events-none z-50" style={{ left: `${g.x}%`, width: 1, background: 'rgba(99,102,241,0.8)' }} />
+                  : <div key={i} className="absolute left-0 right-0 pointer-events-none z-50" style={{ top: `${g.y}%`, height: 1, background: 'rgba(99,102,241,0.8)' }} />
+              ))}
               {/* Background image layer */}
               <div
                 onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[0]); }}
@@ -3099,20 +3417,44 @@ export default function EditorPage() {
             </div>
           </div>
 
-          {/* Thumbnails — 페이지별 다른 이미지 */}
+          {/* Thumbnails — 드래그로 순서 변경 가능 */}
           <div className="h-20 md:h-28 bg-white border-t border-gray-200 flex items-center gap-2 md:gap-3 shrink-0 px-3 md:px-4 z-10 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-            {pagesData.map(pg => (
+            {pagesData.map((pg, idx) => (
               <div
                 key={pg.id}
-                onClick={e => { e.stopPropagation(); handlePageChange(pg.id); }}
-                className={`relative shrink-0 w-10 h-[52px] md:w-14 md:h-[72px] rounded-lg border-2 overflow-hidden cursor-pointer transition-all ${currentPage === pg.id ? 'border-primary-600 shadow-md ring-2 ring-primary-100' : 'border-gray-200 hover:border-gray-400'}`}
+                className="relative shrink-0 group"
+                draggable
+                onDragStart={e => handleThumbDragStart(e, pg.id)}
+                onDragOver={e => handleThumbDragOver(e, pg.id)}
+                onDrop={e => handleThumbDrop(e, pg.id)}
+                onDragEnd={() => { setDragThumbId(null); setDragOverThumbId(null); }}
               >
-                <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=120')} alt={`${pg.id}p`} className="w-full h-full object-cover" loading="lazy" />
-                <div className="absolute inset-0" style={{ background: pg.overlay }} />
-                <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-4 bg-black/60 rounded-full flex items-center justify-center text-[9px] text-white font-bold">{pg.id}</div>
+                <div
+                  onClick={e => { e.stopPropagation(); handlePageChange(pg.id); }}
+                  className={`relative w-10 h-[52px] md:w-14 md:h-[72px] rounded-lg border-2 overflow-hidden cursor-grab active:cursor-grabbing transition-all ${
+                    dragOverThumbId === pg.id ? 'border-primary-400 scale-105 ring-2 ring-primary-200' :
+                    dragThumbId === pg.id ? 'opacity-40 border-gray-300' :
+                    currentPage === pg.id ? 'border-primary-600 shadow-md ring-2 ring-primary-100' : 'border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=120')} alt={`${pg.id}p`} className="w-full h-full object-cover" loading="lazy" />
+                  <div className="absolute inset-0" style={{ background: pg.overlay }} />
+                  <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-4 bg-black/60 rounded-full flex items-center justify-center text-[9px] text-white font-bold">{idx + 1}</div>
+                </div>
+                {/* hover 액션: 복제 / 삭제 */}
+                <div className="absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:flex items-center gap-0.5 bg-gray-800 rounded-lg px-1 py-0.5 z-20 shadow-lg">
+                  <button onClick={e => { e.stopPropagation(); duplicatePage(pg.id); }} title="슬라이드 복제" className="p-1 text-white hover:text-amber-300 transition-colors"><Copy size={11} /></button>
+                  {pagesData.length > 1 && (
+                    <button onClick={e => { e.stopPropagation(); deletePage(pg.id); }} title="슬라이드 삭제" className="p-1 text-white hover:text-red-400 transition-colors"><Trash2 size={11} /></button>
+                  )}
+                </div>
               </div>
             ))}
-            <button className="shrink-0 w-10 h-[52px] md:w-14 md:h-[72px] rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 transition-colors">
+            <button
+              onClick={e => { e.stopPropagation(); addBlankPage(); }}
+              title="슬라이드 추가"
+              className="shrink-0 w-10 h-[52px] md:w-14 md:h-[72px] rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50 transition-colors"
+            >
               <Plus size={16} />
             </button>
           </div>
@@ -3167,6 +3509,7 @@ export default function EditorPage() {
                   onUpdateBrightness={b => updatePageData(currentPage, { bgBrightness: b })}
                   onUpdateBrightnessFilter={v => updatePageData(currentPage, { bgBrightnessFilter: v })}
                   onUpdateOverlayOpacity={v => updatePageData(currentPage, { overlayOpacity: v })}
+                  onApplySettingsAll={applyImageSettingsToAllPages}
                 />
               </div>
             )}
@@ -3176,6 +3519,7 @@ export default function EditorPage() {
                   layer={selectedLayer}
                   onDeselect={handleDeselect}
                   onUpdate={(content, style) => updatePageField(currentPage, selectedLayer.id, content, style)}
+                  onApplyStyleAll={applyStyleToAllPages}
                 />
               </div>
             )}
@@ -3187,6 +3531,26 @@ export default function EditorPage() {
       <div className="md:hidden shrink-0 bg-white border-t border-gray-200 z-30" onClick={e => e.stopPropagation()}>
         {/* 탭 바 */}
         <div className="flex border-b border-gray-100">
+          {/* 되돌리기 / 다시실행 */}
+          <button
+            onClick={undo}
+            disabled={!canUndo}
+            title="되돌리기"
+            className={`flex flex-col items-center justify-center gap-0.5 px-3 py-2.5 border-b-2 border-transparent text-[10px] font-bold transition-colors ${canUndo ? 'text-gray-600 active:bg-gray-100' : 'text-gray-300 cursor-not-allowed'}`}
+          >
+            <Undo size={15} />
+            <span>되돌리기</span>
+          </button>
+          <button
+            onClick={redo}
+            disabled={!canRedo}
+            title="다시실행"
+            className={`flex flex-col items-center justify-center gap-0.5 px-3 py-2.5 border-b-2 border-transparent text-[10px] font-bold transition-colors ${canRedo ? 'text-gray-600 active:bg-gray-100' : 'text-gray-300 cursor-not-allowed'}`}
+          >
+            <Redo size={15} />
+            <span>다시실행</span>
+          </button>
+          <div className="w-px bg-gray-100 my-1.5" />
           {([
             { key: 'edit', label: '편집', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" /></svg> },
             { key: 'element', label: '요소', icon: <ShapesIcon size={14} /> },
@@ -3253,6 +3617,7 @@ export default function EditorPage() {
                 onUpdateBrightness={b => updatePageData(currentPage, { bgBrightness: b })}
                 onUpdateBrightnessFilter={v => updatePageData(currentPage, { bgBrightnessFilter: v })}
                 onUpdateOverlayOpacity={v => updatePageData(currentPage, { overlayOpacity: v })}
+                onApplySettingsAll={applyImageSettingsToAllPages}
               />
             )}
             {mobileActiveTab === 'edit' && selectedLayer?.type === 'text' && (
@@ -3260,6 +3625,7 @@ export default function EditorPage() {
                 layer={selectedLayer}
                 onDeselect={handleDeselect}
                 onUpdate={(content, style) => updatePageField(currentPage, selectedLayer.id, content, style)}
+                onApplyStyleAll={applyStyleToAllPages}
               />
             )}
           </div>
@@ -3435,10 +3801,17 @@ function FullscreenEditor({
   const [draggingElemId, setDraggingElemId] = useState<string | null>(null);
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
   const [editingElemId, setEditingElemId] = useState<string | null>(null);
+  const [fsGuideLines, setFsGuideLines] = useState<{ x?: number; y?: number }[]>([]);
   const fsDragStartRef = useRef<{ startX: number; startY: number; origX: number; origY: number; cw: number; ch: number } | null>(null);
   const fsCanvasRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [canvasW, setCanvasW] = useState(500);
+
+  const fsSnapToGuide = (val: number): { snapped: number; guides: number[] } => {
+    const SNAP_POINTS = [25, 33.33, 50, 66.67, 75];
+    for (const pt of SNAP_POINTS) { if (Math.abs(val - pt) < 3) return { snapped: pt, guides: [pt] }; }
+    return { snapped: val, guides: [] };
+  };
 
   const pageData = pagesData[fsPage - 1];
   const currentBgImage = pageImages[fsPage] ?? pageData.bgImage;
@@ -3504,12 +3877,18 @@ function FullscreenEditor({
   const handleFSCanvasMouseMove = (e: React.MouseEvent) => {
     if (!draggingElemId || !fsDragStartRef.current) return;
     const { startX, startY, origX, origY, cw, ch } = fsDragStartRef.current;
-    setDragPos({ x: Math.max(5, Math.min(95, origX + ((e.clientX - startX) / cw) * 100)), y: Math.max(5, Math.min(95, origY + ((e.clientY - startY) / ch) * 100)) });
+    const rawX = Math.max(5, Math.min(95, origX + ((e.clientX - startX) / cw) * 100));
+    const rawY = Math.max(5, Math.min(95, origY + ((e.clientY - startY) / ch) * 100));
+    const { snapped: newX, guides: xGuides } = fsSnapToGuide(rawX);
+    const { snapped: newY, guides: yGuides } = fsSnapToGuide(rawY);
+    setDragPos({ x: newX, y: newY });
+    setFsGuideLines([...xGuides.map((g: number) => ({ x: g })), ...yGuides.map((g: number) => ({ y: g }))]);
   };
   const handleFSCanvasMouseUp = () => {
     if (draggingElemId && dragPos) fsUpdateElement(draggingElemId, dragPos);
     setDraggingElemId(null);
     setDragPos(null);
+    setFsGuideLines([]);
     fsDragStartRef.current = null;
   };
 
@@ -3578,6 +3957,12 @@ function FullscreenEditor({
               onMouseUp={handleFSCanvasMouseUp}
               onMouseLeave={handleFSCanvasMouseUp}
             >
+              {/* 정렬 가이드 라인 */}
+              {fsGuideLines.map((g, i) => (
+                g.x !== undefined
+                  ? <div key={i} className="absolute top-0 bottom-0 pointer-events-none z-50" style={{ left: `${g.x}%`, width: 1, background: 'rgba(99,102,241,0.8)' }} />
+                  : <div key={i} className="absolute left-0 right-0 pointer-events-none z-50" style={{ top: `${g.y}%`, height: 1, background: 'rgba(99,102,241,0.8)' }} />
+              ))}
               {/* Background image */}
               <div
                 onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[0]); }}
@@ -4329,7 +4714,7 @@ function DownloadModal({
       }
     } catch (e: any) {
       setProgress('');
-      alert('다운로드 실패: ' + e.message);
+      alert('다운로드 실패: ' + friendlyError(e));
     }
   };
 
@@ -4554,7 +4939,7 @@ function SnsUploadModal({
     } catch (e: any) {
       setProgress('');
       setStatus('error');
-      setResults({ _error: { success: false, error: e.message } });
+      setResults({ _error: { success: false, error: friendlyError(e) } });
     }
   };
 
@@ -4745,7 +5130,7 @@ function CaptionModal({
       setHashtags(data.hashtags || []);
       onCaptionGenerated?.(data.caption || '', data.hashtags || []);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '생성 실패');
+      setError(e instanceof Error ? friendlyError(e) : '생성 실패');
     }
     setLoading(false);
   };

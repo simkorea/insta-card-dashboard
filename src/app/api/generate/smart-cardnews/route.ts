@@ -1,8 +1,5 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { NextResponse } from 'next/server';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
-const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
 async function fetchPexelsImage(keyword: string): Promise<string> {
   const apiKey = process.env.PEXELS_API_KEY;
@@ -75,8 +72,7 @@ JSON 배열만 응답하세요 (코드블록 없이):
   }
 ]`;
 
-    const result = await model.generateContent(prompt);
-    let text = result.response.text().trim();
+    let text = (await generateWithRetry(prompt)).trim();
     if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
     else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
 
@@ -106,6 +102,6 @@ JSON 배열만 응답하세요 (코드블록 없이):
 
     return NextResponse.json({ pages, keyword, category, slideCount: pages.length });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: toKoreanError(e) }, { status: 500 });
   }
 }
