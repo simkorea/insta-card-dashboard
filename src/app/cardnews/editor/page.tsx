@@ -731,6 +731,7 @@ function ImagePanel({
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiGeneratedUrls, setAiGeneratedUrls] = useState<string[]>([]);
   const [aiError, setAiError] = useState('');
+  const [applyAllDone, setApplyAllDone] = useState(false);
 
   const handleAiGenerate = async () => {
     if (!aiPrompt.trim() || aiGenerating) return;
@@ -1054,91 +1055,107 @@ function ImagePanel({
             </div>
           </div>
 
-          {/* 배경 밝기 조절 */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-gray-700">배경 밝기</span>
-              <span className="text-[11px] text-gray-400 font-mono">{brightness}%</span>
+          {/* 밝기·오버레이 카드 */}
+          <div className="border border-gray-200 rounded-2xl overflow-hidden">
+            {/* 카드 헤더 */}
+            <div className="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100">
+              <span className="text-[11px] font-bold text-gray-600">밝기 · 오버레이 설정</span>
+              <span className="text-[10px] text-gray-400">현재 슬라이드</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-gray-400">밝게</span>
-              <input
-                type="range" min={0} max={90} value={brightness}
-                onChange={e => handleBrightnessChange(Number(e.target.value))}
-                className="flex-1 accent-gray-700 h-1.5"
-              />
-              <span className="text-[10px] text-gray-400">어둡게</span>
-            </div>
-            <div className="flex gap-2 mt-2">
-              {[0, 20, 40, 60, 75].map(v => (
-                <button key={v} onClick={() => handleBrightnessChange(v)}
-                  className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${brightness === v ? 'bg-gray-800 text-white border-gray-800' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
-                  {v === 0 ? '원본' : `${v}%`}
-                </button>
-              ))}
-            </div>
-          </div>
 
-          {/* 이미지 밝기 (CSS filter) */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-gray-700">이미지 밝기</span>
-              <span className="text-[11px] text-gray-400 font-mono">{brightnessFilter}%</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-gray-400">어둡게</span>
-              <input
-                type="range" min={30} max={250} value={brightnessFilter}
-                onChange={e => handleBrightnessFilterChange(Number(e.target.value))}
-                className="flex-1 accent-yellow-500 h-1.5"
-              />
-              <span className="text-[10px] text-gray-400">밝게</span>
-            </div>
-            <div className="flex gap-1.5 mt-2">
-              {[50, 75, 100, 150, 200].map(v => (
-                <button key={v} onClick={() => handleBrightnessFilterChange(v)}
-                  className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${brightnessFilter === v ? 'bg-yellow-500 text-white border-yellow-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
-                  {v === 100 ? '원본' : `${v}%`}
-                </button>
-              ))}
-            </div>
-          </div>
+            <div className="p-3 space-y-4">
+              {/* 배경 밝기 */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-semibold text-gray-700">배경 밝기</span>
+                  <span className="text-[11px] text-gray-400 font-mono bg-gray-100 px-1.5 py-0.5 rounded">{brightness}%</span>
+                </div>
+                <input
+                  type="range" min={0} max={90} value={brightness}
+                  onChange={e => { handleBrightnessChange(Number(e.target.value)); setApplyAllDone(false); }}
+                  className="w-full accent-gray-700 h-1.5"
+                />
+                <div className="flex gap-1.5 mt-1.5">
+                  {[0, 20, 40, 60, 75].map(v => (
+                    <button key={v} onClick={() => { handleBrightnessChange(v); setApplyAllDone(false); }}
+                      className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${brightness === v ? 'bg-gray-800 text-white border-gray-800' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                      {v === 0 ? '원본' : `${v}%`}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {/* 오버레이 투명도 */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-gray-700">오버레이 투명도</span>
-              <span className="text-[11px] text-gray-400 font-mono">{overlayOpacity}%</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-gray-400">투명</span>
-              <input
-                type="range" min={0} max={100} value={overlayOpacity}
-                onChange={e => handleOverlayOpacityChange(Number(e.target.value))}
-                className="flex-1 accent-blue-500 h-1.5"
-              />
-              <span className="text-[10px] text-gray-400">불투명</span>
-            </div>
-            <div className="flex gap-1.5 mt-2">
-              {[0, 30, 60, 80, 100].map(v => (
-                <button key={v} onClick={() => handleOverlayOpacityChange(v)}
-                  className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${overlayOpacity === v ? 'bg-blue-500 text-white border-blue-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
-                  {v === 100 ? '최대' : v === 0 ? '없음' : `${v}%`}
-                </button>
-              ))}
-            </div>
-          </div>
+              {/* 이미지 밝기 */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-semibold text-gray-700">이미지 밝기</span>
+                  <span className="text-[11px] text-gray-400 font-mono bg-gray-100 px-1.5 py-0.5 rounded">{brightnessFilter}%</span>
+                </div>
+                <input
+                  type="range" min={30} max={250} value={brightnessFilter}
+                  onChange={e => { handleBrightnessFilterChange(Number(e.target.value)); setApplyAllDone(false); }}
+                  className="w-full accent-yellow-500 h-1.5"
+                />
+                <div className="flex gap-1.5 mt-1.5">
+                  {[50, 75, 100, 150, 200].map(v => (
+                    <button key={v} onClick={() => { handleBrightnessFilterChange(v); setApplyAllDone(false); }}
+                      className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${brightnessFilter === v ? 'bg-yellow-500 text-white border-yellow-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                      {v === 100 ? '원본' : `${v}%`}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          {/* 모든 슬라이드에 설정 일괄 적용 */}
-          {onApplySettingsAll && (
-            <button
-              onClick={() => onApplySettingsAll({ bgBrightness: brightness, bgBrightnessFilter: brightnessFilter, overlayOpacity })}
-              className="w-full py-2 bg-amber-50 border border-amber-300 text-amber-700 rounded-xl text-xs font-bold hover:bg-amber-100 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-              이 밝기·오버레이를 모든 슬라이드에 적용
-            </button>
-          )}
+              {/* 오버레이 투명도 */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[11px] font-semibold text-gray-700">오버레이 투명도</span>
+                  <span className="text-[11px] text-gray-400 font-mono bg-gray-100 px-1.5 py-0.5 rounded">{overlayOpacity}%</span>
+                </div>
+                <input
+                  type="range" min={0} max={100} value={overlayOpacity}
+                  onChange={e => { handleOverlayOpacityChange(Number(e.target.value)); setApplyAllDone(false); }}
+                  className="w-full accent-blue-500 h-1.5"
+                />
+                <div className="flex gap-1.5 mt-1.5">
+                  {[0, 30, 60, 80, 100].map(v => (
+                    <button key={v} onClick={() => { handleOverlayOpacityChange(v); setApplyAllDone(false); }}
+                      className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${overlayOpacity === v ? 'bg-blue-500 text-white border-blue-500' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                      {v === 100 ? '최대' : v === 0 ? '없음' : `${v}%`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 일괄 적용 버튼 */}
+            {onApplySettingsAll && (
+              <button
+                onClick={() => {
+                  onApplySettingsAll({ bgBrightness: brightness, bgBrightnessFilter: brightnessFilter, overlayOpacity });
+                  setApplyAllDone(true);
+                  setTimeout(() => setApplyAllDone(false), 2500);
+                }}
+                className={`w-full py-2.5 text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                  applyAllDone
+                    ? 'bg-green-500 text-white'
+                    : 'bg-violet-600 hover:bg-violet-700 active:scale-[0.98] text-white'
+                }`}
+              >
+                {applyAllDone ? (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+                    전체 슬라이드에 적용됨!
+                  </>
+                ) : (
+                  <>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                    전체 슬라이드에 일괄 적용
+                  </>
+                )}
+              </button>
+            )}
+          </div>
 
           {/* AI 추천 이미지 (imageKeyword가 있을 때만 표시) */}
           {(aiRecommendPhotos.length > 0 || aiRecommendLoading) && (
