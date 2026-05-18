@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { createSupabaseBrowser } from '@/lib/supabase-browser';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TextStyle {
@@ -2283,6 +2284,7 @@ export default function EditorPage() {
   const [canvasW, setCanvasW] = useState(420);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showSaveLocalModal, setShowSaveLocalModal] = useState(false);
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [lastCaption, setLastCaption] = useState('');
   const [lastHashtags, setLastHashtags] = useState<string[]>([]);
@@ -2670,6 +2672,13 @@ export default function EditorPage() {
         />
       )}
 
+      {/* 내 템플릿 저장 모달 */}
+      {showSaveTemplateModal && (
+        <SaveTemplateModal
+          pagesData={pagesData}
+          onClose={() => setShowSaveTemplateModal(false)}
+        />
+      )}
       {/* 내 카드뉴스 로컬 저장 모달 */}
       {showSaveLocalModal && (
         <SaveLocalModal
@@ -2776,6 +2785,7 @@ export default function EditorPage() {
                 {shareToast === 'copied' ? '링크 복사됨!' : shareToast === 'error' ? '실패' : '공유 링크'}
               </button>
               <button onClick={() => setShowSaveLocalModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"><FolderOpen size={14} /> 내 카드뉴스 저장</button>
+              <button onClick={() => setShowSaveTemplateModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 transition-colors">⭐ 템플릿 저장</button>
               <button onClick={() => setShowSaveModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"><Save size={14} /> 디자인 저장</button>
               <button onClick={() => setIsFullscreenEdit(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-primary-50 hover:border-primary-400 hover:text-primary-600 transition-colors"><Maximize2 size={14} /> 전체화면 편집</button>
               <button onClick={() => setShowCaptionModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 rounded-lg hover:from-emerald-600 hover:to-teal-600 active:scale-[0.98] transition-all shadow-sm"><Wand2 size={14} /> 캡션 생성</button>
@@ -2814,6 +2824,9 @@ export default function EditorPage() {
           </button>
           <button onClick={() => setShowSaveLocalModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-700 whitespace-nowrap shrink-0 active:bg-emerald-100">
             <FolderOpen size={13} /> 내저장
+          </button>
+          <button onClick={() => setShowSaveTemplateModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-50 border border-violet-200 text-xs font-semibold text-violet-700 whitespace-nowrap shrink-0 active:bg-violet-100">
+            ⭐ 템플릿저장
           </button>
           <button onClick={() => setShowSaveModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 whitespace-nowrap shrink-0 active:bg-gray-100">
             <Save size={13} /> 디자인저장
@@ -3828,6 +3841,103 @@ function FullscreenEditor({
                 />
               </div>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SaveTemplateModal ────────────────────────────────────────────────────────
+const TEMPLATE_CATEGORIES = ['내 템플릿', '비즈니스', '라이프스타일', '음식/카페', '뷰티/패션', '부동산', '교육', '여행', '기타'];
+
+function SaveTemplateModal({ pagesData, onClose }: { pagesData: PageData[]; onClose: () => void }) {
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('내 템플릿');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSave = async () => {
+    if (!name.trim()) { setError('템플릿 이름을 입력해주세요'); return; }
+    setSaving(true);
+    setError('');
+    try {
+      const supabase = createSupabaseBrowser();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setError('로그인이 필요합니다'); setSaving(false); return; }
+
+      const { error: dbError } = await supabase.from('user_templates').upsert(
+        { user_id: user.id, name: name.trim(), category, pages: pagesData },
+        { onConflict: 'user_id,name' }
+      );
+      if (dbError) { setError(dbError.message); setSaving(false); return; }
+      setSaved(true);
+      setTimeout(onClose, 1200);
+    } catch (e: any) {
+      setError(e.message);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-[440px] max-w-full" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-violet-100 rounded-xl flex items-center justify-center text-base">⭐</div>
+            <div>
+              <h2 className="text-sm font-bold text-gray-900">내 템플릿으로 저장</h2>
+              <p className="text-[11px] text-gray-400">카드뉴스 생성 탭에서 재사용 가능</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400"><X size={16} /></button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-2">템플릿 이름</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => { setName(e.target.value); setError(''); }}
+              onKeyDown={e => e.key === 'Enter' && handleSave()}
+              placeholder="예: 피드 카드뉴스 기본형"
+              autoFocus
+              className={`w-full border rounded-xl px-4 py-3 text-sm outline-none transition-all ${error ? 'border-red-400 ring-1 ring-red-200' : 'border-gray-200 focus:border-violet-400 focus:ring-1 focus:ring-violet-100'}`}
+            />
+            {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-2">카테고리</label>
+            <div className="flex flex-wrap gap-1.5">
+              {TEMPLATE_CATEGORIES.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setCategory(cat)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${category === cat ? 'bg-violet-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 p-3 bg-violet-50 rounded-xl border border-violet-100 text-xs text-violet-700">
+            <span>✨</span>
+            <span>{pagesData.length}장 레이아웃 저장 · 카드뉴스 생성 탭 "내 템플릿"에서 불러올 수 있습니다</span>
+          </div>
+
+          <div className="flex gap-3">
+            <button onClick={onClose} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50">취소</button>
+            <button
+              onClick={handleSave}
+              disabled={saving || saved}
+              className={`flex-1 py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 transition-all shadow-sm ${saved ? 'bg-green-500' : 'bg-violet-600 hover:bg-violet-700 active:scale-[0.98]'} disabled:opacity-60`}
+            >
+              {saved ? <><Check size={14} /> 저장 완료!</> : saving ? <><Loader2 size={14} className="animate-spin" /> 저장 중...</> : <>⭐ 템플릿으로 저장</>}
+            </button>
           </div>
         </div>
       </div>

@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ImagePlus, ChevronLeft, Search, RefreshCw, MessageSquare, Settings, ChevronUp, ChevronDown, UploadCloud, Trash2, Pencil, Loader2, Calendar, Clock, Copy, Check, X, Send, RefreshCcw, Images, Sparkles, Wand2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { createSupabaseBrowser } from '@/lib/supabase-browser';
 
 // ─── 슬라이드 렌더러 (카로셀 캡처용) ────────────────────────────────────────
 const CAPTURE_FONTS_URL =
@@ -303,6 +304,9 @@ export default function CardNewsPage() {
   interface SavedCardNews { id: string; name: string; createdAt: string; pages: any[]; }
   const MY_CARDNEWS_KEY = 'my_saved_cardnews';
   const [savedCardNews, setSavedCardNews] = useState<SavedCardNews[]>([]);
+  const [userTemplates, setUserTemplates] = useState<any[]>([]);
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(null);
   const [deletingLocalId, setDeletingLocalId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -348,8 +352,45 @@ export default function CardNewsPage() {
   };
 
   useEffect(() => {
-    if (activeTab === 'history') fetchDesigns();
+    if (activeTab === 'history') {
+      fetchDesigns();
+      fetchUserTemplates();
+    }
   }, [activeTab]);
+
+  const fetchUserTemplates = async () => {
+    setIsLoadingTemplates(true);
+    try {
+      const supabase = createSupabaseBrowser();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('user_templates')
+        .select('id, name, category, pages, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      setUserTemplates(data || []);
+    } catch { /* ignore */ } finally {
+      setIsLoadingTemplates(false);
+    }
+  };
+
+  const handleUseTemplate = (tpl: any) => {
+    localStorage.setItem('cardnews_import_templates', JSON.stringify(tpl.pages));
+    localStorage.removeItem('editingDesign');
+    localStorage.removeItem('cardNewsData');
+    window.location.href = '/cardnews/editor';
+  };
+
+  const handleDeleteUserTemplate = async (id: string) => {
+    if (!confirm('템플릿을 삭제하시겠습니까?')) return;
+    setDeletingTemplateId(id);
+    const supabase = createSupabaseBrowser();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) await supabase.from('user_templates').delete().eq('id', id).eq('user_id', user.id);
+    setUserTemplates(prev => prev.filter(t => t.id !== id));
+    setDeletingTemplateId(null);
+  };
 
   const handleOpenDesign = (design: any) => {
     localStorage.setItem('editingDesign', JSON.stringify(design.pages_data));
@@ -1081,6 +1122,76 @@ export default function CardNewsPage() {
         {/* --- 탭: 생성기록 --- */}
         {activeTab === 'history' && (
           <div className="space-y-10">
+
+            {/* ─── 내 템플릿 (Supabase) ──────────────────────────────────── */}
+            <div>
+              <div className="flex items-center justify-between mb-4 mt-2">
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800">⭐ 내 템플릿</h2>
+                  <p className="text-sm text-gray-400 mt-0.5">에디터에서 "템플릿 저장"한 레이아웃 · 클릭하면 바로 편집 시작</p>
+                </div>
+                <button onClick={fetchUserTemplates} disabled={isLoadingTemplates} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 bg-gray-100 rounded-lg hover:bg-gray-200 disabled:opacity-50">
+                  <RefreshCw size={12} className={isLoadingTemplates ? 'animate-spin' : ''} /> 새로고침
+                </button>
+              </div>
+
+              {isLoadingTemplates ? (
+                <div className="flex items-center justify-center py-10"><Loader2 size={20} className="animate-spin text-gray-300" /></div>
+              ) : userTemplates.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-8 text-gray-400 border-2 border-dashed border-violet-100 rounded-2xl bg-violet-50/30">
+                  <div className="text-3xl mb-2">⭐</div>
+                  <p className="text-sm font-semibold text-gray-500">저장된 템플릿이 없습니다</p>
+                  <p className="text-[12px] text-gray-400 mt-1">에디터 상단 "템플릿 저장" 버튼으로 저장하세요</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {userTemplates.map(tpl => {
+                    const firstPage = tpl.pages?.[0] || null;
+                    return (
+                      <div key={tpl.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow group">
+                        <div
+                          className="relative bg-gray-900 overflow-hidden cursor-pointer"
+                          style={{ height: 140 }}
+                          onClick={() => handleUseTemplate(tpl)}
+                        >
+                          <MiniCardPreview page={firstPage} />
+                          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 text-gray-900 text-xs font-bold px-3 py-1.5 rounded-full shadow">
+                              편집 시작
+                            </div>
+                          </div>
+                          <div className="absolute top-2 left-2 bg-violet-600/90 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            {tpl.category}
+                          </div>
+                          <div className="absolute top-2 right-2 bg-black/60 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                            {tpl.pages?.length || 0}장
+                          </div>
+                        </div>
+                        <div className="p-3">
+                          <p className="font-bold text-xs text-gray-800 truncate mb-0.5">{tpl.name}</p>
+                          <p className="text-[10px] text-gray-400 mb-2">{new Date(tpl.created_at).toLocaleDateString('ko-KR')}</p>
+                          <div className="flex gap-1.5">
+                            <button
+                              onClick={() => handleUseTemplate(tpl)}
+                              className="flex-1 py-1.5 text-[11px] font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+                            >
+                              사용하기
+                            </button>
+                            <button
+                              onClick={() => handleDeleteUserTemplate(tpl.id)}
+                              disabled={deletingTemplateId === tpl.id}
+                              className="w-7 h-7 rounded-lg border border-red-100 text-red-400 hover:bg-red-50 flex items-center justify-center disabled:opacity-40"
+                            >
+                              {deletingTemplateId === tpl.id ? <Loader2 size={11} className="animate-spin" /> : <Trash2 size={11} />}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
 
             {/* ─── 내 카드뉴스 (로컬 저장) ─────────────────────────────── */}
             <div>
