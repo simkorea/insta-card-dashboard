@@ -2,8 +2,46 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// 로그인 없이 접근 가능한 경로
-const PUBLIC_PATHS = ['/login', '/signup', '/auth/callback'];
+// 로그인 없이 접근 가능한 페이지 경로
+const PUBLIC_PAGE_PATHS = ['/login', '/signup', '/auth/callback', '/share', '/view'];
+
+// 인증 없이 허용할 API 경로 (이미지 프록시, 공유 등)
+const PUBLIC_API_PATHS = [
+  '/api/img',
+  '/api/proxy-image',
+  '/api/share',
+  '/api/upload-to-cdn',   // CDN 업로드는 공개 (이미지 서빙용)
+  '/api/instagram/auth',
+  '/api/instagram/callback',
+];
+
+// 인증이 필요한 API 경로 prefix
+const PROTECTED_API_PREFIXES = [
+  '/api/generate',
+  '/api/analyze',
+  '/api/upload',
+  '/api/designs',
+  '/api/brand-kit',
+  '/api/brand-persona',
+  '/api/brand-style',
+  '/api/brand-styles',
+  '/api/scheduled-posts',
+  '/api/templates',
+  '/api/dashboard',
+  '/api/workspace',
+  '/api/instagram/settings',
+  '/api/instagram/publish',
+  '/api/instagram/insights',
+  '/api/insights',
+  '/api/comment-templates',
+  '/api/generate-caption',
+  '/api/generate-card',
+  '/api/suggest-image-search',
+  '/api/upload-image',
+  '/api/pexels',
+  '/api/images',
+  '/api/ai-designer',
+];
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -13,30 +51,42 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
+        getAll() { return request.cookies.getAll(); },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
+          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
         },
       },
     }
   );
 
-  // 세션 갱신 (토큰 만료 시 자동 갱신)
   const { data: { user } } = await supabase.auth.getUser();
-
   const pathname = request.nextUrl.pathname;
-  const isPublic = PUBLIC_PATHS.some(p => pathname.startsWith(p));
 
-  // 비로그인 → 보호된 페이지 접근 시 /login 으로
-  if (!user && !isPublic) {
+  // ── API 경로 처리 ──────────────────────────────────────────────────────────
+  if (pathname.startsWith('/api/')) {
+    // 공개 API는 통과
+    const isPublicApi = PUBLIC_API_PATHS.some(p => pathname.startsWith(p));
+    if (isPublicApi) return addSecurityHeaders(response);
+
+    // 보호된 API — 미인증이면 401
+    const isProtectedApi = PROTECTED_API_PREFIXES.some(p => pathname.startsWith(p));
+    if (isProtectedApi && !user) {
+      return NextResponse.json(
+        { error: '로그인이 필요합니다', code: 'UNAUTHORIZED' },
+        { status: 401, headers: securityHeaders() }
+      );
+    }
+
+    return addSecurityHeaders(response);
+  }
+
+  // ── 페이지 경로 처리 ────────────────────────────────────────────────────────
+  const isPublicPage = PUBLIC_PAGE_PATHS.some(p => pathname.startsWith(p));
+
+  // 미로그인 → 보호된 페이지 접근 시 /login 으로
+  if (!user && !isPublicPage) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('next', pathname);
     return NextResponse.redirect(loginUrl);
@@ -47,6 +97,24 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/cardnews', request.url));
   }
 
+  return addSecurityHeaders(response);
+}
+
+function securityHeaders(): Record<string, string> {
+  return {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  };
+}
+
+function addSecurityHeaders(response: NextResponse): NextResponse {
+  const headers = securityHeaders();
+  for (const [k, v] of Object.entries(headers)) {
+    response.headers.set(k, v);
+  }
   return response;
 }
 
