@@ -23,12 +23,15 @@ async function uploadToThreads(
   }
   const { access_token: token, platform_user_id: userId } = account;
 
+  // Meta는 imgur 등 일부 도메인을 차단 → 프록시 URL 사용
+  const proxiedUrls = imageUrls.map(toProxyUrl);
+
   try {
     let containerId: string;
 
-    if (imageUrls.length === 1) {
+    if (proxiedUrls.length === 1) {
       const params = new URLSearchParams({
-        media_type: 'IMAGE', image_url: imageUrls[0],
+        media_type: 'IMAGE', image_url: proxiedUrls[0],
         text: caption.slice(0, 500), access_token: token,
       });
       const res = await fetch(`${THREADS_API}/${userId}/threads?${params}`, { method: 'POST' });
@@ -36,7 +39,7 @@ async function uploadToThreads(
       if (!res.ok) throw new Error(`단일 이미지 컨테이너 실패: ${JSON.stringify(data)}`);
       containerId = data.id;
     } else {
-      const urls = imageUrls.slice(0, 20);
+      const urls = proxiedUrls.slice(0, 20);
       const itemIds = await Promise.all(urls.map(async (url) => {
         const params = new URLSearchParams({
           media_type: 'IMAGE', image_url: url,
@@ -161,7 +164,8 @@ async function uploadToInstagram(
 
   const { access_token, platform_user_id: ig_user_id } = account;
   const authHeader = { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' };
-  const urls = imageUrls.slice(0, 10);
+  // Meta는 일부 이미지 도메인을 거부 → 프록시 URL 사용
+  const urls = imageUrls.slice(0, 10).map(toProxyUrl);
 
   try {
     let containerId: string;
@@ -180,7 +184,8 @@ async function uploadToInstagram(
         urls.map(url =>
           fetch(`${IG_API}/${ig_user_id}/media`, {
             method: 'POST', headers: authHeader,
-            body: JSON.stringify({ image_url: url, is_carousel_item: true }),
+            // media_type 명시 필수 — 미설정 시 "Only photo or video" 오류 발생
+            body: JSON.stringify({ image_url: url, is_carousel_item: true, media_type: 'IMAGE' }),
           }).then(r => r.json())
         )
       );
