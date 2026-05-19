@@ -503,6 +503,17 @@ const EDUCATION_THEME_DATA: PageData[] = [
 
 const PAGES_DATA = BUSINESS_THEME_DATA; // 기본값
 
+// ── 내장 테마 목록 ─────────────────────────────────────────────────────────────
+const BUILT_IN_THEMES: { id: string; label: string; emoji: string; bg: string; accent: string; data: PageData[] }[] = [
+  { id: 'business', label: '비즈니스', emoji: '🏢', bg: '#0a0a1e', accent: '#6366f1', data: BUSINESS_THEME_DATA },
+  { id: 'cafe', label: '카페', emoji: '☕', bg: '#1a0f08', accent: '#f3d9ba', data: CAFE_THEME_DATA },
+  { id: 'lifestyle', label: '라이프스타일', emoji: '🌿', bg: '#0a1a0a', accent: '#4ADE80', data: LIFESTYLE_THEME_DATA },
+  { id: 'travel', label: '여행', emoji: '✈️', bg: '#0a1020', accent: '#38BDF8', data: TRAVEL_THEME_DATA },
+  { id: 'fashion', label: '패션/뷰티', emoji: '👗', bg: '#1a0a1a', accent: '#F9A8D4', data: FASHION_THEME_DATA },
+  { id: 'food', label: '음식/맛집', emoji: '🍜', bg: '#1a0808', accent: '#FB923C', data: FOOD_THEME_DATA },
+  { id: 'education', label: '교육', emoji: '📚', bg: '#08081a', accent: '#A78BFA', data: EDUCATION_THEME_DATA },
+];
+
 // 현재 페이지의 레이어 목록 생성 (스타일 정보 포함)
 function getLayersForPage(page: PageData): CanvasLayerWithSrc[] {
   return [
@@ -553,6 +564,154 @@ function cardNewsToPages(raw: { page: number; title: string; body: string; backg
 }
 
 // ─── Crop Modal ───────────────────────────────────────────────────────────────
+// ─── Theme Change Modal ────────────────────────────────────────────────────────
+function ThemeChangeModal({ onApply, onClose }: {
+  onApply: (theme: PageData[]) => void;
+  onClose: () => void;
+}) {
+  const supabase = createSupabaseBrowser();
+  const [userTemplates, setUserTemplates] = useState<{ id: string; name: string; pages: PageData[] }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetch = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data } = await supabase
+          .from('user_templates')
+          .select('id, name, pages')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false })
+          .limit(20);
+        if (data) {
+          setUserTemplates(data.map((r: any) => ({
+            id: r.id,
+            name: r.name,
+            pages: Array.isArray(r.pages) ? r.pages : [],
+          })).filter((t: any) => t.pages.length > 0));
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetch();
+  }, [supabase]);
+
+  const handleApply = (theme: PageData[], id: string) => {
+    setApplying(id);
+    onApply(theme);
+  };
+
+  // 테마 미니 프리뷰 (색상 스트라이프)
+  const ThemeCard = ({ id, label, emoji, bg, accent, data }: typeof BUILT_IN_THEMES[0]) => (
+    <button
+      onClick={() => handleApply(data, id)}
+      disabled={applying !== null}
+      className="group relative flex flex-col overflow-hidden rounded-2xl border-2 border-transparent hover:border-violet-400 transition-all active:scale-95 disabled:opacity-60"
+      style={{ background: bg }}
+    >
+      {/* 미니 슬라이드 프리뷰 */}
+      <div className="aspect-[3/4] w-full relative overflow-hidden">
+        {data[0]?.bgImage && (
+          <img src={data[0].bgImage} alt="" className="absolute inset-0 w-full h-full object-cover opacity-60" />
+        )}
+        <div className="absolute inset-0" style={{ background: data[0]?.overlay || 'rgba(0,0,0,0.5)' }} />
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-2">
+          <span className="text-2xl mb-1">{emoji}</span>
+          <div className="text-white text-[10px] font-bold text-center leading-tight drop-shadow-sm">{label}</div>
+          {/* 컬러 포인트 */}
+          <div className="flex gap-1 mt-2">
+            {data.slice(0, 3).map((p, i) => (
+              <div key={i} className="w-3 h-3 rounded-full border border-white/30"
+                style={{ background: p.accent || accent }} />
+            ))}
+          </div>
+        </div>
+        {applying === id && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+      </div>
+      <div className="px-2 py-1.5 text-center">
+        <span className="text-[11px] font-bold text-white/90">{label}</span>
+      </div>
+    </button>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* 헤더 */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">디자인 변경</h2>
+            <p className="text-[12px] text-gray-500 mt-0.5">텍스트·내용은 그대로, 디자인 스타일만 바꿉니다</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"><X size={16} /></button>
+        </div>
+
+        <div className="overflow-y-auto p-6 space-y-6">
+          {/* 내장 테마 */}
+          <div>
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">기본 테마</h3>
+            <div className="grid grid-cols-4 gap-3">
+              {BUILT_IN_THEMES.map(t => <ThemeCard key={t.id} {...t} />)}
+            </div>
+          </div>
+
+          {/* 내 저장 템플릿 */}
+          <div>
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">내 저장 템플릿</h3>
+            {loading ? (
+              <div className="flex items-center justify-center py-8 text-gray-400">
+                <div className="w-5 h-5 border-2 border-gray-300 border-t-violet-500 rounded-full animate-spin mr-2" />
+                불러오는 중...
+              </div>
+            ) : userTemplates.length === 0 ? (
+              <div className="text-center py-8 text-gray-400 text-sm">저장된 템플릿이 없습니다</div>
+            ) : (
+              <div className="grid grid-cols-4 gap-3">
+                {userTemplates.map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => handleApply(t.pages, t.id)}
+                    disabled={applying !== null}
+                    className="group relative flex flex-col overflow-hidden rounded-2xl border-2 border-transparent hover:border-violet-400 transition-all active:scale-95 disabled:opacity-60 bg-gray-800"
+                  >
+                    <div className="aspect-[3/4] w-full relative overflow-hidden">
+                      {t.pages[0]?.bgImage && (
+                        <img src={t.pages[0].bgImage} alt="" className="absolute inset-0 w-full h-full object-cover opacity-60" />
+                      )}
+                      <div className="absolute inset-0" style={{ background: t.pages[0]?.overlay || 'rgba(0,0,0,0.5)' }} />
+                      <div className="absolute inset-0 flex flex-col items-center justify-center p-2">
+                        <div className="text-white text-[9px] font-bold text-center leading-tight drop-shadow px-1">
+                          {t.pages[0]?.title?.slice(0, 15) || t.name}
+                        </div>
+                      </div>
+                      {applying === t.id && (
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="px-2 py-1.5 text-center">
+                      <span className="text-[10px] font-bold text-white/90 line-clamp-1">{t.name}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Crop Modal ────────────────────────────────────────────────────────────────
 function CropModal({ imageSrc, onClose }: { imageSrc: string; onClose: () => void }) {
   const [cropTab, setCropTab] = useState<'자르기' | '조정'>('자르기');
   const [ratio, setRatio] = useState<'자유' | '1:1' | '4:5' | '9:16' | '16:9'>('자유');
@@ -2337,6 +2496,7 @@ export default function EditorPage() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showSaveLocalModal, setShowSaveLocalModal] = useState(false);
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+  const [showThemeModal, setShowThemeModal] = useState(false);
   const [showDownloadMenu, setShowDownloadMenu] = useState(false);
   const [lastCaption, setLastCaption] = useState('');
   const [lastHashtags, setLastHashtags] = useState<string[]>([]);
@@ -2573,6 +2733,35 @@ export default function EditorPage() {
       pushHistory(next);
       return next;
     });
+  }, [pushHistory]);
+
+  // ── 테마(디자인) 교체: 내용(제목·불릿·요소)은 유지, 시각 스타일만 교체 ────────
+  const applyThemeToPages = useCallback((theme: PageData[]) => {
+    setPagesData(prev => {
+      const lastIdx = prev.length - 1;
+      const next = prev.map((page, i) => {
+        let base: PageData;
+        if (i === 0) base = theme[0];
+        else if (i === lastIdx) base = theme[theme.length - 1];
+        else {
+          const mc = Math.max(1, theme.length - 2);
+          base = theme[1 + ((i - 1) % mc)];
+        }
+        return {
+          ...base,
+          id: page.id,
+          title: page.title,
+          subtitle: page.subtitle,
+          bullets: page.bullets,
+          elements: page.elements,
+          imageKeyword: page.imageKeyword,
+        };
+      });
+      pushHistory(next);
+      return next;
+    });
+    setPageImages({});
+    setShowThemeModal(false);
   }, [pushHistory]);
 
   // ── 슬라이드 관리 ───────────────────────────────────────────────────────────
@@ -2972,6 +3161,14 @@ export default function EditorPage() {
         />
       )}
 
+      {/* 디자인(테마) 변경 모달 */}
+      {showThemeModal && (
+        <ThemeChangeModal
+          onApply={applyThemeToPages}
+          onClose={() => setShowThemeModal(false)}
+        />
+      )}
+
       {/* 내 템플릿 저장 모달 */}
       {showSaveTemplateModal && (
         <SaveTemplateModal
@@ -3114,6 +3311,10 @@ export default function EditorPage() {
                 {shareToast === 'copied' ? '링크 복사됨!' : shareToast === 'error' ? '실패' : '공유 링크'}
               </button>
               <button onClick={() => setShowSaveLocalModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"><FolderOpen size={14} /> 내 카드뉴스 저장</button>
+              <button onClick={() => setShowThemeModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-orange-700 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 116.93 19.07"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83"/></svg>
+                디자인 변경
+              </button>
               <button onClick={() => setShowSaveTemplateModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-violet-700 bg-violet-50 border border-violet-200 rounded-lg hover:bg-violet-100 transition-colors">⭐ 템플릿 저장</button>
               <button onClick={() => setShowSaveModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"><Save size={14} /> 디자인 저장</button>
               <button onClick={() => setIsFullscreenEdit(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-primary-50 hover:border-primary-400 hover:text-primary-600 transition-colors"><Maximize2 size={14} /> 전체화면 편집</button>
