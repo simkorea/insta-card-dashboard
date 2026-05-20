@@ -113,10 +113,14 @@ async function uploadToTikTok(
 
   try {
     const photos = imageUrls.slice(0, 35).map(toProxyUrl);
+    const title = (caption || '').slice(0, 2200).trim() || '카드뉴스';
     const body = {
       post_info: {
-        title: caption.slice(0, 2200) || ' ',
+        title,
         privacy_level: 'SELF_ONLY',
+        disable_duet: false,
+        disable_comment: false,
+        disable_stitch: false,
         brand_content_toggle: false,
         brand_organic_toggle: false,
       },
