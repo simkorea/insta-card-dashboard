@@ -112,12 +112,27 @@ async function uploadToTikTok(
   }
 
   try {
+    // Creator info 조회로 허용된 privacy_level 확인
+    let privacyLevel = 'SELF_ONLY';
+    try {
+      const creatorRes = await fetch('https://open.tiktokapis.com/v2/post/publish/creator_info/query/', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' },
+        body: JSON.stringify({}),
+      });
+      const creatorData = await creatorRes.json();
+      const options: string[] = creatorData.data?.privacy_level_options ?? [];
+      if (options.length > 0) {
+        privacyLevel = options.includes('SELF_ONLY') ? 'SELF_ONLY' : options[0];
+      }
+    } catch { /* fallback */ }
+
     const photos = imageUrls.slice(0, 35).map(toProxyUrl);
     const title = (caption || '').slice(0, 2200).trim() || '카드뉴스';
     const body = {
       post_info: {
         title,
-        privacy_level: 'SELF_ONLY',
+        privacy_level: privacyLevel,
         disable_duet: false,
         disable_comment: false,
         disable_stitch: false,
