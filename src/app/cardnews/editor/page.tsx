@@ -2516,6 +2516,8 @@ export default function EditorPage() {
   // ── 자동 저장 ──
   const [autoSaveTime, setAutoSaveTime] = useState<string | null>(null);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 자동저장 복구 배너
+  const [restoreBanner, setRestoreBanner] = useState<{ savedAt: number; pages: PageData[] } | null>(null);
 
   // ── 슬라이드 드래그 순서 변경 ──
   const [dragThumbId, setDragThumbId] = useState<number | null>(null);
@@ -2567,6 +2569,23 @@ export default function EditorPage() {
   // 마운트 시 데이터 로드 (우선순위: editingDesign > cardnews_import_templates > cardNewsData > 기본값)
   useEffect(() => {
     try {
+      // ── 자동저장 복구 확인 (항상 먼저 체크) ─────────────────────────────────
+      const autosaveRaw = localStorage.getItem('cardnews_autosave');
+      if (autosaveRaw) {
+        try {
+          const autosave = JSON.parse(autosaveRaw);
+          if (Array.isArray(autosave.pages) && autosave.pages.length > 0 && autosave.savedAt) {
+            // 24시간 이내 저장본만 복구 배너 표시
+            const ageMs = Date.now() - autosave.savedAt;
+            if (ageMs < 24 * 60 * 60 * 1000) {
+              setRestoreBanner({ savedAt: autosave.savedAt, pages: autosave.pages });
+            } else {
+              localStorage.removeItem('cardnews_autosave');
+            }
+          }
+        } catch { /* 파싱 실패 무시 */ }
+      }
+
       const editingRaw = localStorage.getItem('editingDesign');
       if (editingRaw) {
         const parsed = JSON.parse(editingRaw);
@@ -3034,7 +3053,7 @@ export default function EditorPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
 
-  // ── 자동 저장 (30초마다) ────────────────────────────────────────────────────
+  // ── 자동 저장 (10초마다) ────────────────────────────────────────────────────
   useEffect(() => {
     autoSaveTimerRef.current = setInterval(() => {
       try {
@@ -3043,7 +3062,7 @@ export default function EditorPage() {
         const t = new Date();
         setAutoSaveTime(`${String(t.getHours()).padStart(2,'0')}:${String(t.getMinutes()).padStart(2,'0')}:${String(t.getSeconds()).padStart(2,'0')}`);
       } catch { /* ignore */ }
-    }, 30000);
+    }, 10000);
     return () => { if (autoSaveTimerRef.current) clearInterval(autoSaveTimerRef.current); };
   }, [pagesData, pageImages]);
 
@@ -3263,8 +3282,35 @@ export default function EditorPage() {
             {/* 자동 저장 표시 */}
             {autoSaveTime && (
               <span className="hidden md:flex items-center gap-1 text-[10px] text-gray-400">
-                <Check size={10} className="text-emerald-400" /> {autoSaveTime} 저장됨
+                <Check size={10} className="text-emerald-400" /> {autoSaveTime} 자동저장됨
               </span>
+            )}
+            {/* 자동저장 복구 배너 */}
+            {restoreBanner && (
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-amber-50 border border-amber-300 rounded-lg text-[11px] font-medium text-amber-800 animate-pulse">
+                <span>⏱ 미저장 작업 발견</span>
+                <span className="text-amber-500">{new Date(restoreBanner.savedAt).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                <button
+                  onClick={() => {
+                    setPagesData(restoreBanner.pages);
+                    historyRef.current = [restoreBanner.pages];
+                    historyIdxRef.current = 0;
+                    setRestoreBanner(null);
+                  }}
+                  className="px-2 py-0.5 bg-amber-500 text-white rounded-md hover:bg-amber-600 transition-colors"
+                >
+                  복구하기
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.removeItem('cardnews_autosave');
+                    setRestoreBanner(null);
+                  }}
+                  className="px-2 py-0.5 bg-gray-200 text-gray-600 rounded-md hover:bg-gray-300 transition-colors"
+                >
+                  무시
+                </button>
+              </div>
             )}
             <div className="flex items-center gap-0.5 bg-gray-100 p-1 rounded-lg">
               <button
@@ -5162,11 +5208,21 @@ function SnsUploadModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      onClick={status === 'uploading' ? undefined : onClose}
+    >
       <div
         className="bg-white rounded-2xl shadow-2xl w-[480px] max-w-full overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
+        {/* 업로드 중 안내 배너 */}
+        {status === 'uploading' && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-2">
+            <div className="w-3 h-3 border-2 border-amber-500 border-t-transparent rounded-full animate-spin shrink-0" />
+            <p className="text-xs font-semibold text-amber-700">업로드 진행 중입니다. 창을 닫거나 다른 곳을 클릭하지 마세요.</p>
+          </div>
+        )}
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-pink-50">
           <div className="flex items-center gap-2.5">
@@ -5178,7 +5234,11 @@ function SnsUploadModal({
               <p className="text-[11px] text-gray-400">전체 {pagesData.length}장 → Threads·TikTok 업로드</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400">
+          <button
+            onClick={status === 'uploading' ? undefined : onClose}
+            disabled={status === 'uploading'}
+            className={`p-1.5 rounded-lg ${status === 'uploading' ? 'text-gray-200 cursor-not-allowed' : 'hover:bg-gray-100 text-gray-400'}`}
+          >
             <X size={16} />
           </button>
         </div>

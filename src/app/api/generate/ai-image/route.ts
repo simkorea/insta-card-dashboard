@@ -11,33 +11,75 @@ const sizeMap: Record<string, '1024x1024' | '1024x1792' | '1792x1024'> = {
 };
 
 export async function POST(req: NextRequest) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: 'OPENAI_API_KEY 미설정' }, { status: 500 });
+  const apiKey = process.env.LEONARDO_API_KEY;
+  if (!apiKey) return NextResponse.json({ error: 'LEONARDO_API_KEY 미설정' }, { status: 500 });
 
   try {
-    const { prompt, ratio = '1:1', count = 1 } = await req.json();
+    const { prompt, ratio = '4:5', count = 1 } = await req.json();
     if (!prompt?.trim()) return NextResponse.json({ error: '프롬프트를 입력하세요' }, { status: 400 });
 
-    const size = sizeMap[ratio] || '1024x1024';
-    const n = Math.min(Math.max(1, count), 4);
+    // 레오나르도 비율 매핑 (최대 지원 크기에 맞춤)
+    let width = 768;
+    let height = 960;
+    if (ratio === '1:1') { width = 1024; height = 1024; }
+    else if (ratio === '16:9') { width = 1024; height = 576; }
+    else if (ratio === '9:16') { width = 576; height = 1024; }
 
-    // DALL-E 3는 n=1만 지원 → 병렬 요청
-    const requests = Array.from({ length: n }, () =>
-      fetch('https://api.openai.com/v1/images/generations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: 'dall-e-3', prompt: prompt.slice(0, 1000), n: 1, size, quality: 'standard' }),
-      }).then(r => r.json())
-    );
+    const negativePrompt = "text, letters, words, numbers, watermark, signature, logo, caption, label, distortion, fisheye, lens distortion, warped, skewed, perspective distortion, blurry, out of focus, low quality, pixelated, jpeg artifacts, noise, grain, people, faces, humans, person, crowd, cartoon, illustration, painting, drawing, anime, 3d render, cgi, overexposed, underexposed, bad composition, cropped";
 
-    const results = await Promise.all(requests);
-    const urls: string[] = [];
-    for (const r of results) {
-      if (r.data?.[0]?.url) urls.push(r.data[0].url);
-      else if (r.error) throw new Error(r.error.message || 'DALL-E 오류');
+    const payload = {
+      height,
+      width,
+      modelId: "05ce0082-2d80-4a2d-8653-4d1c85e2418e", // Lucid Realism
+      prompt: prompt.slice(0, 1000),
+      negative_prompt: negativePrompt,
+      num_images: Math.min(Math.max(1, count), 4)
+    };
+
+    const res = await fetch("https://cloud.leonardo.ai/api/rest/v1/generations", {
+      method: "POST",
+      headers: {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!data?.sdGenerationJob?.generationId) {
+       throw new Error(data.error || 'Leonardo API 생성 요청 오류');
     }
 
-    return NextResponse.json({ urls });
+    const generationId = data.sdGenerationJob.generationId;
+
+    // 생성 완료까지 대기 (최대 30초)
+    let imageUrls: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      const checkRes = await fetch(`https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`, {
+        headers: {
+          "accept": "application/json",
+          "authorization": `Bearer ${apiKey}`
+        }
+      });
+      const checkData = await checkRes.json();
+      const status = checkData?.generations_by_pk?.status;
+      
+      if (status === 'COMPLETE') {
+        const images = checkData.generations_by_pk.generated_images;
+        imageUrls = images.map((img: any) => img.url);
+        break;
+      } else if (status === 'FAILED') {
+        throw new Error('Leonardo API 생성 실패');
+      }
+    }
+
+    if (imageUrls.length === 0) {
+      throw new Error('이미지 생성 시간 초과');
+    }
+
+    return NextResponse.json({ urls: imageUrls });
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }

@@ -61,8 +61,8 @@ Return ONLY the English query words, nothing else:`;
 Focus on subject matter, setting, and mood.
 Return ONLY the search query, nothing else.`;
 
-    const result = await model.generateContent([imagePart, textPrompt]);
-    const query = result.response.text()
+    const text = await generateWithRetry([imagePart, textPrompt]);
+    const query = text
       .trim()
       .replace(/^["']|["']$/g, '')
       .split('\n')[0];
