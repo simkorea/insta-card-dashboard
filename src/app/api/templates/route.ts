@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
+import { REAL_ESTATE_SEEDS } from './real_estate_seeds';
 
 export async function GET() {
   try {
@@ -98,8 +99,8 @@ export async function GET() {
       { id: 20, title: '자연을 담은 홈오피스 집중력 키우기', category: '인테리어', ratio: '4:5', isFavorite: false, image: 'https://images.unsplash.com/photo-1498409785966-ab341407de6e?w=500&q=80' },
     ];
 
-    // 합쳐서 반환 (로컬 커스텀 템플릿을 먼저 보여줌)
-    return NextResponse.json({ success: true, data: [...customTemplates, ...mockTemplates] });
+    // 합쳐서 반환 (로컬 커스텀 및 부동산 시드 템플릿 포함)
+    return NextResponse.json({ success: true, data: [...customTemplates, ...REAL_ESTATE_SEEDS, ...mockTemplates] });
 
   } catch (error: any) {
     console.error('Error reading templates:', error);

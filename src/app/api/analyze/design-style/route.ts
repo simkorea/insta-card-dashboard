@@ -74,9 +74,46 @@ export async function POST(req: NextRequest) {
       };
       return `#${avg.r.toString(16).padStart(2, '0')}${avg.g.toString(16).padStart(2, '0')}${avg.b.toString(16).padStart(2, '0')}`;
     };
+function getBrandTone(hex: string): 'gold' | 'sage' {
+  try {
+    const cleanHex = hex.replace(/^#/, '');
+    if (!/^[0-9A-Fa-f]{6}$/.test(cleanHex) && !/^[0-9A-Fa-f]{3}$/.test(cleanHex)) {
+      return 'gold';
+    }
+    const r = parseInt(cleanHex.length === 3 ? cleanHex[0]+cleanHex[0] : cleanHex.slice(0, 2), 16) / 255;
+    const g = parseInt(cleanHex.length === 3 ? cleanHex[1]+cleanHex[1] : cleanHex.slice(2, 4), 16) / 255;
+    const b = parseInt(cleanHex.length === 3 ? cleanHex[2]+cleanHex[2] : cleanHex.slice(4, 6), 16) / 255;
+
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    let h = 0;
+    if (max !== min) {
+      const d = max - min;
+      switch (max) {
+        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+        case g: h = (b - r) / d + 2; break;
+        case b: h = (r - g) / d + 4; break;
+      }
+      h /= 6;
+    }
+    const hue = h * 360;
+
+    // Green/Sage family (hue typically between 70 and 170)
+    if (hue >= 70 && hue <= 170) {
+      return 'sage';
+    }
+    // Yellow/Gold or other families default to gold
+    return 'gold';
+  } catch {
+    return 'gold';
+  }
+}
+
+    const primaryColor = avgColor('primaryColor') || '#6366f1';
+    const brandTone = getBrandTone(primaryColor);
 
     const profile = {
-      primaryColor: avgColor('primaryColor') || '#6366f1',
+      primaryColor,
       secondaryColor: avgColor('secondaryColor') || '#818cf8',
       backgroundColor: avgColor('backgroundColor') || '#ffffff',
       textColor: avgColor('textColor') || '#1a1a1a',
@@ -87,6 +124,8 @@ export async function POST(req: NextRequest) {
       styleKeywords: topKeywords.length ? topKeywords : ['modern'],
       contentRatio: synthesize('contentRatio') || 'balanced',
       imageCount: images.length,
+      brandTone,
+      showFrame: true,
       analyses,
     };
 

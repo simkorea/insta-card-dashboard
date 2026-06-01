@@ -20,6 +20,8 @@ export async function POST(req: NextRequest) {
 4. 제목의 크기, 굵기, 색상
 5. 강조색 (노란색, 빨간색 등)
 6. 글머리 기호(bullet) 항목 수와 스타일
+7. 레이아웃에 해당하는 구조화된 "blocks" 배열 구성 (각 요소들을 SlideBlock 형태로 맵핑)
+8. 어울리는 브랜드 톤 (brandTone: 'gold' 또는 'sage')과 프레임 노출 여부 (showFrame: true 또는 false)
 
 반드시 코드블록 없이 JSON만 응답하세요:
 {
@@ -44,7 +46,22 @@ export async function POST(req: NextRequest) {
     "fontSize": 글머리 크기 숫자 (12~18),
     "fontWeight": "400",
     "color": "#FFFFFF"
-  }
+  },
+  "brandTone": "gold 또는 sage",
+  "showFrame": true 또는 false,
+  "blocks": [
+    // 아래 10가지 타입 중 이미지 내용에 매칭되는 블록들을 순서대로 배열로 구성:
+    // 1) { "type": "eyebrow", "text": "섹션 라벨 텍스트" }
+    // 2) { "type": "headline", "text": "헤드라인 전체 텍스트", "accentText": "강조할 일부 단어(있으면)" }
+    // 3) { "type": "sub", "text": "설명/서브 텍스트" }
+    // 4) { "type": "bigNumber", "value": "큰 숫자값 (예: 7억대)", "caption": "설명/캡션" }
+    // 5) { "type": "statGrid", "cols": 2 | 3 | 4, "items": [{"value": "수치값", "label": "라벨"}] }
+    // 6) { "type": "compareTable", "rows": [{"label": "구분", "value": "설명", "highlight": true|false}] }
+    // 7) { "type": "timeline", "items": [{"date": "날짜", "title": "제목", "desc": "설명", "state": "done"|"active"|"todo"}] }
+    // 8) { "type": "checklist", "items": ["체크리스트 내용들"] }
+    // 9) { "type": "badgeRow", "badges": [{"text": "태그명", "tone": "gold"|"green"|"neutral"}] }
+    // 10) { "type": "sourceNote", "text": "출처 정보 (예: 국토교통부)" }
+  ]
 }`;
 
     let text = (await generateWithRetry({
@@ -60,6 +77,28 @@ export async function POST(req: NextRequest) {
     else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
 
     const template = JSON.parse(text);
+
+    // blocks, brandTone, showFrame에 대한 하위 호환성 보장 로직 추가
+    if (!template.blocks || !Array.isArray(template.blocks)) {
+      const fallbackBlocks = [];
+      if (template.title) {
+        fallbackBlocks.push({ type: 'headline', text: template.title });
+      }
+      if (template.subtitle) {
+        fallbackBlocks.push({ type: 'sub', text: template.subtitle });
+      }
+      if (template.bullets && Array.isArray(template.bullets) && template.bullets.length > 0) {
+        fallbackBlocks.push({ type: 'checklist', items: template.bullets });
+      }
+      template.blocks = fallbackBlocks;
+    }
+    if (!template.brandTone) {
+      template.brandTone = 'gold';
+    }
+    if (template.showFrame === undefined) {
+      template.showFrame = true;
+    }
+
     return NextResponse.json({ template });
   } catch (e: any) {
     return NextResponse.json({ error: toKoreanError(e) }, { status: 500 });

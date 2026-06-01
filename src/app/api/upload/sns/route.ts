@@ -282,7 +282,8 @@ export async function POST(req: NextRequest) {
             results.instagram = await uploadToInstagram(accounts.instagram ?? null, imageUrls, caption);
             break;
           case 'tiktok':
-            results.tiktok = await uploadToTikTok(accounts.tiktok ?? null, imageUrls, caption);
+            // results.tiktok = await uploadToTikTok(accounts.tiktok ?? null, imageUrls, caption);
+            results.tiktok = { success: false, error: 'TikTok은 이미지 게시물을 지원하지 않습니다. 영상 전용(준비 중)입니다.' };
             break;
           case 'youtube':
             results.youtube = { success: false, error: 'YouTube는 이미지 게시물을 지원하지 않습니다. 동영상 전용입니다.' };

@@ -13,6 +13,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { friendlyError } from '@/lib/errors';
+import type { SlideBlock, BrandTone } from '@/lib/cardnews/blocks';
+import { BlockRenderer } from '@/components/cardnews/BlockRenderer';
+import { SlideFrame } from '@/components/cardnews/SlideFrame';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TextStyle {
@@ -87,6 +90,11 @@ interface PageData {
   bgBrightness?: number;
   bgBrightnessFilter?: number;  // CSS filter brightness % (50-200, default 100)
   overlayOpacity?: number;       // gradient overlay opacity % (0-100, default 100)
+  blocks?: SlideBlock[];
+  brandTone?: BrandTone;
+  showFrame?: boolean;
+  blocksOffsetY?: number;
+  handle?: string;
 }
 
 const BUSINESS_THEME_DATA: PageData[] = [
@@ -531,7 +539,7 @@ function getLayersForPage(page: PageData): CanvasLayerWithSrc[] {
 }
 
 // AI 생성 데이터({ page, title, body, backgroundImage, accent, imageKeyword }[]) → PageData[] 변환
-function cardNewsToPages(raw: { page: number; title: string; body: string; backgroundImage?: string; accent?: string; imageKeyword?: string }[], theme: PageData[] = PAGES_DATA): PageData[] {
+function cardNewsToPages(raw: { page: number; title: string; body: string; backgroundImage?: string; accent?: string; imageKeyword?: string; blocks?: SlideBlock[]; brandTone?: BrandTone; showFrame?: boolean; blocksOffsetY?: number; }[], theme: PageData[] = PAGES_DATA): PageData[] {
   const lastIdx = raw.length - 1;
   return raw.map((card, i) => {
     // 테마 슬롯 매핑: 첫 장은 표지, 마지막 장은 마무리, 나머지는 중간 레이아웃 반복
@@ -546,8 +554,13 @@ function cardNewsToPages(raw: { page: number; title: string; body: string; backg
     const bgImage = card.backgroundImage || base.bgImage;
     const accent = card.accent || base.accent;
     const imageKeyword = card.imageKeyword;
+    const blocks = card.blocks || base.blocks;
+    const brandTone = card.brandTone || base.brandTone;
+    const showFrame = card.showFrame !== undefined ? card.showFrame : base.showFrame;
+    const blocksOffsetY = card.blocksOffsetY !== undefined ? card.blocksOffsetY : base.blocksOffsetY;
+
     if (i === 0) {
-      return { ...base, id: card.page, title: card.title, subtitle: card.body, bullets: undefined, bgImage, accent, imageKeyword };
+      return { ...base, id: card.page, title: card.title, subtitle: card.body, bullets: undefined, bgImage, accent, imageKeyword, blocks, brandTone, showFrame, blocksOffsetY };
     }
     const bodyLines = card.body.split('\n').map((l: string) => l.trim()).filter(Boolean);
     return {
@@ -559,6 +572,10 @@ function cardNewsToPages(raw: { page: number; title: string; body: string; backg
       bgImage,
       accent,
       imageKeyword,
+      blocks,
+      brandTone,
+      showFrame,
+      blocksOffsetY,
     };
   });
 }
@@ -843,12 +860,14 @@ function ImagePanel({
   initialBrightness,
   initialBrightnessFilter,
   initialOverlayOpacity,
+  initialBlocksOffsetY,
   onSelectImage,
   onDeselect,
   onUpdateBgTransform,
   onUpdateBrightness,
   onUpdateBrightnessFilter,
   onUpdateOverlayOpacity,
+  onUpdateBlocksOffsetY,
   onApplySettingsAll,
 }: {
   layer: CanvasLayer;
@@ -860,12 +879,14 @@ function ImagePanel({
   initialBrightness?: number;
   initialBrightnessFilter?: number;
   initialOverlayOpacity?: number;
+  initialBlocksOffsetY?: number;
   onSelectImage?: (url: string) => void;
   onDeselect: () => void;
   onUpdateBgTransform?: (scale: number, pos: { x: number; y: number }) => void;
   onUpdateBrightness?: (brightness: number) => void;
   onUpdateBrightnessFilter?: (v: number) => void;
   onUpdateOverlayOpacity?: (v: number) => void;
+  onUpdateBlocksOffsetY?: (v: number) => void;
   onApplySettingsAll?: (settings: { bgBrightness: number; bgBrightnessFilter: number; overlayOpacity: number }) => void;
 }) {
   const [focusDot, setFocusDot] = useState(initialPosition ?? { x: 50, y: 50 });
@@ -875,6 +896,14 @@ function ImagePanel({
   const [brightness, setBrightness] = useState(initialBrightness ?? 0);
   const [brightnessFilter, setBrightnessFilter] = useState(initialBrightnessFilter ?? 100);
   const [overlayOpacity, setOverlayOpacity] = useState(initialOverlayOpacity ?? 100);
+  const [blocksOffsetY, setBlocksOffsetY] = useState(initialBlocksOffsetY ?? 70);
+
+  useEffect(() => {
+    if (initialBlocksOffsetY !== undefined) {
+      setBlocksOffsetY(initialBlocksOffsetY);
+    }
+  }, [initialBlocksOffsetY]);
+
   const [imgTab, setImgTab] = useState<ImageTab>('상업사용');
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestedQuery, setSuggestedQuery] = useState('');
@@ -1285,6 +1314,34 @@ function ImagePanel({
                   ))}
                 </div>
               </div>
+
+              {/* 블록 위치 (blocks가 있는 경우에만) */}
+              {initialBlocksOffsetY !== undefined && onUpdateBlocksOffsetY && (
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[11px] font-semibold text-gray-700">블록 상하 위치</span>
+                    <span className="text-[11px] text-gray-400 font-mono bg-gray-100 px-1.5 py-0.5 rounded">{blocksOffsetY}%</span>
+                  </div>
+                  <input
+                    type="range" min={10} max={90} value={blocksOffsetY}
+                    onChange={e => {
+                      const v = Number(e.target.value);
+                      setBlocksOffsetY(v);
+                      onUpdateBlocksOffsetY(v);
+                      setApplyAllDone(false);
+                    }}
+                    className="w-full accent-violet-600 h-1.5"
+                  />
+                  <div className="flex gap-1.5 mt-1.5">
+                    {[20, 40, 60, 70, 80].map(v => (
+                      <button key={v} onClick={() => { setBlocksOffsetY(v); onUpdateBlocksOffsetY(v); setApplyAllDone(false); }}
+                        className={`flex-1 py-1 text-[10px] font-bold rounded-lg border transition-all ${blocksOffsetY === v ? 'bg-violet-600 text-white border-violet-600' : 'border-gray-200 text-gray-500 hover:bg-gray-50'}`}>
+                        {v}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 일괄 적용 버튼 */}
@@ -2662,6 +2719,42 @@ export default function EditorPage() {
     setCanRedo(false);
   }, []);
 
+  // ── 블록 상하 드래그 Y축 위치 조작 ──
+  const [isDraggingBlocks, setIsDraggingBlocks] = useState(false);
+
+  useEffect(() => {
+    if (!isDraggingBlocks) return;
+    
+    let currentVal = pagesData.find(p => p.id === currentPage)?.blocksOffsetY ?? 70;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!canvasElemRef.current) return;
+      const rect = canvasElemRef.current.getBoundingClientRect();
+      const relativeY = e.clientY - rect.top;
+      let percent = Math.round((relativeY / rect.height) * 100);
+      percent = Math.max(10, Math.min(90, percent));
+      currentVal = percent;
+      
+      setPagesData(prev => prev.map(p => p.id !== currentPage ? p : { ...p, blocksOffsetY: percent }));
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingBlocks(false);
+      setPagesData(prev => {
+        const next = prev.map(p => p.id !== currentPage ? p : { ...p, blocksOffsetY: currentVal });
+        pushHistory(next);
+        return next;
+      });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingBlocks, currentPage, pushHistory, pagesData]);
+
   // layerId 1=title, 2=subtitle, 3+=bullets[layerId-3] / style은 선택 적용
   const updatePageField = useCallback((pageId: number, layerId: number, content: string, style?: TextStyle) => {
     setPagesData(prev => {
@@ -3461,198 +3554,290 @@ export default function EditorPage() {
                   ? <div key={i} className="absolute top-0 bottom-0 pointer-events-none z-50" style={{ left: `${g.x}%`, width: 1, background: 'rgba(99,102,241,0.8)' }} />
                   : <div key={i} className="absolute left-0 right-0 pointer-events-none z-50" style={{ top: `${g.y}%`, height: 1, background: 'rgba(99,102,241,0.8)' }} />
               ))}
-              {/* Background image layer */}
-              <div
-                onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[0]); }}
-                className={`absolute inset-0 cursor-pointer transition-all overflow-hidden ${selectedLayer?.id === 0 ? 'ring-2 ring-primary-500' : 'hover:ring-2 hover:ring-primary-300/60'}`}
-              >
-                <img src={currentBgImage} alt="배경" className="w-full h-full object-cover"
-                  style={{
-                    transform: `scale(${pageData.bgScale ?? 1})`,
-                    transformOrigin: `${pageData.bgPosition?.x ?? 50}% ${pageData.bgPosition?.y ?? 50}%`,
-                    filter: `brightness(${(pageData.bgBrightnessFilter ?? 100) / 100})`,
-                    transition: 'transform 0.1s ease',
-                  }}
-                />
-                <div className="absolute inset-0" style={{ background: pageData.overlay, opacity: (pageData.overlayOpacity ?? 100) / 100 }} />
-                {(pageData.bgBrightness ?? 0) > 0 && (
-                  <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${(pageData.bgBrightness ?? 0) / 100})` }} />
-                )}
-                {brandKit?.logo && (
-                  <div className="absolute top-[4%] right-[4%] z-10 opacity-80 pointer-events-none">
-                    <img src={brandKit.logo} className="h-4 object-contain" style={{ height: `${(16 * canvasW) / 420}px` }} />
-                  </div>
-                )}
-                {selectedLayer?.id === 0 && (
-                  <span className="absolute top-2 left-2 bg-primary-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow">
-                    🖼 {pageData.bgLabel}
-                  </span>
-                )}
-              </div>
+              {/* Canvas layers */}
+              {(() => {
+                const eyebrowBlock = pageData.blocks?.find(b => b.type === 'eyebrow');
+                const eyebrowText = eyebrowBlock && 'text' in eyebrowBlock ? eyebrowBlock.text : undefined;
 
-              {/* Text layers — layout varies per page */}
-              <div className="absolute inset-0 pointer-events-none">
-                {pageData.layout === 'center' && (
-                  <div className="flex flex-col items-center justify-center h-full px-10 text-center">
+                const innerLayers = (
+                  <>
+                    {/* Background image layer */}
                     <div
-                      onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }}
-                      className={`pointer-events-auto cursor-pointer mb-4 rounded px-2 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}
+                      onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[0]); }}
+                      className={`absolute inset-0 cursor-pointer transition-all overflow-hidden ${selectedLayer?.id === 0 ? 'ring-2 ring-primary-500' : 'hover:ring-2 hover:ring-primary-300/60'}`}
                     >
-                      <h1
-                        className="drop-shadow-lg whitespace-pre-line"
+                      <img src={currentBgImage} alt="배경" className="w-full h-full object-cover"
                         style={{
-                          fontSize: `${((pageData.titleStyle?.fontSize ?? 38) * canvasW) / 420}px`,
-                          fontWeight: pageData.titleStyle?.fontWeight ?? '900',
-                          fontFamily: pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                          color: pageData.titleStyle?.color ?? '#FFFFFF',
-                          letterSpacing: pageData.titleStyle?.letterSpacing ? `${pageData.titleStyle.letterSpacing}px` : undefined,
-                          lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
-                          textAlign: pageData.titleStyle?.align ?? 'center',
+                          transform: `scale(${pageData.bgScale ?? 1})`,
+                          transformOrigin: `${pageData.bgPosition?.x ?? 50}% ${pageData.bgPosition?.y ?? 50}%`,
+                          filter: `brightness(${(pageData.bgBrightnessFilter ?? 100) / 100})`,
+                          transition: 'transform 0.1s ease',
                         }}
-                      >
-                        {pageData.title}
-                      </h1>
-                    </div>
-                    <div className="w-16 h-0.5 bg-white/50 mb-4" />
-                    {pageData.subtitle && (
-                      <div
-                        onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2]); }}
-                        className={`pointer-events-auto cursor-pointer rounded px-2 py-1 transition-all ${selectedLayer?.id === 2 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}
-                      >
-                        <p
-                          className="whitespace-pre-line drop-shadow"
-                          style={{
-                            fontSize: `${((pageData.subtitleStyle?.fontSize ?? 14) * canvasW) / 420}px`,
-                            fontWeight: pageData.subtitleStyle?.fontWeight ?? '400',
-                            fontFamily: pageData.subtitleStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                            color: pageData.subtitleStyle?.color ?? '#E5E7EB',
-                            lineHeight: pageData.subtitleStyle?.lineHeight ?? 1.6,
-                            textAlign: pageData.subtitleStyle?.align ?? 'center',
-                          }}
-                        >
-                          {pageData.subtitle}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {(pageData.layout === 'bottom-left' || pageData.layout === 'bottom-left-list') && (
-                  <div className="flex flex-col justify-end h-full px-8 pb-10 gap-5">
-                    <div
-                      onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }}
-                      className={`pointer-events-auto cursor-pointer flex items-start gap-3 rounded px-1 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}
-                    >
-                      <span className="mt-0.5 shrink-0" style={{ color: pageData.accent || '#ffd700', fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px` }}>●</span>
-                      <h2
-                        className="leading-tight drop-shadow"
-                        style={{
-                          fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px`,
-                          fontWeight: pageData.titleStyle?.fontWeight ?? '900',
-                          fontFamily: pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                          color: pageData.titleStyle?.color ?? (pageData.accent || '#ffd700'),
-                          lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
-                          textDecoration: 'underline',
-                          textDecorationColor: 'rgba(255,215,0,0.5)',
-                        }}
-                      >
-                        {pageData.title}
-                      </h2>
+                      />
+                      <div className="absolute inset-0" style={{ background: pageData.overlay, opacity: (pageData.overlayOpacity ?? 100) / 100 }} />
+                      {(pageData.bgBrightness ?? 0) > 0 && (
+                        <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${(pageData.bgBrightness ?? 0) / 100})` }} />
+                      )}
+                      {brandKit?.logo && !pageData.showFrame && (
+                        <div className="absolute top-[4%] right-[4%] z-10 opacity-80 pointer-events-none">
+                          <img src={brandKit.logo} className="h-4 object-contain" style={{ height: `${(16 * canvasW) / 420}px` }} />
+                        </div>
+                      )}
+                      {selectedLayer?.id === 0 && (
+                        <span className="absolute top-2 left-2 bg-primary-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow">
+                          🖼 {pageData.bgLabel}
+                        </span>
+                      )}
                     </div>
 
-                    {pageData.bullets && (
-                      <div className="space-y-2.5 pl-2">
-                        {pageData.bullets.map((bullet, i) => (
+                    {/* Text layers — layout varies per page */}
+                    <div className="absolute inset-0 pointer-events-none">
+                      {(pageData.blocks?.length ?? 0) > 0 ? (
+                        <>
                           <div
-                            key={i}
-                            onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2 + i]); }}
-                            className={`pointer-events-auto cursor-pointer flex items-start gap-2 rounded px-1 py-0.5 transition-all ${selectedLayer?.id === 2 + i ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}
+                            style={{
+                              position: 'absolute',
+                              top: 0,
+                              bottom: `${100 - (pageData.blocksOffsetY ?? 70)}%`,
+                              left: 28,
+                              right: 28,
+                              display: 'flex',
+                              flexDirection: 'column',
+                              paddingBottom: 40,
+                              pointerEvents: 'none',
+                            }}
                           >
-                            <span className="text-white/60 shrink-0 mt-0.5" style={{ fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px` }}>•</span>
-                            <p
-                              className="drop-shadow"
-                              style={{
-                                fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px`,
-                                fontWeight: pageData.bulletStyle?.fontWeight ?? '400',
-                                fontFamily: pageData.bulletStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                                color: pageData.bulletStyle?.color ?? '#FFFFFF',
-                                lineHeight: pageData.bulletStyle?.lineHeight ?? 1.6,
-                              }}
-                              dangerouslySetInnerHTML={{ __html: bullet.replace(/<b>(.*?)<\/b>/g, `<b style="color:${pageData.accent || '#ffd700'}">$1</b>`) }}
-                            />
+                            <div style={{ pointerEvents: 'none', display: 'flex', flexDirection: 'column', width: '100%', marginTop: 'auto' }}>
+                              <BlockRenderer
+                                blocks={pageData.blocks!}
+                                brandTone={pageData.brandTone}
+                                editable={true}
+                                availableHeight={Math.floor(canvasW * 1.25 * (pageData.blocksOffsetY ?? 70) / 100 - 40)}
+                                onBlockOffsetChange={(index, offsetY) => {
+                                  const updatedBlocks = [...(pageData.blocks || [])];
+                                  if (updatedBlocks[index]) {
+                                    updatedBlocks[index] = {
+                                      ...updatedBlocks[index],
+                                      offsetY,
+                                    };
+                                    updatePageData(currentPage, { blocks: updatedBlocks });
+                                  }
+                                }}
+                              />
+                            </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Canvas Elements Layer */}
-              {(pageData.elements || []).map(elem => {
-                const isSelected = selectedElementId === elem.id;
-                const isEditing = editingElemId === elem.id;
-                const displayX = draggingElemId === elem.id && dragPos ? dragPos.x : elem.x;
-                const displayY = draggingElemId === elem.id && dragPos ? dragPos.y : elem.y;
-                const pxSize = (elem.size / 100) * canvasW;
-                const textW = elem.type === 'text' ? ((elem.width ?? 80) / 100) * canvasW : pxSize;
-                const scaledFs = ((elem.fontSize ?? 16) * canvasW) / 420;
-                return (
-                  <div
-                    key={elem.id}
-                    className={`absolute select-none ${isEditing ? 'cursor-text' : 'cursor-move'} transition-shadow ${isSelected ? 'ring-2 ring-blue-400 ring-offset-1 rounded-sm' : 'hover:ring-1 hover:ring-blue-300 rounded-sm'}`}
-                    style={{
-                      left: `${displayX}%`, top: `${displayY}%`,
-                      width: elem.type === 'text' ? `${textW}px` : `${pxSize}px`,
-                      height: elem.type === 'text' ? 'auto' : `${pxSize}px`,
-                      opacity: elem.opacity, zIndex: 15,
-                      transform: 'translate(-50%, -50%)',
-                    }}
-                    onMouseDown={e => { if (!isEditing) handleCanvasElemMouseDown(e, elem); }}
-                    onDoubleClick={e => { if (elem.type === 'text') { e.stopPropagation(); setEditingElemId(elem.id); } }}
-                  >
-                    {elem.type === 'shape' && elem.shape && <ShapeSVG shape={elem.shape} color={elem.color} />}
-                    {elem.type === 'emoji' && (
-                      <span style={{ fontSize: `${pxSize}px`, lineHeight: 1, userSelect: 'none' }}>{elem.emoji}</span>
-                    )}
-                    {elem.type === 'text' && (
-                      isEditing ? (
-                        <textarea
-                          autoFocus
-                          defaultValue={elem.text ?? ''}
-                          onBlur={e => { updateElement(elem.id, { text: e.target.value }); setEditingElemId(null); }}
-                          onMouseDown={e => e.stopPropagation()}
-                          rows={3}
-                          style={{
-                            width: '100%', background: 'transparent', border: 'none', outline: '2px solid rgba(59,130,246,0.6)',
-                            resize: 'none', padding: '2px 4px', borderRadius: 2,
-                            fontSize: `${scaledFs}px`, fontWeight: elem.fontWeight ?? '400',
-                            fontFamily: elem.fontFamily ?? 'Noto Sans KR',
-                            textAlign: elem.textAlign ?? 'left', color: elem.color, lineHeight: 1.4,
-                          }}
-                        />
+                          {/* Y-axis drag handlebar ⠿ 블록 위치 조절 */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: 28,
+                              right: 28,
+                              top: `${(pageData.blocksOffsetY ?? 70) - 5}%`, // 핸들이 블록 바로 위에 오도록
+                              zIndex: 40,
+                              pointerEvents: 'auto',
+                            }}
+                            className="flex justify-center"
+                          >
+                            <div
+                              onMouseDown={e => {
+                                e.stopPropagation();
+                                e.preventDefault();
+                                setIsDraggingBlocks(true);
+                              }}
+                              className="cursor-ns-resize bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 active:scale-95 transition-all select-none border border-violet-500"
+                              title="드래그하여 블록 위치 조절"
+                            >
+                              <span className="font-mono">⠿</span>
+                              <span>블록 위치 조절</span>
+                              <span className="bg-white/20 px-1 py-0.2 rounded font-mono text-[9px]">
+                                {pageData.blocksOffsetY ?? 70}%
+                              </span>
+                            </div>
+                          </div>
+                        </>
                       ) : (
-                        <p style={{
-                          fontSize: `${scaledFs}px`, fontWeight: elem.fontWeight ?? '400',
-                          fontFamily: elem.fontFamily ?? 'Noto Sans KR',
-                          textAlign: elem.textAlign ?? 'left', color: elem.color,
-                          lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                          margin: 0, padding: '2px 4px', userSelect: 'none',
-                        }}>
-                          {elem.text || <span style={{ opacity: 0.4 }}>텍스트 입력...</span>}
-                        </p>
-                      )
-                    )}
-                    {isSelected && !isEditing && (
-                      <button
-                        className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center shadow-lg z-20 cursor-pointer hover:bg-red-600"
-                        onMouseDown={e => e.stopPropagation()}
-                        onClick={e => { e.stopPropagation(); deleteElement(elem.id); }}
-                      >×</button>
-                    )}
-                  </div>
+                        <>
+                          {pageData.layout === 'center' && (
+                            <div className="flex flex-col items-center justify-center h-full px-10 text-center">
+                              <div
+                                onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }}
+                                className={`pointer-events-auto cursor-pointer mb-4 rounded px-2 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}
+                              >
+                                <h1
+                                  className="drop-shadow-lg whitespace-pre-line"
+                                  style={{
+                                    fontSize: `${((pageData.titleStyle?.fontSize ?? 38) * canvasW) / 420}px`,
+                                    fontWeight: pageData.titleStyle?.fontWeight ?? '900',
+                                    fontFamily: pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                    color: pageData.titleStyle?.color ?? '#FFFFFF',
+                                    letterSpacing: pageData.titleStyle?.letterSpacing ? `${pageData.titleStyle.letterSpacing}px` : undefined,
+                                    lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
+                                    textAlign: pageData.titleStyle?.align ?? 'center',
+                                  }}
+                                >
+                                  {pageData.title}
+                                </h1>
+                              </div>
+                              <div className="w-16 h-0.5 bg-white/50 mb-4" />
+                              {pageData.subtitle && (
+                                <div
+                                  onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2]); }}
+                                  className={`pointer-events-auto cursor-pointer rounded px-2 py-1 transition-all ${selectedLayer?.id === 2 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}
+                                >
+                                  <p
+                                    className="whitespace-pre-line drop-shadow"
+                                    style={{
+                                      fontSize: `${((pageData.subtitleStyle?.fontSize ?? 14) * canvasW) / 420}px`,
+                                      fontWeight: pageData.subtitleStyle?.fontWeight ?? '400',
+                                      fontFamily: pageData.subtitleStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                      color: pageData.subtitleStyle?.color ?? '#E5E7EB',
+                                      lineHeight: pageData.subtitleStyle?.lineHeight ?? 1.6,
+                                      textAlign: pageData.subtitleStyle?.align ?? 'center',
+                                    }}
+                                  >
+                                    {pageData.subtitle}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {(pageData.layout === 'bottom-left' || pageData.layout === 'bottom-left-list') && (
+                            <div className="flex flex-col justify-end h-full px-8 pb-10 gap-5">
+                              <div
+                                onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }}
+                                className={`pointer-events-auto cursor-pointer flex items-start gap-3 rounded px-1 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}
+                              >
+                                <span className="mt-0.5 shrink-0" style={{ color: pageData.accent || '#ffd700', fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px` }}>●</span>
+                                <h2
+                                  className="leading-tight drop-shadow"
+                                  style={{
+                                    fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px`,
+                                    fontWeight: pageData.titleStyle?.fontWeight ?? '900',
+                                    fontFamily: pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                    color: pageData.titleStyle?.color ?? (pageData.accent || '#ffd700'),
+                                    lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
+                                    textDecoration: 'underline',
+                                    textDecorationColor: 'rgba(255,215,0,0.5)',
+                                  }}
+                                >
+                                  {pageData.title}
+                                </h2>
+                              </div>
+
+                              {pageData.bullets && (
+                                <div className="space-y-2.5 pl-2">
+                                  {pageData.bullets.map((bullet, i) => (
+                                    <div
+                                      key={i}
+                                      onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2 + i]); }}
+                                      className={`pointer-events-auto cursor-pointer flex items-start gap-2 rounded px-1 py-0.5 transition-all ${selectedLayer?.id === 2 + i ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}
+                                    >
+                                      <span className="text-white/60 shrink-0 mt-0.5" style={{ fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px` }}>•</span>
+                                      <p
+                                        className="drop-shadow"
+                                        style={{
+                                          fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px`,
+                                          fontWeight: pageData.bulletStyle?.fontWeight ?? '400',
+                                          fontFamily: pageData.bulletStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                          color: pageData.bulletStyle?.color ?? '#FFFFFF',
+                                          lineHeight: pageData.bulletStyle?.lineHeight ?? 1.6,
+                                        }}
+                                        dangerouslySetInnerHTML={{ __html: bullet.replace(/<b>(.*?)<\/b>/g, `<b style="color:${pageData.accent || '#ffd700'}">$1</b>`) }}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {/* Canvas Elements Layer */}
+                    {(pageData.elements || []).map(elem => {
+                      const isSelected = selectedElementId === elem.id;
+                      const isEditing = editingElemId === elem.id;
+                      const displayX = draggingElemId === elem.id && dragPos ? dragPos.x : elem.x;
+                      const displayY = draggingElemId === elem.id && dragPos ? dragPos.y : elem.y;
+                      const pxSize = (elem.size / 100) * canvasW;
+                      const textW = elem.type === 'text' ? ((elem.width ?? 80) / 100) * canvasW : pxSize;
+                      const scaledFs = ((elem.fontSize ?? 16) * canvasW) / 420;
+                      return (
+                        <div
+                          key={elem.id}
+                          className={`absolute select-none ${isEditing ? 'cursor-text' : 'cursor-move'} transition-shadow ${isSelected ? 'ring-2 ring-blue-400 ring-offset-1 rounded-sm' : 'hover:ring-1 hover:ring-blue-300 rounded-sm'}`}
+                          style={{
+                            left: `${displayX}%`, top: `${displayY}%`,
+                            width: elem.type === 'text' ? `${textW}px` : `${pxSize}px`,
+                            height: elem.type === 'text' ? 'auto' : `${pxSize}px`,
+                            opacity: elem.opacity, zIndex: 15,
+                            transform: 'translate(-50%, -50%)',
+                          }}
+                          onMouseDown={e => { if (!isEditing) handleCanvasElemMouseDown(e, elem); }}
+                          onDoubleClick={e => { if (elem.type === 'text') { e.stopPropagation(); setEditingElemId(elem.id); } }}
+                        >
+                          {elem.type === 'shape' && elem.shape && <ShapeSVG shape={elem.shape} color={elem.color} />}
+                          {elem.type === 'emoji' && (
+                            <span style={{ fontSize: `${pxSize}px`, lineHeight: 1, userSelect: 'none' }}>{elem.emoji}</span>
+                          )}
+                          {elem.type === 'text' && (
+                            isEditing ? (
+                              <textarea
+                                autoFocus
+                                defaultValue={elem.text ?? ''}
+                                onBlur={e => { updateElement(elem.id, { text: e.target.value }); setEditingElemId(null); }}
+                                onMouseDown={e => e.stopPropagation()}
+                                rows={3}
+                                style={{
+                                  width: '100%', background: 'transparent', border: 'none', outline: '2px solid rgba(59,130,246,0.6)',
+                                  resize: 'none', padding: '2px 4px', borderRadius: 2,
+                                  fontSize: `${scaledFs}px`, fontWeight: elem.fontWeight ?? '400',
+                                  fontFamily: elem.fontFamily ?? 'Noto Sans KR',
+                                  textAlign: elem.textAlign ?? 'left', color: elem.color, lineHeight: 1.4,
+                                }}
+                              />
+                            ) : (
+                              <p style={{
+                                fontSize: `${scaledFs}px`, fontWeight: elem.fontWeight ?? '400',
+                                fontFamily: elem.fontFamily ?? 'Noto Sans KR',
+                                textAlign: elem.textAlign ?? 'left', color: elem.color,
+                                lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                                margin: 0, padding: '2px 4px', userSelect: 'none',
+                              }}>
+                                {elem.text || <span style={{ opacity: 0.4 }}>텍스트 입력...</span>}
+                              </p>
+                            )
+                          )}
+                          {isSelected && !isEditing && (
+                            <button
+                              className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center shadow-lg z-20 cursor-pointer hover:bg-red-600"
+                              onMouseDown={e => e.stopPropagation()}
+                              onClick={e => { e.stopPropagation(); deleteElement(elem.id); }}
+                            >×</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
                 );
-              })}
+
+                if (pageData.showFrame) {
+                  return (
+                    <SlideFrame
+                      page={currentPage}
+                      total={pagesData.length}
+                      brandTone={pageData.brandTone}
+                      eyebrow={undefined}
+                      handle={pageData.handle ?? '@aptshowhome'}
+                    >
+                      {innerLayers}
+                    </SlideFrame>
+                  );
+                }
+                return innerLayers;
+              })()}
 
               {/* Floating toolbar */}
               {selectedLayer && (
@@ -3767,12 +3952,14 @@ export default function EditorPage() {
                   initialBrightness={pageData.bgBrightness}
                   initialBrightnessFilter={pageData.bgBrightnessFilter}
                   initialOverlayOpacity={pageData.overlayOpacity}
+                  initialBlocksOffsetY={(pageData.blocks?.length ?? 0) > 0 ? (pageData.blocksOffsetY ?? 70) : undefined}
                   onSelectImage={handleSelectImage}
                   onDeselect={handleDeselect}
                   onUpdateBgTransform={(scale, pos) => updatePageData(currentPage, { bgScale: scale, bgPosition: pos })}
                   onUpdateBrightness={b => updatePageData(currentPage, { bgBrightness: b })}
                   onUpdateBrightnessFilter={v => updatePageData(currentPage, { bgBrightnessFilter: v })}
                   onUpdateOverlayOpacity={v => updatePageData(currentPage, { overlayOpacity: v })}
+                  onUpdateBlocksOffsetY={v => updatePageData(currentPage, { blocksOffsetY: v })}
                   onApplySettingsAll={applyImageSettingsToAllPages}
                 />
               </div>
@@ -3875,12 +4062,14 @@ export default function EditorPage() {
                 initialBrightness={pageData.bgBrightness}
                 initialBrightnessFilter={pageData.bgBrightnessFilter}
                 initialOverlayOpacity={pageData.overlayOpacity}
+                initialBlocksOffsetY={(pageData.blocks?.length ?? 0) > 0 ? (pageData.blocksOffsetY ?? 70) : undefined}
                 onSelectImage={handleSelectImage}
                 onDeselect={handleDeselect}
                 onUpdateBgTransform={(scale, pos) => updatePageData(currentPage, { bgScale: scale, bgPosition: pos })}
                 onUpdateBrightness={b => updatePageData(currentPage, { bgBrightness: b })}
                 onUpdateBrightnessFilter={v => updatePageData(currentPage, { bgBrightnessFilter: v })}
                 onUpdateOverlayOpacity={v => updatePageData(currentPage, { overlayOpacity: v })}
+                onUpdateBlocksOffsetY={v => updatePageData(currentPage, { blocksOffsetY: v })}
                 onApplySettingsAll={applyImageSettingsToAllPages}
               />
             )}
@@ -3933,7 +4122,31 @@ function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; lo
         </div>
       )}
       <div className="absolute inset-0 pointer-events-none">
-        {page.layout === 'center' && (
+        {page.blocks && page.blocks.length > 0 ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: 0,
+              bottom: `${100 - (page.blocksOffsetY ?? 70)}%`,
+              left: 28,
+              right: 28,
+              display: 'flex',
+              flexDirection: 'column',
+              paddingBottom: 40,
+              pointerEvents: 'none',
+            }}
+          >
+            <div style={{ pointerEvents: 'none', display: 'flex', flexDirection: 'column', width: '100%', marginTop: 'auto' }}>
+              <BlockRenderer
+                blocks={page.blocks}
+                brandTone={page.brandTone}
+                availableHeight={Math.floor(525 * (page.blocksOffsetY ?? 70) / 100 - 40)}
+              />
+            </div>
+          </div>
+        ) : (
+          <>
+            {page.layout === 'center' && (
           <div className="flex flex-col items-center justify-center h-full px-10 text-center">
             <h1
               className="drop-shadow-lg whitespace-pre-line"
@@ -4007,6 +4220,8 @@ function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; lo
               </div>
             )}
           </div>
+        )}
+        </>
         )}
       </div>
       {/* Free-placement text/shape/emoji elements */}
@@ -4227,175 +4442,226 @@ function FullscreenEditor({
                   ? <div key={i} className="absolute top-0 bottom-0 pointer-events-none z-50" style={{ left: `${g.x}%`, width: 1, background: 'rgba(99,102,241,0.8)' }} />
                   : <div key={i} className="absolute left-0 right-0 pointer-events-none z-50" style={{ top: `${g.y}%`, height: 1, background: 'rgba(99,102,241,0.8)' }} />
               ))}
-              {/* Background image */}
-              <div
-                onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[0]); }}
-                className={`absolute inset-0 cursor-pointer transition-all overflow-hidden ${selectedLayer?.id === 0 ? 'ring-2 ring-primary-500' : 'hover:ring-2 hover:ring-primary-300/60'}`}
-              >
-                <img src={currentBgImage} alt="배경" className="w-full h-full object-cover"
-                  style={{
-                    transform: `scale(${pageData.bgScale ?? 1})`,
-                    transformOrigin: `${pageData.bgPosition?.x ?? 50}% ${pageData.bgPosition?.y ?? 50}%`,
-                    filter: `brightness(${(pageData.bgBrightnessFilter ?? 100) / 100})`,
-                    transition: 'transform 0.1s ease',
-                  }}
-                />
-                <div className="absolute inset-0" style={{ background: pageData.overlay, opacity: (pageData.overlayOpacity ?? 100) / 100 }} />
-                {(pageData.bgBrightness ?? 0) > 0 && (
-                  <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${(pageData.bgBrightness ?? 0) / 100})` }} />
-                )}
-                {brandLogo && (
-                  <div className="absolute top-[4%] right-[4%] z-10 opacity-80 pointer-events-none">
-                    <img src={brandLogo} className="h-4 object-contain" style={{ height: `${(16 * canvasW) / 420}px` }} />
-                  </div>
-                )}
-                {selectedLayer?.id === 0 && (
-                  <span className="absolute top-2 left-2 bg-primary-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow">
-                    🖼 {pageData.bgLabel}
-                  </span>
-                )}
-              </div>
+              {/* Canvas layers */}
+              {(() => {
+                const eyebrowBlock = pageData.blocks?.find(b => b.type === 'eyebrow');
+                const eyebrowText = eyebrowBlock && 'text' in eyebrowBlock ? eyebrowBlock.text : undefined;
 
-              {/* Text layers */}
-              <div className="absolute inset-0 pointer-events-none">
-                {pageData.layout === 'center' && (
-                  <div className="flex flex-col items-center justify-center h-full px-10 text-center">
-                    <div onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }} className={`pointer-events-auto cursor-pointer mb-4 rounded px-2 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}>
-                      <h1
-                        className="drop-shadow-lg whitespace-pre-line"
+                const innerLayers = (
+                  <>
+                    {/* Background image */}
+                    <div
+                      onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[0]); }}
+                      className={`absolute inset-0 cursor-pointer transition-all overflow-hidden ${selectedLayer?.id === 0 ? 'ring-2 ring-primary-500' : 'hover:ring-2 hover:ring-primary-300/60'}`}
+                    >
+                      <img src={currentBgImage} alt="배경" className="w-full h-full object-cover"
                         style={{
-                          fontSize: `${((pageData.titleStyle?.fontSize ?? 38) * canvasW) / 420}px`,
-                          fontWeight: pageData.titleStyle?.fontWeight ?? '900',
-                          color: pageData.titleStyle?.color ?? '#FFFFFF',
-                          lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
-                          letterSpacing: pageData.titleStyle?.letterSpacing ? `${pageData.titleStyle.letterSpacing}px` : undefined,
-                          textAlign: pageData.titleStyle?.align ?? 'center',
+                          transform: `scale(${pageData.bgScale ?? 1})`,
+                          transformOrigin: `${pageData.bgPosition?.x ?? 50}% ${pageData.bgPosition?.y ?? 50}%`,
+                          filter: `brightness(${(pageData.bgBrightnessFilter ?? 100) / 100})`,
+                          transition: 'transform 0.1s ease',
                         }}
-                      >
-                        {pageData.title}
-                      </h1>
+                      />
+                      <div className="absolute inset-0" style={{ background: pageData.overlay, opacity: (pageData.overlayOpacity ?? 100) / 100 }} />
+                      {(pageData.bgBrightness ?? 0) > 0 && (
+                        <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${(pageData.bgBrightness ?? 0) / 100})` }} />
+                      )}
+                      {brandLogo && !pageData.showFrame && (
+                        <div className="absolute top-[4%] right-[4%] z-10 opacity-80 pointer-events-none">
+                          <img src={brandLogo} className="h-4 object-contain" style={{ height: `${(16 * canvasW) / 420}px` }} />
+                        </div>
+                      )}
+                      {selectedLayer?.id === 0 && (
+                        <span className="absolute top-2 left-2 bg-primary-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow">
+                          🖼 {pageData.bgLabel}
+                        </span>
+                      )}
                     </div>
-                    <div className="w-16 h-0.5 bg-white/50 mb-4" />
-                    {pageData.subtitle && (
-                      <div onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2]); }} className={`pointer-events-auto cursor-pointer rounded px-2 py-1 transition-all ${selectedLayer?.id === 2 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}>
-                        <p
-                          className="whitespace-pre-line drop-shadow"
+
+                    {/* Text layers */}
+                    <div className="absolute inset-0 pointer-events-none">
+                      {pageData.blocks && pageData.blocks.length > 0 ? (
+                        <div
                           style={{
-                            fontSize: `${((pageData.subtitleStyle?.fontSize ?? 14) * canvasW) / 420}px`,
-                            fontWeight: pageData.subtitleStyle?.fontWeight ?? '400',
-                            fontFamily: pageData.subtitleStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                            color: pageData.subtitleStyle?.color ?? '#E5E7EB',
-                            lineHeight: pageData.subtitleStyle?.lineHeight ?? 1.6,
-                            textAlign: pageData.subtitleStyle?.align ?? 'center',
+                            position: 'absolute',
+                            top: 0,
+                            bottom: `${100 - (pageData.blocksOffsetY ?? 70)}%`,
+                            left: 28,
+                            right: 28,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            paddingBottom: 40,
+                            pointerEvents: 'none',
                           }}
                         >
-                          {pageData.subtitle}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-                {(pageData.layout === 'bottom-left' || pageData.layout === 'bottom-left-list') && (
-                  <div className="flex flex-col justify-end h-full px-8 pb-10 gap-5">
-                    <div onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }} className={`pointer-events-auto cursor-pointer flex items-start gap-3 rounded px-1 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}>
-                      <span style={{ color: pageData.accent || '#ffd700', fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px` }} className="mt-0.5 shrink-0">●</span>
-                      <h2
-                        className="leading-tight drop-shadow"
-                        style={{
-                          fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px`,
-                          fontWeight: pageData.titleStyle?.fontWeight ?? '900',
-                          color: pageData.titleStyle?.color ?? (pageData.accent || '#ffd700'),
-                          lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
-                          textDecoration: 'underline',
-                          textDecorationColor: 'rgba(255,215,0,0.4)',
-                        }}
-                      >
-                        {pageData.title}
-                      </h2>
-                    </div>
-                    {pageData.bullets && (
-                      <div className="space-y-2.5 pl-2">
-                        {pageData.bullets.map((bullet, i) => (
-                          <div key={i} onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2 + i]); }} className={`pointer-events-auto cursor-pointer flex items-start gap-2 rounded px-1 py-0.5 transition-all ${selectedLayer?.id === 2 + i ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}>
-                            <span className="text-white/60 shrink-0 mt-0.5" style={{ fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px` }}>•</span>
-                            <p
-                              className="drop-shadow"
-                              style={{
-                                fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px`,
-                                fontWeight: pageData.bulletStyle?.fontWeight ?? '400',
-                                fontFamily: pageData.bulletStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                                color: pageData.bulletStyle?.color ?? '#FFFFFF',
-                                lineHeight: pageData.bulletStyle?.lineHeight ?? 1.6,
-                              }}
-                              dangerouslySetInnerHTML={{ __html: bullet.replace(/<b>(.*?)<\/b>/g, `<b style="color:${pageData.accent || '#ffd700'}">$1</b>`) }}
+                          <div style={{ pointerEvents: 'none', display: 'flex', flexDirection: 'column', width: '100%', marginTop: 'auto' }}>
+                            <BlockRenderer
+                              blocks={pageData.blocks}
+                              brandTone={pageData.brandTone}
+                              availableHeight={Math.floor(canvasW * 1.25 * (pageData.blocksOffsetY ?? 70) / 100 - 40)}
                             />
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Canvas Elements Layer (FS) */}
-              {(pageData.elements || []).map(elem => {
-                const isSelected = selectedElementId === elem.id;
-                const isEditing = editingElemId === elem.id;
-                const displayX = draggingElemId === elem.id && dragPos ? dragPos.x : elem.x;
-                const displayY = draggingElemId === elem.id && dragPos ? dragPos.y : elem.y;
-                const pxSize = (elem.size / 100) * canvasW;
-                const textW = elem.type === 'text' ? ((elem.width ?? 80) / 100) * canvasW : pxSize;
-                const scaledFs = ((elem.fontSize ?? 16) * canvasW) / 420;
-                return (
-                  <div key={elem.id}
-                    className={`absolute select-none ${isEditing ? 'cursor-text' : 'cursor-move'} ${isSelected ? 'ring-2 ring-blue-400 ring-offset-1 rounded-sm' : 'hover:ring-1 hover:ring-blue-300 rounded-sm'}`}
-                    style={{
-                      left: `${displayX}%`, top: `${displayY}%`,
-                      width: elem.type === 'text' ? `${textW}px` : `${pxSize}px`,
-                      height: elem.type === 'text' ? 'auto' : `${pxSize}px`,
-                      opacity: elem.opacity, zIndex: 15, transform: 'translate(-50%,-50%)',
-                    }}
-                    onMouseDown={e => { if (!isEditing) handleFSElemMouseDown(e, elem); }}
-                    onDoubleClick={e => { if (elem.type === 'text') { e.stopPropagation(); setEditingElemId(elem.id); } }}
-                  >
-                    {elem.type === 'shape' && elem.shape && <ShapeSVG shape={elem.shape} color={elem.color} />}
-                    {elem.type === 'emoji' && <span style={{ fontSize: `${pxSize}px`, lineHeight: 1, userSelect: 'none' }}>{elem.emoji}</span>}
-                    {elem.type === 'text' && (
-                      isEditing ? (
-                        <textarea
-                          autoFocus
-                          defaultValue={elem.text ?? ''}
-                          onBlur={e => { fsUpdateElement(elem.id, { text: e.target.value }); setEditingElemId(null); }}
-                          onMouseDown={e => e.stopPropagation()}
-                          rows={3}
-                          style={{
-                            width: '100%', background: 'transparent', border: 'none', outline: '2px solid rgba(59,130,246,0.6)',
-                            resize: 'none', padding: '2px 4px', borderRadius: 2,
-                            fontSize: `${scaledFs}px`, fontWeight: elem.fontWeight ?? '400',
-                            fontFamily: elem.fontFamily ?? 'Noto Sans KR',
-                            textAlign: elem.textAlign ?? 'left', color: elem.color, lineHeight: 1.4,
-                          }}
-                        />
+                        </div>
                       ) : (
-                        <p style={{
-                          fontSize: `${scaledFs}px`, fontWeight: elem.fontWeight ?? '400',
-                          fontFamily: elem.fontFamily ?? 'Noto Sans KR',
-                          textAlign: elem.textAlign ?? 'left', color: elem.color,
-                          lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                          margin: 0, padding: '2px 4px', userSelect: 'none',
-                        }}>
-                          {elem.text || <span style={{ opacity: 0.4 }}>텍스트 입력...</span>}
-                        </p>
-                      )
-                    )}
-                    {isSelected && !isEditing && (
-                      <button className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center shadow-lg z-20 hover:bg-red-600"
-                        onMouseDown={e => e.stopPropagation()}
-                        onClick={e => { e.stopPropagation(); fsDeleteElement(elem.id); }}>×</button>
-                    )}
-                  </div>
+                        <>
+                          {pageData.layout === 'center' && (
+                            <div className="flex flex-col items-center justify-center h-full px-10 text-center">
+                              <div onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }} className={`pointer-events-auto cursor-pointer mb-4 rounded px-2 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}>
+                                <h1
+                                  className="drop-shadow-lg whitespace-pre-line"
+                                  style={{
+                                    fontSize: `${((pageData.titleStyle?.fontSize ?? 38) * canvasW) / 420}px`,
+                                    fontWeight: pageData.titleStyle?.fontWeight ?? '900',
+                                    color: pageData.titleStyle?.color ?? '#FFFFFF',
+                                    lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
+                                    letterSpacing: pageData.titleStyle?.letterSpacing ? `${pageData.titleStyle.letterSpacing}px` : undefined,
+                                    textAlign: pageData.titleStyle?.align ?? 'center',
+                                  }}
+                                >
+                                  {pageData.title}
+                                </h1>
+                              </div>
+                              <div className="w-16 h-0.5 bg-white/50 mb-4" />
+                              {pageData.subtitle && (
+                                <div onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2]); }} className={`pointer-events-auto cursor-pointer rounded px-2 py-1 transition-all ${selectedLayer?.id === 2 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}>
+                                  <p
+                                    className="whitespace-pre-line drop-shadow"
+                                    style={{
+                                      fontSize: `${((pageData.subtitleStyle?.fontSize ?? 14) * canvasW) / 420}px`,
+                                      fontWeight: pageData.subtitleStyle?.fontWeight ?? '400',
+                                      fontFamily: pageData.subtitleStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                      color: pageData.subtitleStyle?.color ?? '#E5E7EB',
+                                      lineHeight: pageData.subtitleStyle?.lineHeight ?? 1.6,
+                                      textAlign: pageData.subtitleStyle?.align ?? 'center',
+                                    }}
+                                  >
+                                    {pageData.subtitle}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {(pageData.layout === 'bottom-left' || pageData.layout === 'bottom-left-list') && (
+                            <div className="flex flex-col justify-end h-full px-8 pb-10 gap-5">
+                              <div onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }} className={`pointer-events-auto cursor-pointer flex items-start gap-3 rounded px-1 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}>
+                                <span style={{ color: pageData.accent || '#ffd700', fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px` }} className="mt-0.5 shrink-0">●</span>
+                                <h2
+                                  className="leading-tight drop-shadow"
+                                  style={{
+                                    fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px`,
+                                    fontWeight: pageData.titleStyle?.fontWeight ?? '900',
+                                    color: pageData.titleStyle?.color ?? (pageData.accent || '#ffd700'),
+                                    lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
+                                    textDecoration: 'underline',
+                                    textDecorationColor: 'rgba(255,215,0,0.4)',
+                                  }}
+                                >
+                                  {pageData.title}
+                                </h2>
+                              </div>
+                              {pageData.bullets && (
+                                <div className="space-y-2.5 pl-2">
+                                  {pageData.bullets.map((bullet, i) => (
+                                    <div key={i} onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2 + i]); }} className={`pointer-events-auto cursor-pointer flex items-start gap-2 rounded px-1 py-0.5 transition-all ${selectedLayer?.id === 2 + i ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}>
+                                      <span className="text-white/60 shrink-0 mt-0.5" style={{ fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px` }}>•</span>
+                                      <p
+                                        className="drop-shadow"
+                                        style={{
+                                          fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px`,
+                                          fontWeight: pageData.bulletStyle?.fontWeight ?? '400',
+                                          fontFamily: pageData.bulletStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                          color: pageData.bulletStyle?.color ?? '#FFFFFF',
+                                          lineHeight: pageData.bulletStyle?.lineHeight ?? 1.6,
+                                        }}
+                                        dangerouslySetInnerHTML={{ __html: bullet.replace(/<b>(.*?)<\/b>/g, `<b style="color:${pageData.accent || '#ffd700'}">$1</b>`) }}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {/* Canvas Elements Layer (FS) */}
+                    {(pageData.elements || []).map(elem => {
+                      const isSelected = selectedElementId === elem.id;
+                      const isEditing = editingElemId === elem.id;
+                      const displayX = draggingElemId === elem.id && dragPos ? dragPos.x : elem.x;
+                      const displayY = draggingElemId === elem.id && dragPos ? dragPos.y : elem.y;
+                      const pxSize = (elem.size / 100) * canvasW;
+                      const textW = elem.type === 'text' ? ((elem.width ?? 80) / 100) * canvasW : pxSize;
+                      const scaledFs = ((elem.fontSize ?? 16) * canvasW) / 420;
+                      return (
+                        <div key={elem.id}
+                          className={`absolute select-none ${isEditing ? 'cursor-text' : 'cursor-move'} ${isSelected ? 'ring-2 ring-blue-400 ring-offset-1 rounded-sm' : 'hover:ring-1 hover:ring-blue-300 rounded-sm'}`}
+                          style={{
+                            left: `${displayX}%`, top: `${displayY}%`,
+                            width: elem.type === 'text' ? `${textW}px` : `${pxSize}px`,
+                            height: elem.type === 'text' ? 'auto' : `${pxSize}px`,
+                            opacity: elem.opacity, zIndex: 15, transform: 'translate(-50%,-50%)',
+                          }}
+                          onMouseDown={e => { if (!isEditing) handleFSElemMouseDown(e, elem); }}
+                          onDoubleClick={e => { if (elem.type === 'text') { e.stopPropagation(); setEditingElemId(elem.id); } }}
+                        >
+                          {elem.type === 'shape' && elem.shape && <ShapeSVG shape={elem.shape} color={elem.color} />}
+                          {elem.type === 'emoji' && <span style={{ fontSize: `${pxSize}px`, lineHeight: 1, userSelect: 'none' }}>{elem.emoji}</span>}
+                          {elem.type === 'text' && (
+                            isEditing ? (
+                              <textarea
+                                autoFocus
+                                defaultValue={elem.text ?? ''}
+                                onBlur={e => { fsUpdateElement(elem.id, { text: e.target.value }); setEditingElemId(null); }}
+                                onMouseDown={e => e.stopPropagation()}
+                                rows={3}
+                                style={{
+                                  width: '100%', background: 'transparent', border: 'none', outline: '2px solid rgba(59,130,246,0.6)',
+                                  resize: 'none', padding: '2px 4px', borderRadius: 2,
+                                  fontSize: `${scaledFs}px`, fontWeight: elem.fontWeight ?? '400',
+                                  fontFamily: elem.fontFamily ?? 'Noto Sans KR',
+                                  textAlign: elem.textAlign ?? 'left', color: elem.color, lineHeight: 1.4,
+                                }}
+                              />
+                            ) : (
+                              <p style={{
+                                fontSize: `${scaledFs}px`, fontWeight: elem.fontWeight ?? '400',
+                                fontFamily: elem.fontFamily ?? 'Noto Sans KR',
+                                textAlign: elem.textAlign ?? 'left', color: elem.color,
+                                lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                                margin: 0, padding: '2px 4px', userSelect: 'none',
+                              }}>
+                                {elem.text || <span style={{ opacity: 0.4 }}>텍스트 입력...</span>}
+                              </p>
+                            )
+                          )}
+                          {isSelected && !isEditing && (
+                            <button className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center shadow-lg z-20 hover:bg-red-600"
+                              onMouseDown={e => e.stopPropagation()}
+                              onClick={e => { e.stopPropagation(); fsDeleteElement(elem.id); }}>×</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
                 );
-              })}
+
+                if (pageData.showFrame) {
+                  return (
+                    <SlideFrame
+                      page={fsPage}
+                      total={pagesData.length}
+                      brandTone={pageData.brandTone}
+                      eyebrow={undefined}
+                      handle={pageData.handle ?? '@aptshowhome'}
+                    >
+                      {innerLayers}
+                    </SlideFrame>
+                  );
+                }
+                return innerLayers;
+              })()}
 
               {/* Floating toolbar */}
               {selectedLayer && (
@@ -4472,12 +4738,14 @@ function FullscreenEditor({
                   initialBrightness={pagesData[fsPage - 1]?.bgBrightness}
                   initialBrightnessFilter={pagesData[fsPage - 1]?.bgBrightnessFilter}
                   initialOverlayOpacity={pagesData[fsPage - 1]?.overlayOpacity}
+                  initialBlocksOffsetY={(pagesData[fsPage - 1]?.blocks?.length ?? 0) > 0 ? (pagesData[fsPage - 1]?.blocksOffsetY ?? 70) : undefined}
                   onSelectImage={url => onSelectImage(url, fsPage)}
                   onDeselect={handleDeselect}
                   onUpdateBgTransform={(scale, pos) => onApplyPageChanges(fsPage, { bgScale: scale, bgPosition: pos })}
                   onUpdateBrightness={b => onApplyPageChanges(fsPage, { bgBrightness: b })}
                   onUpdateBrightnessFilter={v => onApplyPageChanges(fsPage, { bgBrightnessFilter: v })}
                   onUpdateOverlayOpacity={v => onApplyPageChanges(fsPage, { overlayOpacity: v })}
+                  onUpdateBlocksOffsetY={v => onApplyPageChanges(fsPage, { blocksOffsetY: v })}
                 />
               </div>
             )}
@@ -5103,7 +5371,7 @@ const PLATFORMS = [
   { id: 'instagram', label: 'Instagram', icon: '📸', note: '' },
   { id: 'threads', label: 'Threads', icon: '🧵', note: '' },
   { id: 'youtube', label: 'YouTube', icon: '▶️', note: '동영상 전용' },
-  { id: 'tiktok', label: 'TikTok', icon: '🎵', note: '' },
+  { id: 'tiktok', label: 'TikTok', icon: '🎵', note: '영상 전용 (준비 중)' },
   { id: 'x', label: 'X', icon: '✕', note: '준비 중' },
 ] as const;
 
@@ -5115,7 +5383,7 @@ function SnsUploadModal({
   onClose: () => void;
   initialCaption?: string;
 }) {
-  const [selected, setSelected] = React.useState<Set<string>>(new Set(['threads']));
+  const [selected, setSelected] = React.useState<Set<string>>(new Set(['instagram', 'threads']));
   const [caption, setCaption] = React.useState(initialCaption);
   const [status, setStatus] = React.useState<SnsStatus>('idle');
   const [progress, setProgress] = React.useState('');

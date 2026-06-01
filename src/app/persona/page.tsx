@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Sparkles, Save, CheckCircle2, User, Target, Palette, Hash, Briefcase, Megaphone, ChevronRight, RotateCcw, Loader2 } from 'lucide-react';
+import { Sparkles, Save, CheckCircle2, User, Target, Palette, Hash, Megaphone, ChevronRight, RotateCcw, Loader2, Plus, Pencil, Trash2, ArrowLeft, ChevronLeft } from 'lucide-react';
 
 const TONE_OPTIONS = [
   { value: 'friendly', label: '친근한', desc: '따뜻하고 편안한 말투', emoji: '😊', color: 'bg-orange-50 border-orange-200 text-orange-700' },
@@ -29,6 +29,7 @@ const GOAL_OPTIONS = [
 
 interface Persona {
   id?: string;
+  persona_name?: string;
   brand_name: string;
   tone: string;
   target_audience: string;
@@ -40,6 +41,7 @@ interface Persona {
 }
 
 const DEFAULT_PERSONA: Persona = {
+  persona_name: '',
   brand_name: '',
   tone: 'friendly',
   target_audience: '',
@@ -51,20 +53,32 @@ const DEFAULT_PERSONA: Persona = {
 };
 
 export default function PersonaPage() {
+  const [personas, setPersonas] = useState<Persona[]>([]);
   const [persona, setPersona] = useState<Persona>(DEFAULT_PERSONA);
+  const [isEditing, setIsEditing] = useState(false);
   const [keywordInput, setKeywordInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [activeSection, setActiveSection] = useState(0);
 
+  const loadPersonas = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/brand-persona');
+      const data = await res.json();
+      if (data.personas) {
+        setPersonas(data.personas);
+      }
+    } catch (e) {
+      console.error('페르소나 리스트 로드 실패:', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetch('/api/brand-persona')
-      .then(r => r.json())
-      .then(d => {
-        if (d.persona) setPersona({ ...DEFAULT_PERSONA, ...d.persona, keywords: d.persona.keywords ?? [] });
-      })
-      .finally(() => setIsLoading(false));
+    loadPersonas();
   }, []);
 
   const addKeyword = () => {
@@ -79,21 +93,61 @@ export default function PersonaPage() {
 
   const handleSave = async () => {
     if (!persona.brand_name.trim()) { alert('브랜드 이름을 입력해주세요'); return; }
+    
+    // 식별 이름이 없으면 브랜드 이름을 기본 식별명으로 대입
+    const finalPersonaName = persona.persona_name?.trim() || persona.brand_name.trim();
+    const payload = { ...persona, persona_name: finalPersonaName };
+
     setIsSaving(true);
     try {
       const res = await fetch('/api/brand-persona', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(persona),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error((await res.json()).error);
+      
       setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      setTimeout(() => setSaved(false), 2000);
+      
+      await loadPersonas();
+      setIsEditing(false);
     } catch (e: any) {
       alert('저장 실패: ' + e.message);
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (!confirm(`'${name}' 페르소나를 정말 삭제하시겠습니까?`)) return;
+    try {
+      const res = await fetch(`/api/brand-persona?id=${id}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) throw new Error((await res.json()).error);
+      
+      await loadPersonas();
+    } catch (e: any) {
+      alert('삭제 실패: ' + e.message);
+    }
+  };
+
+  const startNewPersona = () => {
+    setPersona(DEFAULT_PERSONA);
+    setActiveSection(0);
+    setIsEditing(true);
+  };
+
+  const startEditPersona = (p: Persona) => {
+    setPersona({
+      ...DEFAULT_PERSONA,
+      ...p,
+      persona_name: p.persona_name || p.brand_name,
+      keywords: p.keywords || []
+    });
+    setActiveSection(0);
+    setIsEditing(true);
   };
 
   const completeness = [
@@ -121,21 +175,137 @@ export default function PersonaPage() {
     );
   }
 
+  // ─── 1. 목록 화면 (isEditing === false) ───────────────────────────────────
+  if (!isEditing) {
+    return (
+      <div className="flex flex-col h-full bg-gray-50 overflow-y-auto p-6 md:p-8">
+        <div className="max-w-6xl mx-auto w-full space-y-6">
+          
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-gray-200">
+            <div>
+              <h1 className="text-xl md:text-2xl font-black text-gray-900 flex items-center gap-2">
+                <Sparkles size={24} className="text-primary-500" /> 브랜드 페르소나 보관함
+              </h1>
+              <p className="text-xs md:text-sm text-gray-500 mt-1">여러 개의 페르소나 스타일을 저장해 두고, 콘텐츠 생성 시 골라서 사용할 수 있습니다.</p>
+            </div>
+            <button
+              onClick={startNewPersona}
+              className="flex items-center justify-center gap-2 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-xl text-sm font-bold shadow-sm transition-all hover:scale-[1.02] shrink-0"
+            >
+              <Plus size={16} /> 새 페르소나 추가
+            </button>
+          </div>
+
+          {/* Persona Card Grid */}
+          {personas.length === 0 ? (
+            <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-12 text-center max-w-xl mx-auto mt-8 space-y-4">
+              <div className="w-12 h-12 bg-primary-50 rounded-full flex items-center justify-center text-primary-500 mx-auto">
+                <Plus size={24} />
+              </div>
+              <div>
+                <h3 className="font-bold text-gray-800 text-base">보관된 페르소나가 없습니다</h3>
+                <p className="text-xs text-gray-400 mt-1">인스타그램 계정의 정체성과 글쓰기 톤을 맞춘 첫 페르소나를 등록해 보세요.</p>
+              </div>
+              <button
+                onClick={startNewPersona}
+                className="px-5 py-2 bg-primary-600 hover:bg-primary-700 text-white font-bold rounded-lg text-sm transition-all"
+              >
+                페르소나 만들기
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {personas.map((p) => {
+                const toneLabel = TONE_OPTIONS.find(t => t.value === p.tone)?.label || p.tone;
+                return (
+                  <div
+                    key={p.id}
+                    className="bg-white rounded-2xl border border-gray-200 hover:border-primary-200 hover:shadow-md transition-all p-5 flex flex-col justify-between relative group overflow-hidden"
+                  >
+                    {/* Brand color accents */}
+                    <div className="absolute top-0 left-0 w-full h-1.5" style={{ backgroundColor: p.brand_color || '#6366F1' }} />
+                    
+                    <div className="space-y-4">
+                      {/* Avatar & Header */}
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-base font-black shadow-sm"
+                          style={{ backgroundColor: p.brand_color || '#6366F1' }}
+                        >
+                          {p.persona_name?.[0]?.toUpperCase() || 'B'}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-bold text-gray-800 text-sm truncate">{p.persona_name || '기본 페르소나'}</h3>
+                          <p className="text-xs text-gray-400 truncate">@{p.brand_name}</p>
+                        </div>
+                      </div>
+
+                      {/* Content summary */}
+                      <div className="space-y-2.5 text-xs text-gray-600 bg-gray-50 rounded-xl p-3">
+                        <p className="line-clamp-2"><span className="font-bold text-gray-700">🎯 타겟:</span> {p.target_audience}</p>
+                        <p><span className="font-bold text-gray-700">🏷️ 업종/톤:</span> {p.industry} · {toneLabel} 말투</p>
+                        {p.keywords && p.keywords.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {p.keywords.slice(0, 4).map((k) => (
+                              <span key={k} className="px-1.5 py-0.5 bg-white text-primary-600 border border-primary-100 rounded text-[10px] font-medium">#{k}</span>
+                            ))}
+                            {p.keywords.length > 4 && <span className="text-[10px] text-gray-400 self-center">+{p.keywords.length - 4}</span>}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-100 mt-4">
+                      <button
+                        onClick={() => startEditPersona(p)}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-600 hover:text-primary-600 hover:bg-primary-50 rounded-lg font-medium transition-all"
+                      >
+                        <Pencil size={12} /> 편집
+                      </button>
+                      <button
+                        onClick={() => p.id && handleDelete(p.id, p.persona_name || p.brand_name)}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg font-medium transition-all"
+                      >
+                        <Trash2 size={12} /> 삭제
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── 2. 편집 화면 (isEditing === true) ───────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 md:px-8 py-4 md:py-5 flex items-center justify-between shrink-0">
-        <div className="ml-10 md:ml-0">
-          <h1 className="text-lg md:text-xl font-black text-gray-900 flex items-center gap-2">
-            <Sparkles size={20} className="text-primary-500" /> 브랜드 페르소나 설정
-          </h1>
-          <p className="text-xs md:text-sm text-gray-500 mt-0.5">설정한 페르소나가 모든 AI 콘텐츠 생성에 자동 반영됩니다</p>
+        <div className="ml-10 md:ml-0 flex items-center gap-3">
+          <button
+            onClick={() => setIsEditing(false)}
+            className="p-2 hover:bg-gray-100 rounded-lg text-gray-500 transition-colors"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <div>
+            <h1 className="text-lg md:text-xl font-black text-gray-900 flex items-center gap-2">
+              <Sparkles size={20} className="text-primary-500" /> 
+              {persona.id ? '페르소나 편집하기' : '새 페르소나 만들기'}
+            </h1>
+            <p className="text-xs md:text-sm text-gray-500 mt-0.5">상세 프로필을 바탕으로 AI가 최적의 문장과 이미지를 설계합니다.</p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="text-right">
+          <div className="text-right hidden sm:block">
             <div className="text-xs text-gray-500 mb-1">완성도</div>
             <div className="flex items-center gap-2">
-              <div className="w-32 h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div className="w-24 h-2 bg-gray-100 rounded-full overflow-hidden">
                 <div className="h-full bg-primary-500 rounded-full transition-all" style={{ width: `${(completeness / 6) * 100}%` }} />
               </div>
               <span className="text-xs font-bold text-primary-600">{completeness}/6</span>
@@ -176,15 +346,28 @@ export default function PersonaPage() {
                 <SectionTitle icon={<User size={18} />} title="브랜드 기본 정보" />
                 <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 space-y-5">
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">브랜드/계정 이름 *</label>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">페르소나 식별 이름 *</label>
+                    <input
+                      type="text"
+                      value={persona.persona_name || ''}
+                      onChange={e => setPersona(p => ({ ...p, persona_name: e.target.value }))}
+                      placeholder="예: 부동산 소식 전달형, 맛집 투어 브랜딩 (구분용)"
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-2">인스타그램 계정명 *</label>
                     <input
                       type="text"
                       value={persona.brand_name}
                       onChange={e => setPersona(p => ({ ...p, brand_name: e.target.value }))}
-                      placeholder="예: 먹스타그램, 핏빗바디, 코딩클럽"
+                      placeholder="예: @aptshowhome, @mukstagram_daily"
                       className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none"
                     />
+                    <p className="text-xs text-gray-400 mt-1">카드뉴스 마무리 페이지와 워터마크에 해당 계정명이 자동으로 삽입됩니다.</p>
                   </div>
+                  
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">브랜드 색상</label>
                     <div className="flex items-center gap-3">
@@ -196,7 +379,7 @@ export default function PersonaPage() {
                       />
                       <div>
                         <p className="text-sm font-medium text-gray-700">{persona.brand_color}</p>
-                        <p className="text-xs text-gray-400">AI 생성 카드뉴스의 강조 색상으로 사용됩니다</p>
+                        <p className="text-xs text-gray-400">생성되는 카드뉴스의 강조 컬러 및 포인트 라벨에 적용됩니다.</p>
                       </div>
                     </div>
                     <div className="flex gap-2 mt-3">
@@ -208,7 +391,10 @@ export default function PersonaPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex justify-end">
+                <div className="flex justify-between">
+                  <button onClick={() => setIsEditing(false)} className="flex items-center gap-1.5 px-4 py-2 text-gray-500 rounded-xl text-sm font-medium hover:bg-gray-100">
+                    목록으로
+                  </button>
                   <button onClick={() => setActiveSection(1)} className="flex items-center gap-1.5 px-4 py-2 bg-primary-50 text-primary-700 rounded-xl text-sm font-bold hover:bg-primary-100">
                     다음 <ChevronRight size={14} />
                   </button>
@@ -230,7 +416,7 @@ export default function PersonaPage() {
                       rows={3}
                       className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none resize-none"
                     />
-                    <p className="text-xs text-gray-400 mt-1">구체적일수록 AI가 더 정확한 콘텐츠를 생성합니다</p>
+                    <p className="text-xs text-gray-400 mt-1">구체적일수록 AI가 더 정확한 콘텐츠를 생성합니다.</p>
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-gray-700 mb-2">업종/카테고리 *</label>
@@ -384,9 +570,9 @@ export default function PersonaPage() {
                   <div className="bg-gradient-to-br from-primary-50 to-purple-50 rounded-xl p-4 space-y-2">
                     <div className="flex items-center gap-2">
                       <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-black" style={{ background: persona.brand_color }}>
-                        {persona.brand_name?.[0] || 'B'}
+                        {persona.persona_name?.[0]?.toUpperCase() || 'B'}
                       </div>
-                      <span className="font-bold text-gray-800">{persona.brand_name || '브랜드명 미입력'}</span>
+                      <span className="font-bold text-gray-800">{persona.persona_name || persona.brand_name || '브랜드명 미입력'}</span>
                     </div>
                     <p className="text-xs text-gray-600">🎯 타겟: {persona.target_audience || '미입력'}</p>
                     <p className="text-xs text-gray-600">🏷️ 업종: {persona.industry || '미입력'} · {TONE_OPTIONS.find(t => t.value === persona.tone)?.label || ''} 톤</p>

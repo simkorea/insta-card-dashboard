@@ -179,6 +179,15 @@ export default function CardNewsPage() {
   const [activeCategory, setActiveCategory] = useState<string>('전체');
   const [prompt, setPrompt] = useState('');
   
+  // 브랜드 페르소나 관련 상태 정의
+  interface PersonaShort {
+    id: string;
+    persona_name?: string;
+    brand_name: string;
+  }
+  const [personas, setPersonas] = useState<PersonaShort[]>([]);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
+  
   useEffect(() => {
     fetch('/api/templates')
       .then(res => res.json())
@@ -187,6 +196,20 @@ export default function CardNewsPage() {
           setTemplates(data.data);
         }
       });
+    fetchUserTemplates();
+
+    // 브랜드 페르소나 목록 조회
+    fetch('/api/brand-persona')
+      .then(res => res.json())
+      .then(data => {
+        if (data.personas && Array.isArray(data.personas)) {
+          setPersonas(data.personas);
+          if (data.personas.length > 0) {
+            setSelectedPersonaId(data.personas[0].id);
+          }
+        }
+      })
+      .catch(err => console.error('페르소나 목록 로드 실패:', err));
   }, []);
 
   // Settings states
@@ -377,7 +400,9 @@ export default function CardNewsPage() {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false });
       setUserTemplates(data || []);
-    } catch { /* ignore */ } finally {
+    } catch (err) {
+      console.error('fetchUserTemplates error:', err);
+    } finally {
       setIsLoadingTemplates(false);
     }
   };
@@ -795,6 +820,14 @@ export default function CardNewsPage() {
   const handleStartWithTemplate = async (t: any) => {
     setSelectedTemplate(t);
 
+    if (t.pages && Array.isArray(t.pages)) {
+      localStorage.setItem('cardnews_import_templates', JSON.stringify(t.pages));
+      localStorage.removeItem('editingDesign');
+      localStorage.removeItem('cardNewsData');
+      window.location.href = '/cardnews/editor';
+      return;
+    }
+
     // 이미 생성되었거나 입력된 내용이 있다면 템플릿 예시로 덮어쓰지 않고, 템플릿 맞춤 요약 진행
     if (prompt.trim() !== '') {
       setIsSummarizing(true);
@@ -897,7 +930,12 @@ export default function CardNewsPage() {
       const res = await fetch('/api/generate/smart-cardnews', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: smartKeyword, category: smartCategory, slideCount: smartSlideCount }),
+        body: JSON.stringify({ 
+          keyword: smartKeyword, 
+          category: smartCategory, 
+          slideCount: smartSlideCount,
+          personaId: selectedPersonaId
+        }),
       });
       clearInterval(stepTimer);
 
@@ -906,8 +944,10 @@ export default function CardNewsPage() {
 
       setSmartStep('에디터 준비 중...');
       localStorage.removeItem('editingDesign');
+      localStorage.removeItem('cardnews_autosave');
+      localStorage.removeItem('cardNewsData');
       localStorage.setItem('cardnews_import_templates', JSON.stringify(data.pages));
-      router.push('/cardnews/editor');
+      window.location.href = '/cardnews/editor';
     } catch (e: any) {
       alert('생성 실패: ' + friendlyError(e));
     } finally {
@@ -2219,6 +2259,35 @@ export default function CardNewsPage() {
                       </div>
                     </div>
 
+                    {/* 브랜드 페르소나 선택 */}
+                    <div>
+                      <p className="text-xs font-bold text-gray-500 mb-2">적용할 브랜드 페르소나</p>
+                      {personas.length === 0 ? (
+                        <div className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3.5 border border-gray-200 flex items-center justify-between shadow-sm">
+                          <span>보관된 페르소나가 없습니다. 기본 페르소나(@aptshowhome)로 생성됩니다.</span>
+                          <button
+                            type="button"
+                            onClick={() => router.push('/persona')}
+                            className="text-violet-600 hover:text-violet-700 font-bold ml-2 underline transition-all shrink-0"
+                          >
+                            설정하러 가기
+                          </button>
+                        </div>
+                      ) : (
+                        <select
+                          value={selectedPersonaId || ''}
+                          onChange={e => setSelectedPersonaId(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-violet-400 bg-white cursor-pointer shadow-sm hover:border-violet-300 transition-colors"
+                        >
+                          {personas.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.persona_name || p.brand_name} (@{p.brand_name})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
                     {/* 키워드 입력 */}
                     <div>
                       <p className="text-xs font-bold text-gray-500 mb-2">주제 키워드</p>
@@ -2301,8 +2370,34 @@ export default function CardNewsPage() {
 
                 {/* Category Filter */}
                 {(() => {
-                  const categories = ['전체', ...Array.from(new Set(templates.map(t => t.category).filter(Boolean)))];
-                  const filtered = activeCategory === '전체' ? templates : templates.filter(t => t.category === activeCategory);
+                  const templatesWithoutFakeMyTemplate = templates.filter(t => t.category !== '내 템플릿');
+                  
+                  const myMappedTemplates = userTemplates.map(ut => {
+                    const firstPage = ut.pages?.[0] || null;
+                    return {
+                      id: ut.id,
+                      title: ut.name,
+                      category: '내 템플릿',
+                      ratio: firstPage?.ratio || '4:5',
+                      isFavorite: false,
+                      image: firstPage?.bgImage || 'https://images.unsplash.com/photo-1611532736597-de2d4265fba3?w=500&q=80',
+                      pages: ut.pages,
+                      isDbTemplate: true,
+                    };
+                  });
+
+                  const rawCategories = Array.from(new Set(templatesWithoutFakeMyTemplate.map(t => t.category).filter(Boolean)));
+                  const categories = ['전체', '내 템플릿', ...rawCategories.filter(c => c !== '내 템플릿')];
+
+                  let filtered;
+                  if (activeCategory === '내 템플릿') {
+                    filtered = myMappedTemplates;
+                  } else if (activeCategory === '전체') {
+                    filtered = [...myMappedTemplates, ...templatesWithoutFakeMyTemplate];
+                  } else {
+                    filtered = templatesWithoutFakeMyTemplate.filter(t => t.category === activeCategory);
+                  }
+                  
                   return (
                     <>
                       <div className="flex gap-2 flex-wrap mb-5">
@@ -2318,8 +2413,17 @@ export default function CardNewsPage() {
                       </div>
 
                       {/* Template Grid */}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-5">
-                        {filtered.slice(0, visibleTemplateCount).map(t => (
+                      {activeCategory === '내 템플릿' && filtered.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-14 bg-white border-2 border-dashed border-gray-100 rounded-2xl text-gray-400 w-full col-span-full">
+                          <div className="text-4xl mb-3">🔒</div>
+                          <p className="text-sm font-semibold text-gray-500">저장된 내 템플릿이 없습니다</p>
+                          <p className="text-xs mt-1 text-gray-400 text-center">
+                            에디터 화면 우측 상단에서 "템플릿 저장" 버튼으로 나만의 디자인을 저장해 보세요.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 md:gap-5">
+                          {filtered.slice(0, visibleTemplateCount).map(t => (
                           <div key={t.id} className="group relative rounded-2xl overflow-hidden cursor-pointer shadow-sm hover:shadow-lg transition-all border border-gray-100 bg-white">
                             <div className="relative aspect-[4/5]">
                               <img src={t.image} className="w-full h-full object-cover" alt={t.title} />
@@ -2343,6 +2447,7 @@ export default function CardNewsPage() {
                           </div>
                         ))}
                       </div>
+                    )}
                       {visibleTemplateCount < filtered.length && (
                         <div className="flex justify-center mt-6">
                           <button
