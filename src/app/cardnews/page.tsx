@@ -510,8 +510,9 @@ export default function CardNewsPage() {
 
   const handleOpenDesign = (design: any) => {
     localStorage.setItem('editingDesign', JSON.stringify(design.pages_data));
+    localStorage.setItem('editingDesignId', String(design.id));
     localStorage.removeItem('cardNewsData');
-    window.location.href = '/cardnews/editor';
+    window.location.href = `/cardnews/editor?id=${design.id}`;
   };
 
   const handleDeleteDesign = async (id: string) => {

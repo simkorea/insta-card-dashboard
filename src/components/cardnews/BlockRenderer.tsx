@@ -11,6 +11,16 @@ const panel = {
 
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 
+export interface TextStyle {
+  fontSize?: number;       // px at 420px canvas width
+  fontWeight?: string;     // '300'|'400'|'500'|'600'|'900'
+  fontFamily?: string;
+  color?: string;
+  letterSpacing?: number;  // px
+  lineHeight?: number;
+  align?: 'left' | 'center' | 'right';
+}
+
 export function BlockRenderer({
   blocks,
   brandTone = 'gold',
@@ -18,6 +28,9 @@ export function BlockRenderer({
   onBlockOffsetChange,
   availableHeight,
   isDraggingParent = false,
+  titleStyle,
+  subtitleStyle,
+  bulletStyle,
 }: {
   blocks: SlideBlock[];
   brandTone?: BrandTone;
@@ -25,6 +38,9 @@ export function BlockRenderer({
   onBlockOffsetChange?: (index: number, offsetY: number) => void;
   availableHeight?: number;
   isDraggingParent?: boolean;
+  titleStyle?: TextStyle;
+  subtitleStyle?: TextStyle;
+  bulletStyle?: TextStyle;
 }) {
   const c = tone(brandTone);
   const [isDragging, setIsDragging] = useState(false);
@@ -204,7 +220,15 @@ export function BlockRenderer({
 
           case 'headline':
             innerContent = (
-              <div style={{ fontSize: 32, fontWeight: 900, color: '#fff', lineHeight: 1.12, letterSpacing: -0.5 }}>
+              <div style={{
+                fontSize: titleStyle?.fontSize ?? 32,
+                fontWeight: titleStyle?.fontWeight ?? '900',
+                fontFamily: titleStyle?.fontFamily ?? undefined,
+                color: titleStyle?.color ?? '#fff',
+                lineHeight: titleStyle?.lineHeight ?? 1.12,
+                letterSpacing: titleStyle?.letterSpacing != null ? `${titleStyle.letterSpacing}px` : '-0.5px',
+                textAlign: titleStyle?.align ?? undefined,
+              }}>
                 {b.text}
                 {b.accentText && <span style={{ color: c.accent }}> {b.accentText}</span>}
               </div>
@@ -213,7 +237,15 @@ export function BlockRenderer({
 
           case 'sub':
             innerContent = (
-              <div style={{ fontSize: 15, color: 'rgba(255,255,255,0.7)', lineHeight: 1.4 }}>{b.text}</div>
+              <div style={{
+                fontSize: subtitleStyle?.fontSize ?? 15,
+                fontWeight: subtitleStyle?.fontWeight ?? '400',
+                fontFamily: subtitleStyle?.fontFamily ?? undefined,
+                color: subtitleStyle?.color ?? 'rgba(255,255,255,0.7)',
+                lineHeight: subtitleStyle?.lineHeight ?? 1.4,
+                letterSpacing: subtitleStyle?.letterSpacing != null ? `${subtitleStyle.letterSpacing}px` : undefined,
+                textAlign: subtitleStyle?.align ?? undefined,
+              }}>{b.text}</div>
             );
             break;
 
@@ -221,7 +253,18 @@ export function BlockRenderer({
             innerContent = (
               <div>
                 <div style={{ fontSize: 56, fontWeight: 900, color: c.accent, lineHeight: 1, letterSpacing: -1 }}>{b.value}</div>
-                {b.caption && <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.65)', marginTop: 6 }}>{b.caption}</div>}
+                {b.caption && (
+                  <div style={{
+                    fontSize: bulletStyle?.fontSize ?? 14,
+                    fontWeight: bulletStyle?.fontWeight ?? '400',
+                    fontFamily: bulletStyle?.fontFamily ?? undefined,
+                    color: bulletStyle?.color ?? 'rgba(255,255,255,0.65)',
+                    lineHeight: bulletStyle?.lineHeight ?? 1.4,
+                    letterSpacing: bulletStyle?.letterSpacing != null ? `${bulletStyle.letterSpacing}px` : undefined,
+                    textAlign: bulletStyle?.align ?? undefined,
+                    marginTop: 6,
+                  }}>{b.caption}</div>
+                )}
               </div>
             );
             break;
@@ -231,7 +274,14 @@ export function BlockRenderer({
               <div style={{ ...panel, padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {b.rows.map((r, j) => (
                   <div key={j} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: 15, fontWeight: r.highlight ? 800 : 500, color: r.highlight ? '#fff' : 'rgba(255,255,255,0.75)' }}>{r.label}</span>
+                    <span style={{
+                      fontSize: bulletStyle?.fontSize ?? 15,
+                      fontWeight: r.highlight ? 800 : (bulletStyle?.fontWeight ?? '500'),
+                      fontFamily: bulletStyle?.fontFamily ?? undefined,
+                      color: r.highlight ? '#fff' : (bulletStyle?.color ?? 'rgba(255,255,255,0.75)'),
+                      lineHeight: bulletStyle?.lineHeight ?? 1.4,
+                      letterSpacing: bulletStyle?.letterSpacing != null ? `${bulletStyle.letterSpacing}px` : undefined,
+                    }}>{r.label}</span>
                     <span style={{ fontSize: r.highlight ? 22 : 17, fontWeight: 800, color: r.highlight ? c.accent : '#fff' }}>{r.value}</span>
                   </div>
                 ))}
@@ -249,8 +299,24 @@ export function BlockRenderer({
                       <div style={{ width: 10, height: 10, marginTop: 5, borderRadius: 999, background: dot, flexShrink: 0 }} />
                       <div>
                         <div style={{ fontSize: 12, fontWeight: 700, color: dot }}>{it.date}</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: '#fff' }}>{it.title}</div>
-                        {it.desc && <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>{it.desc}</div>}
+                        <div style={{
+                          fontSize: bulletStyle?.fontSize ? bulletStyle.fontSize + 2 : 16,
+                          fontWeight: bulletStyle?.fontWeight ?? '700',
+                          fontFamily: bulletStyle?.fontFamily ?? undefined,
+                          color: bulletStyle?.color ?? '#fff',
+                          lineHeight: bulletStyle?.lineHeight ?? 1.4,
+                          letterSpacing: bulletStyle?.letterSpacing != null ? `${bulletStyle.letterSpacing}px` : undefined,
+                        }}>{it.title}</div>
+                        {it.desc && (
+                          <div style={{
+                            fontSize: bulletStyle?.fontSize ?? 12,
+                            fontWeight: bulletStyle?.fontWeight ?? '400',
+                            fontFamily: bulletStyle?.fontFamily ?? undefined,
+                            color: bulletStyle?.color ?? 'rgba(255,255,255,0.55)',
+                            lineHeight: bulletStyle?.lineHeight ?? 1.4,
+                            letterSpacing: bulletStyle?.letterSpacing != null ? `${bulletStyle.letterSpacing}px` : undefined,
+                          }}>{it.desc}</div>
+                        )}
                       </div>
                     </div>
                   );
@@ -265,7 +331,15 @@ export function BlockRenderer({
                 {b.items.map((s, j) => (
                   <div key={j} style={{ ...panel, padding: '16px 10px', textAlign: 'center' }}>
                     <div style={{ fontSize: 24, fontWeight: 900, color: c.accent, lineHeight: 1 }}>{s.value}</div>
-                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 6 }}>{s.label}</div>
+                    <div style={{
+                      fontSize: bulletStyle?.fontSize ?? 11,
+                      fontWeight: bulletStyle?.fontWeight ?? '400',
+                      fontFamily: bulletStyle?.fontFamily ?? undefined,
+                      color: bulletStyle?.color ?? 'rgba(255,255,255,0.7)',
+                      lineHeight: bulletStyle?.lineHeight ?? 1.4,
+                      letterSpacing: bulletStyle?.letterSpacing != null ? `${bulletStyle.letterSpacing}px` : undefined,
+                      marginTop: 6,
+                    }}>{s.label}</div>
                   </div>
                 ))}
               </div>
@@ -278,7 +352,14 @@ export function BlockRenderer({
                 {b.items.map((it, j) => (
                   <div key={j} style={{ ...panel, padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
                     <span style={{ color: c.good, fontSize: 16, fontWeight: 900, flexShrink: 0 }}>✓</span>
-                    <span style={{ fontSize: 15, fontWeight: 600, color: '#fff', lineHeight: 1.35 }}>{it}</span>
+                    <span style={{
+                      fontSize: bulletStyle?.fontSize ?? 15,
+                      fontWeight: bulletStyle?.fontWeight ?? '600',
+                      fontFamily: bulletStyle?.fontFamily ?? undefined,
+                      color: bulletStyle?.color ?? '#fff',
+                      lineHeight: bulletStyle?.lineHeight ?? 1.35,
+                      letterSpacing: bulletStyle?.letterSpacing != null ? `${bulletStyle.letterSpacing}px` : undefined,
+                    }}>{it}</span>
                   </div>
                 ))}
               </div>
@@ -292,7 +373,17 @@ export function BlockRenderer({
                   const bg = bd.tone === 'green' ? 'rgba(91,208,138,0.16)' : bd.tone === 'neutral' ? 'rgba(255,255,255,0.10)' : c.accentSoft;
                   const fg = bd.tone === 'green' ? c.good : bd.tone === 'neutral' ? 'rgba(255,255,255,0.85)' : c.accent;
                   return (
-                    <span key={j} style={{ fontSize: 13, fontWeight: 700, color: fg, background: bg, border: `1px solid ${bg}`, padding: '6px 14px', borderRadius: 999 }}>{bd.text}</span>
+                    <span key={j} style={{
+                      fontSize: bulletStyle?.fontSize ?? 13,
+                      fontWeight: bulletStyle?.fontWeight ?? '700',
+                      fontFamily: bulletStyle?.fontFamily ?? undefined,
+                      color: fg,
+                      background: bg,
+                      border: `1px solid ${bg}`,
+                      padding: '6px 14px',
+                      borderRadius: 999,
+                      letterSpacing: bulletStyle?.letterSpacing != null ? `${bulletStyle.letterSpacing}px` : undefined,
+                    }}>{bd.text}</span>
                   );
                 })}
               </div>
@@ -301,7 +392,14 @@ export function BlockRenderer({
 
           case 'sourceNote':
             innerContent = (
-              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)', textAlign: 'center' }}>{b.text}</div>
+              <div style={{
+                fontSize: bulletStyle?.fontSize ? bulletStyle.fontSize - 4 : 10,
+                fontWeight: bulletStyle?.fontWeight ?? '400',
+                fontFamily: bulletStyle?.fontFamily ?? undefined,
+                color: bulletStyle?.color ?? 'rgba(255,255,255,0.4)',
+                letterSpacing: bulletStyle?.letterSpacing != null ? `${bulletStyle.letterSpacing}px` : undefined,
+                textAlign: 'center',
+              }}>{b.text}</div>
             );
             break;
 

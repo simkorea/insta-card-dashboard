@@ -71,7 +71,7 @@ interface CanvasLayerWithSrc extends CanvasLayer {
 }
 
 interface PageData {
-  id: number;
+  id: string;
   bgImage: string;
   bgLabel: string;
   overlay: string;
@@ -97,7 +97,23 @@ interface PageData {
   handle?: string;
 }
 
-const BUSINESS_THEME_DATA: PageData[] = [
+const normalizePages = (pages: any[]): PageData[] => {
+  return pages.map((p, idx) => {
+    let id = p.id;
+    if (id === undefined || id === null || String(id) === '' || String(id) === 'NaN' || (typeof id === 'number' && isNaN(id))) {
+      id = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    } else {
+      id = String(id);
+    }
+    return {
+      ...p,
+      id,
+    };
+  });
+};
+
+
+const BUSINESS_THEME_DATA: any[] = [
   {
     id: 1,
     bgImage: 'https://images.unsplash.com/photo-1517935706615-2717063c2225?w=800&q=80',
@@ -153,7 +169,7 @@ const BUSINESS_THEME_DATA: PageData[] = [
   },
 ];
 
-const CAFE_THEME_DATA: PageData[] = [
+const CAFE_THEME_DATA: any[] = [
   {
     id: 1,
     bgImage: 'https://images.unsplash.com/photo-1497935586351-b67a49e012bf?w=800&q=80',
@@ -209,7 +225,7 @@ const CAFE_THEME_DATA: PageData[] = [
   },
 ];
 
-const LIFESTYLE_THEME_DATA: PageData[] = [
+const LIFESTYLE_THEME_DATA: any[] = [
   {
     id: 1,
     bgImage: 'https://images.unsplash.com/photo-1506126613408-eca07ce68773?w=800&q=80',
@@ -269,7 +285,7 @@ const LIFESTYLE_THEME_DATA: PageData[] = [
   },
 ];
 
-const TRAVEL_THEME_DATA: PageData[] = [
+const TRAVEL_THEME_DATA: any[] = [
   {
     id: 1,
     bgImage: 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=800&q=80',
@@ -329,7 +345,7 @@ const TRAVEL_THEME_DATA: PageData[] = [
   },
 ];
 
-const FASHION_THEME_DATA: PageData[] = [
+const FASHION_THEME_DATA: any[] = [
   {
     id: 1,
     bgImage: 'https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800&q=80',
@@ -389,7 +405,7 @@ const FASHION_THEME_DATA: PageData[] = [
   },
 ];
 
-const FOOD_THEME_DATA: PageData[] = [
+const FOOD_THEME_DATA: any[] = [
   {
     id: 1,
     bgImage: 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=800&q=80',
@@ -449,7 +465,7 @@ const FOOD_THEME_DATA: PageData[] = [
   },
 ];
 
-const EDUCATION_THEME_DATA: PageData[] = [
+const EDUCATION_THEME_DATA: any[] = [
   {
     id: 1,
     bgImage: 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?w=800&q=80',
@@ -539,7 +555,7 @@ function getLayersForPage(page: PageData): CanvasLayerWithSrc[] {
 }
 
 // AI 생성 데이터({ page, title, body, backgroundImage, accent, imageKeyword }[]) → PageData[] 변환
-function cardNewsToPages(raw: { page: number; title: string; body: string; backgroundImage?: string; accent?: string; imageKeyword?: string; blocks?: SlideBlock[]; brandTone?: BrandTone; showFrame?: boolean; blocksOffsetY?: number; }[], theme: PageData[] = PAGES_DATA): PageData[] {
+function cardNewsToPages(raw: { page: number; title: string; body: string; backgroundImage?: string; accent?: string; imageKeyword?: string; blocks?: SlideBlock[]; brandTone?: BrandTone; showFrame?: boolean; blocksOffsetY?: number; }[], theme: any[] = PAGES_DATA): any[] {
   const lastIdx = raw.length - 1;
   return raw.map((card, i) => {
     // 테마 슬롯 매핑: 첫 장은 표지, 마지막 장은 마무리, 나머지는 중간 레이아웃 반복
@@ -560,12 +576,12 @@ function cardNewsToPages(raw: { page: number; title: string; body: string; backg
     const blocksOffsetY = card.blocksOffsetY !== undefined ? card.blocksOffsetY : base.blocksOffsetY;
 
     if (i === 0) {
-      return { ...base, id: card.page, title: card.title, subtitle: card.body, bullets: undefined, bgImage, accent, imageKeyword, blocks, brandTone, showFrame, blocksOffsetY };
+      return { ...base, id: String(card.page), title: card.title, subtitle: card.body, bullets: undefined, bgImage, accent, imageKeyword, blocks, brandTone, showFrame, blocksOffsetY };
     }
     const bodyLines = card.body.split('\n').map((l: string) => l.trim()).filter(Boolean);
     return {
       ...base,
-      id: card.page,
+      id: String(card.page),
       title: card.title,
       subtitle: '',
       bullets: bodyLines.length > 1 ? bodyLines : [card.body],
@@ -2546,7 +2562,7 @@ export default function EditorPage() {
   const [editingElemId, setEditingElemId] = useState<string | null>(null);
   const dragStartRef = useRef<{ startX: number; startY: number; origX: number; origY: number; cw: number; ch: number } | null>(null);
   const canvasElemRef = useRef<HTMLDivElement>(null);
-  const [pageImages, setPageImages] = useState<Record<number, string>>({});
+  const [pageImages, setPageImages] = useState<Record<string, string>>({});
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   const [canvasW, setCanvasW] = useState(420);
@@ -2558,7 +2574,7 @@ export default function EditorPage() {
   const [lastCaption, setLastCaption] = useState('');
   const [lastHashtags, setLastHashtags] = useState<string[]>([]);
   const [isFullscreenEdit, setIsFullscreenEdit] = useState(false);
-  const captureRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const captureRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [isDraggingFile, setIsDraggingFile] = useState(false);
   const [isUploadingDrop, setIsUploadingDrop] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -2577,8 +2593,8 @@ export default function EditorPage() {
   const [restoreBanner, setRestoreBanner] = useState<{ savedAt: number; pages: PageData[] } | null>(null);
 
   // ── 슬라이드 드래그 순서 변경 ──
-  const [dragThumbId, setDragThumbId] = useState<number | null>(null);
-  const [dragOverThumbId, setDragOverThumbId] = useState<number | null>(null);
+  const [dragThumbId, setDragThumbId] = useState<string | null>(null);
+  const [dragOverThumbId, setDragOverThumbId] = useState<string | null>(null);
 
   // ── 요소 복사·붙여넣기 ──
   const copiedElementRef = useRef<CanvasElement | null>(null);
@@ -2623,85 +2639,240 @@ export default function EditorPage() {
     document.head.appendChild(link);
   }, []);
 
-  // 마운트 시 데이터 로드 (우선순위: editingDesign > cardnews_import_templates > cardNewsData > 기본값)
+  // 마운트 시 데이터 로드 및 URL 동기화 (우선순위: URL id > editingDesign > cardnews_import_templates > cardNewsData > autosave > PAGES_DATA)
   useEffect(() => {
-    try {
-      // ── 자동저장 복구 확인 (항상 먼저 체크) ─────────────────────────────────
-      const autosaveRaw = localStorage.getItem('cardnews_autosave');
-      if (autosaveRaw) {
-        try {
-          const autosave = JSON.parse(autosaveRaw);
-          if (Array.isArray(autosave.pages) && autosave.pages.length > 0 && autosave.savedAt) {
-            // 24시간 이내 저장본만 복구 배너 표시
-            const ageMs = Date.now() - autosave.savedAt;
-            if (ageMs < 24 * 60 * 60 * 1000) {
-              setRestoreBanner({ savedAt: autosave.savedAt, pages: autosave.pages });
-            } else {
-              localStorage.removeItem('cardnews_autosave');
+    const searchParams = new URLSearchParams(window.location.search);
+    const urlId = searchParams.get('id');
+    const urlPage = searchParams.get('page');
+
+    const updateUrlParams = (id: string | null, page: number) => {
+      if (typeof window === 'undefined') return;
+      const params = new URLSearchParams(window.location.search);
+      if (id) {
+        params.set('id', id);
+      } else {
+        params.delete('id');
+      }
+      params.set('page', String(page));
+      const newUrl = `${window.location.pathname}?${params.toString()}`;
+      window.history.replaceState(null, '', newUrl);
+    };
+
+    const initializeEditor = async () => {
+      try {
+        // ── 자동저장 복구 확인 (항상 먼저 체크 및 배너 세팅) ──────────────────────
+        const autosaveRaw = localStorage.getItem('cardnews_autosave');
+        if (autosaveRaw) {
+          try {
+            const autosave = JSON.parse(autosaveRaw);
+            if (Array.isArray(autosave.pages) && autosave.pages.length > 0 && autosave.savedAt) {
+              const ageMs = Date.now() - autosave.savedAt;
+              if (ageMs < 24 * 60 * 60 * 1000) {
+                setRestoreBanner({ savedAt: autosave.savedAt, pages: normalizePages(autosave.pages) });
+              } else {
+                localStorage.removeItem('cardnews_autosave');
+              }
+            }
+          } catch {}
+        }
+
+        // 1. URL에 id가 있는 경우 -> Supabase API에서 디자인 로드 시도
+        if (urlId) {
+          const res = await fetch(`/api/designs/${urlId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.design && Array.isArray(data.design.pages_data)) {
+              const pages = normalizePages(data.design.pages_data);
+              setPagesData(pages);
+              historyRef.current = [pages];
+              historyIdxRef.current = 0;
+
+              // 로드 완료 후 임시 스토리지 키 정리
+              localStorage.removeItem('editingDesign');
+              localStorage.removeItem('editingDesignId');
+              localStorage.removeItem('cardnews_import_templates');
+              localStorage.removeItem('cardNewsData');
+
+              let targetPage = 1;
+              if (urlPage) {
+                const pNum = Number(urlPage);
+                if (pNum >= 1 && pNum <= pages.length) {
+                  targetPage = pNum;
+                }
+              }
+              setCurrentPage(targetPage);
+              updateUrlParams(urlId, targetPage);
+              return;
             }
           }
-        } catch { /* 파싱 실패 무시 */ }
-      }
+        }
 
-      const editingRaw = localStorage.getItem('editingDesign');
-      if (editingRaw) {
-        const parsed = JSON.parse(editingRaw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setPagesData(parsed);
-          historyRef.current = [parsed];
-          historyIdxRef.current = 0;
-          return;
-        }
-      }
-      const importRaw = localStorage.getItem('cardnews_import_templates');
-      if (importRaw) {
-        localStorage.removeItem('cardnews_import_templates');
-        const parsed = JSON.parse(importRaw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setPagesData(parsed);
-          historyRef.current = [parsed];
-          historyIdxRef.current = 0;
-          return;
-        }
-      }
-      const raw = localStorage.getItem('cardNewsData');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          // 템플릿에 따른 테마 선택
-          let theme = BUSINESS_THEME_DATA;
-          const selectedTpl = localStorage.getItem('selectedTemplate');
-          if (selectedTpl) {
-            try {
-              const tpl = JSON.parse(selectedTpl);
-              const cat = (tpl.category || '').toLowerCase();
-              const title = (tpl.title || '').toLowerCase();
-              if (cat.includes('카페') || cat.includes('커피') || title.includes('카페')) {
-                theme = CAFE_THEME_DATA;
-              } else if (cat.includes('라이프스타일') || cat.includes('wellness') || title.includes('라이프')) {
-                theme = LIFESTYLE_THEME_DATA;
-              } else if (cat.includes('여행') || cat.includes('travel') || title.includes('여행') || title.includes('핫플')) {
-                theme = TRAVEL_THEME_DATA;
-              } else if (cat.includes('패션') || cat.includes('뷰티') || cat.includes('fashion') || title.includes('패션') || title.includes('뷰티')) {
-                theme = FASHION_THEME_DATA;
-              } else if (cat.includes('음식') || cat.includes('맛집') || cat.includes('food') || title.includes('맛집') || title.includes('레시피') || title.includes('음식')) {
-                theme = FOOD_THEME_DATA;
-              } else if (cat.includes('교육') || cat.includes('자기계발') || cat.includes('학습') || title.includes('공부') || title.includes('배우')) {
-                theme = EDUCATION_THEME_DATA;
+        // 2. localStorage에 기존 편집 디자인이 있는 경우 (빠른 로딩 및 URL 동기화)
+        const editingRaw = localStorage.getItem('editingDesign');
+        const editingId = localStorage.getItem('editingDesignId') || urlId;
+        if (editingRaw) {
+          const parsed = JSON.parse(editingRaw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const pages = normalizePages(parsed);
+            setPagesData(pages);
+            historyRef.current = [pages];
+            historyIdxRef.current = 0;
+
+            localStorage.removeItem('editingDesign');
+            localStorage.removeItem('editingDesignId');
+
+            let targetPage = 1;
+            if (urlPage) {
+              const pNum = Number(urlPage);
+              if (pNum >= 1 && pNum <= parsed.length) {
+                targetPage = pNum;
               }
-            } catch { /* 파싱 실패 시 기본 테마 유지 */ }
+            }
+            setCurrentPage(targetPage);
+            updateUrlParams(editingId, targetPage);
+            return;
           }
-
-          const converted = cardNewsToPages(parsed, theme);
-          setPagesData(converted);
-          historyRef.current = [converted];
-          historyIdxRef.current = 0;
         }
+
+        // 3. localStorage에 템플릿 신규 생성이 있는 경우
+        const importRaw = localStorage.getItem('cardnews_import_templates');
+        if (importRaw) {
+          const parsed = JSON.parse(importRaw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const pages = normalizePages(parsed);
+            setPagesData(pages);
+            historyRef.current = [pages];
+            historyIdxRef.current = 0;
+
+            localStorage.removeItem('cardnews_import_templates');
+            localStorage.removeItem('editingDesign');
+            localStorage.removeItem('editingDesignId');
+
+            let targetPage = 1;
+            if (urlPage) {
+              const pNum = Number(urlPage);
+              if (pNum >= 1 && pNum <= parsed.length) {
+                targetPage = pNum;
+              }
+            }
+            setCurrentPage(targetPage);
+            updateUrlParams(null, targetPage);
+            return;
+          }
+        }
+
+        // 4. localStorage에 AI 생성 데이터가 있는 경우
+        const raw = localStorage.getItem('cardNewsData');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            let theme = BUSINESS_THEME_DATA;
+            const selectedTpl = localStorage.getItem('selectedTemplate');
+            if (selectedTpl) {
+              try {
+                const tpl = JSON.parse(selectedTpl);
+                const cat = (tpl.category || '').toLowerCase();
+                const title = (tpl.title || '').toLowerCase();
+                if (cat.includes('카페') || cat.includes('커피') || title.includes('카페')) {
+                  theme = CAFE_THEME_DATA;
+                } else if (cat.includes('라이프스타일') || cat.includes('wellness') || title.includes('라이프')) {
+                  theme = LIFESTYLE_THEME_DATA;
+                } else if (cat.includes('여행') || cat.includes('travel') || title.includes('여행') || title.includes('핫플')) {
+                  theme = TRAVEL_THEME_DATA;
+                } else if (cat.includes('패션') || cat.includes('뷰티') || cat.includes('fashion') || title.includes('패션') || title.includes('뷰티')) {
+                  theme = FASHION_THEME_DATA;
+                } else if (cat.includes('음식') || cat.includes('맛집') || cat.includes('food') || title.includes('맛집') || title.includes('레시피') || title.includes('음식')) {
+                  theme = FOOD_THEME_DATA;
+                } else if (cat.includes('교육') || cat.includes('자기계발') || cat.includes('학습') || title.includes('공부') || title.includes('배우')) {
+                  theme = EDUCATION_THEME_DATA;
+                }
+              } catch {}
+            }
+
+            const converted = normalizePages(cardNewsToPages(parsed, theme));
+            setPagesData(converted);
+            historyRef.current = [converted];
+            historyIdxRef.current = 0;
+
+            localStorage.removeItem('cardNewsData');
+
+            let targetPage = 1;
+            if (urlPage) {
+              const pNum = Number(urlPage);
+              if (pNum >= 1 && pNum <= converted.length) {
+                targetPage = pNum;
+              }
+            }
+            setCurrentPage(targetPage);
+            updateUrlParams(null, targetPage);
+            return;
+          }
+        }
+
+        // 5. 새로고침 폴백 우선순위: 자동저장본(autosave) 우선 사용
+        if (autosaveRaw) {
+          const autosave = JSON.parse(autosaveRaw);
+          if (Array.isArray(autosave.pages) && autosave.pages.length > 0) {
+            const pages = normalizePages(autosave.pages);
+            setPagesData(pages);
+            historyRef.current = [pages];
+            historyIdxRef.current = 0;
+
+            let targetPage = 1;
+            if (urlPage) {
+              const pNum = Number(urlPage);
+              if (pNum >= 1 && pNum <= autosave.pages.length) {
+                targetPage = pNum;
+              }
+            }
+            setCurrentPage(targetPage);
+            updateUrlParams(urlId, targetPage);
+            return;
+          }
+        }
+
+        // 6. 최종 폴백: 기본 PAGES_DATA ("business title" 테마)
+        const fallbackPages = normalizePages(PAGES_DATA);
+        setPagesData(fallbackPages);
+        historyRef.current = [fallbackPages];
+        historyIdxRef.current = 0;
+
+        let targetPage = 1;
+        if (urlPage) {
+          const pNum = Number(urlPage);
+          if (pNum >= 1 && pNum <= PAGES_DATA.length) {
+            targetPage = pNum;
+          }
+        }
+        setCurrentPage(targetPage);
+        updateUrlParams(null, targetPage);
+      } catch (err) {
+        console.error('Failed to load cardnews editor data:', err);
+        const fallbackPages = normalizePages(PAGES_DATA);
+        setPagesData(fallbackPages);
+        setCurrentPage(1);
+        updateUrlParams(null, 1);
       }
-    } catch {
-      // 파싱 실패 시 기본 PAGES_DATA 유지
-    }
+    };
+
+    initializeEditor();
   }, []);
+
+  // 페이지 번호 변경 시 URL Query 동기화
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const urlId = searchParams.get('id');
+    const params = new URLSearchParams(window.location.search);
+    if (urlId) {
+      params.set('id', urlId);
+    } else {
+      params.delete('id');
+    }
+    params.set('page', String(currentPage));
+    const newUrl = `${window.location.pathname}?${params.toString()}`;
+    window.history.replaceState(null, '', newUrl);
+  }, [currentPage]);
 
   const syncUndoRedo = useCallback(() => {
     setCanUndo(historyIdxRef.current > 0);
@@ -2756,10 +2927,10 @@ export default function EditorPage() {
   }, [isDraggingBlocks, currentPage, pushHistory, pagesData]);
 
   // layerId 1=title, 2=subtitle, 3+=bullets[layerId-3] / style은 선택 적용
-  const updatePageField = useCallback((pageId: number, layerId: number, content: string, style?: TextStyle) => {
+  const updatePageField = useCallback((pageId: string, layerId: number, content: string, style?: TextStyle) => {
     setPagesData(prev => {
       const next = prev.map(p => {
-        if (p.id !== pageId) return p;
+        if (String(p.id) !== String(pageId)) return p;
         if (layerId === 1) return { ...p, title: content, ...(style ? { titleStyle: style } : {}) };
         if (layerId === 2) return { ...p, subtitle: content, ...(style ? { subtitleStyle: style } : {}) };
         if (layerId >= 3) {
@@ -2793,9 +2964,9 @@ export default function EditorPage() {
   }, []);
 
   // AI 디자이너: 현재 페이지 전체 변경 적용
-  const updatePageData = useCallback((pageId: number, changes: Partial<PageData>) => {
+  const updatePageData = useCallback((pageId: string, changes: Partial<PageData>) => {
     setPagesData(prev => {
-      const next = prev.map(p => p.id !== pageId ? p : { ...p, ...changes });
+      const next = prev.map(p => String(p.id) !== String(pageId) ? p : { ...p, ...changes });
       pushHistory(next);
       return next;
     });
@@ -2877,44 +3048,44 @@ export default function EditorPage() {
   }, [pushHistory]);
 
   // ── 슬라이드 관리 ───────────────────────────────────────────────────────────
-  const duplicatePage = useCallback((pageId: number) => {
+  const duplicatePage = useCallback((pageId: string) => {
     setPagesData(prev => {
-      const idx = prev.findIndex(p => p.id === pageId);
+      const idx = prev.findIndex(p => String(p.id) === String(pageId));
       if (idx === -1) return prev;
-      const maxId = Math.max(...prev.map(p => p.id));
-      const clone = { ...prev[idx], id: maxId + 1 };
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      const clone = { ...prev[idx], id: newId };
       const next = [...prev.slice(0, idx + 1), clone, ...prev.slice(idx + 1)];
       pushHistory(next);
       return next;
     });
   }, [pushHistory]);
 
-  const deletePage = useCallback((pageId: number) => {
+  const deletePage = useCallback((pageId: string) => {
     setPagesData(prev => {
       if (prev.length <= 1) return prev;
-      const next = prev.filter(p => p.id !== pageId);
+      const next = prev.filter(p => String(p.id) !== String(pageId));
       pushHistory(next);
       return next;
     });
     setCurrentPage(p => {
-      const remaining = pagesData.filter(pg => pg.id !== pageId);
+      const remaining = pagesData.filter(pg => String(pg.id) !== String(pageId));
       return Math.min(p, remaining.length || 1);
     });
   }, [pushHistory, pagesData]);
 
   // ── 슬라이드 드래그 순서 변경 ─────────────────────────────────────────────
-  const handleThumbDragStart = useCallback((e: React.DragEvent, pageId: number) => {
+  const handleThumbDragStart = useCallback((e: React.DragEvent, pageId: string) => {
     e.dataTransfer.effectAllowed = 'move';
     setDragThumbId(pageId);
   }, []);
 
-  const handleThumbDragOver = useCallback((e: React.DragEvent, pageId: number) => {
+  const handleThumbDragOver = useCallback((e: React.DragEvent, pageId: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     setDragOverThumbId(pageId);
   }, []);
 
-  const handleTouchStart = useCallback((e: React.TouchEvent, pageId: number) => {
+  const handleTouchStart = useCallback((e: React.TouchEvent, pageId: string) => {
     setDragThumbId(pageId);
   }, []);
 
@@ -2925,7 +3096,7 @@ export default function EditorPage() {
     if (!elem) return;
     const thumbElem = elem.closest('[data-page-id]');
     if (thumbElem) {
-      const targetId = Number(thumbElem.getAttribute('data-page-id'));
+      const targetId = String(thumbElem.getAttribute('data-page-id'));
       if (targetId && targetId !== dragThumbId) {
         setDragOverThumbId(targetId);
       }
@@ -2935,8 +3106,8 @@ export default function EditorPage() {
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
     if (dragThumbId !== null && dragOverThumbId !== null && dragThumbId !== dragOverThumbId) {
       setPagesData(prev => {
-        const fromIdx = prev.findIndex(p => p.id === dragThumbId);
-        const toIdx = prev.findIndex(p => p.id === dragOverThumbId);
+        const fromIdx = prev.findIndex(p => String(p.id) === String(dragThumbId));
+        const toIdx = prev.findIndex(p => String(p.id) === String(dragOverThumbId));
         if (fromIdx === -1 || toIdx === -1) return prev;
         
         const currentSelectedPageId = prev[currentPage - 1]?.id;
@@ -2947,7 +3118,7 @@ export default function EditorPage() {
         pushHistory(next);
         
         if (currentSelectedPageId !== undefined) {
-          const newSelectedIdx = next.findIndex(p => p.id === currentSelectedPageId);
+          const newSelectedIdx = next.findIndex(p => String(p.id) === String(currentSelectedPageId));
           if (newSelectedIdx !== -1) {
             setCurrentPage(newSelectedIdx + 1);
           }
@@ -2959,12 +3130,12 @@ export default function EditorPage() {
     setDragOverThumbId(null);
   }, [dragThumbId, dragOverThumbId, currentPage, pushHistory]);
 
-  const handleThumbDrop = useCallback((e: React.DragEvent, targetId: number) => {
+  const handleThumbDrop = useCallback((e: React.DragEvent, targetId: string) => {
     e.preventDefault();
     if (dragThumbId === null || dragThumbId === targetId) { setDragThumbId(null); setDragOverThumbId(null); return; }
     setPagesData(prev => {
-      const fromIdx = prev.findIndex(p => p.id === dragThumbId);
-      const toIdx = prev.findIndex(p => p.id === targetId);
+      const fromIdx = prev.findIndex(p => String(p.id) === String(dragThumbId));
+      const toIdx = prev.findIndex(p => String(p.id) === String(targetId));
       if (fromIdx === -1 || toIdx === -1) return prev;
       
       const currentSelectedPageId = prev[currentPage - 1]?.id;
@@ -2975,7 +3146,7 @@ export default function EditorPage() {
       pushHistory(next);
       
       if (currentSelectedPageId !== undefined) {
-        const newSelectedIdx = next.findIndex(p => p.id === currentSelectedPageId);
+        const newSelectedIdx = next.findIndex(p => String(p.id) === String(currentSelectedPageId));
         if (newSelectedIdx !== -1) {
           setCurrentPage(newSelectedIdx + 1);
         }
@@ -2988,10 +3159,10 @@ export default function EditorPage() {
 
   const addBlankPage = useCallback(() => {
     setPagesData(prev => {
-      const maxId = Math.max(...prev.map(p => p.id));
+      const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `page_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
       const last = prev[prev.length - 1];
       const blank: PageData = {
-        id: maxId + 1,
+        id: newId,
         bgImage: last.bgImage,
         bgLabel: '새 페이지',
         overlay: last.overlay,
@@ -3693,6 +3864,9 @@ export default function EditorPage() {
                                     updatePageData(pageData.id, { blocks: updatedBlocks });
                                   }
                                 }}
+                                titleStyle={pageData.titleStyle}
+                                subtitleStyle={pageData.subtitleStyle}
+                                bulletStyle={pageData.bulletStyle}
                               />
                             </div>
                           </div>
@@ -4243,6 +4417,9 @@ function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; lo
                 blocks={page.blocks}
                 brandTone={page.brandTone}
                 availableHeight={Math.floor(525 * (page.blocksOffsetY ?? 70) / 100 - 40)}
+                titleStyle={page.titleStyle}
+                subtitleStyle={page.subtitleStyle}
+                bulletStyle={page.bulletStyle}
               />
             </div>
           </div>
@@ -4366,10 +4543,10 @@ function FullscreenEditor({
 }: {
   pagesData: PageData[];
   initialPage: number;
-  pageImages: Record<number, string>;
-  onSelectImage: (url: string, pageId: number) => void;
-  onUpdatePage: (pageId: number, layerId: number, content: string, style?: TextStyle) => void;
-  onApplyPageChanges: (pageId: number, changes: Partial<PageData>) => void;
+  pageImages: Record<string, string>;
+  onSelectImage: (url: string, pageId: string) => void;
+  onUpdatePage: (pageId: string, layerId: number, content: string, style?: TextStyle) => void;
+  onApplyPageChanges: (pageId: string, changes: Partial<PageData>) => void;
   onClose: () => void;
   brandLogo?: string;
 }) {
@@ -4614,6 +4791,9 @@ function FullscreenEditor({
                               blocks={pageData.blocks}
                               brandTone={pageData.brandTone}
                               availableHeight={Math.floor(canvasW * 1.25 * (pageData.blocksOffsetY ?? 70) / 100 - 40)}
+                              titleStyle={pageData.titleStyle}
+                              subtitleStyle={pageData.subtitleStyle}
+                              bulletStyle={pageData.bulletStyle}
                             />
                           </div>
                         </div>
@@ -5080,7 +5260,7 @@ function SaveDesignModal({
   pagesData, pageImages, onClose,
 }: {
   pagesData: PageData[];
-  pageImages: Record<number, string>;
+  pageImages: Record<string, string>;
   onClose: () => void;
 }) {
   const [name, setName] = useState('');
@@ -5209,9 +5389,9 @@ function DownloadModal({
   pagesData, pageImages, currentPage, captureRefs, brandLogo, onClose,
 }: {
   pagesData: PageData[];
-  pageImages: Record<number, string>;
+  pageImages: Record<string, string>;
   currentPage: number;
-  captureRefs: React.RefObject<Record<number, HTMLDivElement | null>>;
+  captureRefs: React.RefObject<Record<string, HTMLDivElement | null>>;
   brandLogo?: string;
   onClose: () => void;
 }) {
@@ -5296,10 +5476,10 @@ function DownloadModal({
     return out;
   };
 
-  const capturePages = async (ids: number[]): Promise<{ id: number; dataUrl: string; title: string }[]> => {
-    const results: { id: number; dataUrl: string; title: string }[] = [];
+  const capturePages = async (ids: string[]): Promise<{ id: string; dataUrl: string; title: string }[]> => {
+    const results: { id: string; dataUrl: string; title: string }[] = [];
     for (const id of ids) {
-      const pg = pagesData.find(p => p.id === id);
+      const pg = pagesData.find(p => String(p.id) === String(id));
       if (!pg) continue;
       const el = captureRefs.current?.[id];
       if (!el) continue;
@@ -5497,7 +5677,7 @@ function SnsUploadModal({
   pagesData, captureRefs, onClose, initialCaption = '',
 }: {
   pagesData: PageData[];
-  captureRefs: React.MutableRefObject<Record<number, HTMLDivElement | null>>;
+  captureRefs: React.MutableRefObject<Record<string, HTMLDivElement | null>>;
   onClose: () => void;
   initialCaption?: string;
 }) {
