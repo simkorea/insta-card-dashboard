@@ -369,7 +369,7 @@ export default function BlogGeneratorPage() {
             {error && <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
           </div>
 
-          <div className="p-4 border-t border-gray-100">
+          <div className="p-4 pb-24 md:pb-4 border-t border-gray-100">
             <button
               onClick={handleGenerate}
               disabled={isGenerating || !topic.trim()}
