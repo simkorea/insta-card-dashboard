@@ -4394,7 +4394,8 @@ function FullscreenEditor({
     return { snapped: val, guides: [] };
   };
 
-  const pageData = pagesData[fsPage - 1];
+  const safeFsPageIndex = pagesData.length > 0 ? Math.max(0, Math.min(fsPage - 1, pagesData.length - 1)) : 0;
+  const pageData = pagesData[safeFsPageIndex] || PAGES_DATA[0];
   const currentBgImage = pageData ? (pageImages[pageData.id] ?? pageData.bgImage) : '';
   const rawLayers = getLayersForPage(pageData);
   const pageLayers: CanvasLayerWithSrc[] = [
@@ -4410,15 +4411,22 @@ function FullscreenEditor({
     : '';
 
   useEffect(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setIsPanelOpen(false); // Close panel by default on mobile to show the canvas first
+    }
+  }, []);
+
+  useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const ro = new ResizeObserver(() => {
       const pad = 48;
       const thumbH = 88;
-      const panelW = isPanelOpen ? 360 : 0;
+      const isMobile = el.clientWidth < 768;
+      const panelW = (isPanelOpen && !isMobile) ? 360 : 0;
       const availH = el.clientHeight - thumbH - pad;
       const availW = el.clientWidth - 48 - panelW - pad;
-      setCanvasW(Math.max(300, Math.floor(Math.min(availW, availH * (4 / 5)))));
+      setCanvasW(Math.max(280, Math.floor(Math.min(availW, availH * (4 / 5)))));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -4433,19 +4441,19 @@ function FullscreenEditor({
   const fsAddElement = (elem: Omit<CanvasElement, 'id'>) => {
     if (!pageData) return;
     const newElem: CanvasElement = { ...elem, id: `el_${Date.now()}` };
-    const pd = pagesData[fsPage - 1];
+    const pd = pageData;
     onApplyPageChanges(pageData.id, { elements: [...(pd.elements || []), newElem] });
     setSelectedElementId(newElem.id);
     setActiveTab('element');
   };
   const fsUpdateElement = (id: string, updates: Partial<CanvasElement>) => {
     if (!pageData) return;
-    const pd = pagesData[fsPage - 1];
+    const pd = pageData;
     onApplyPageChanges(pageData.id, { elements: (pd.elements || []).map(e => e.id === id ? { ...e, ...updates } : e) });
   };
   const fsDeleteElement = (id: string) => {
     if (!pageData) return;
-    const pd = pagesData[fsPage - 1];
+    const pd = pageData;
     onApplyPageChanges(pageData.id, { elements: (pd.elements || []).filter(e => e.id !== id) });
     setSelectedElementId(null);
   };
@@ -4805,7 +4813,7 @@ function FullscreenEditor({
 
         {/* Right panel */}
         <div
-          className="bg-white flex flex-col shrink-0 overflow-hidden border-l border-gray-200"
+          className="absolute md:relative right-0 top-12 md:top-0 bottom-0 bg-white flex flex-col shrink-0 overflow-hidden border-l border-gray-200 z-40 md:z-auto shadow-2xl md:shadow-none max-w-[calc(100vw-48px)]"
           style={{ width: isPanelOpen ? 360 : 0, transition: 'width 0.25s ease' }}
           onClick={e => e.stopPropagation()}
         >
@@ -4821,12 +4829,12 @@ function FullscreenEditor({
             </button>
           </div>
           <div className="flex-1 overflow-hidden flex flex-col">
-            {activeTab === 'ai' && pageData && <AIPanel pageData={pagesData[fsPage - 1]} onApplyChanges={(changes) => onApplyPageChanges(pageData.id, changes)} messages={aiMessages} setMessages={setAiMessages} />}
+            {activeTab === 'ai' && pageData && <AIPanel pageData={pageData} onApplyChanges={(changes) => onApplyPageChanges(pageData.id, changes)} messages={aiMessages} setMessages={setAiMessages} />}
             {activeTab === 'element' && (
               <div className="flex-1 overflow-hidden">
                 <ElementPanel
                   onAdd={fsAddElement}
-                  selectedElement={selectedElementId ? (pagesData[fsPage - 1]?.elements || []).find(e => e.id === selectedElementId) ?? null : null}
+                  selectedElement={selectedElementId ? (pageData.elements || []).find(e => e.id === selectedElementId) ?? null : null}
                   onUpdateElement={fsUpdateElement}
                   onDeleteElement={fsDeleteElement}
                 />
@@ -4840,13 +4848,13 @@ function FullscreenEditor({
                   layer={selectedLayer}
                   currentImageUrl={currentBgImage}
                   cardContent={cardTextContent}
-                  imageKeyword={pagesData[fsPage - 1]?.imageKeyword}
-                  initialScale={pagesData[fsPage - 1]?.bgScale}
-                  initialPosition={pagesData[fsPage - 1]?.bgPosition}
-                  initialBrightness={pagesData[fsPage - 1]?.bgBrightness}
-                  initialBrightnessFilter={pagesData[fsPage - 1]?.bgBrightnessFilter}
-                  initialOverlayOpacity={pagesData[fsPage - 1]?.overlayOpacity}
-                  initialBlocksOffsetY={(pagesData[fsPage - 1]?.blocks?.length ?? 0) > 0 ? (pagesData[fsPage - 1]?.blocksOffsetY ?? 70) : undefined}
+                  imageKeyword={pageData.imageKeyword}
+                  initialScale={pageData.bgScale}
+                  initialPosition={pageData.bgPosition}
+                  initialBrightness={pageData.bgBrightness}
+                  initialBrightnessFilter={pageData.bgBrightnessFilter}
+                  initialOverlayOpacity={pageData.overlayOpacity}
+                  initialBlocksOffsetY={(pageData.blocks?.length ?? 0) > 0 ? (pageData.blocksOffsetY ?? 70) : undefined}
                   onSelectImage={url => onSelectImage(url, pageData.id)}
                   onDeselect={handleDeselect}
                   onUpdateBgTransform={(scale, pos) => onApplyPageChanges(pageData.id, { bgScale: scale, bgPosition: pos })}
