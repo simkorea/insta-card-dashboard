@@ -36,7 +36,7 @@ export function toKoreanError(err: unknown): string {
 // - array of parts (mixed text + image)
 export async function generateWithRetry(
   input: Parameters<ReturnType<GoogleGenerativeAI['getGenerativeModel']>['generateContent']>[0],
-  options: { systemInstruction?: string } = {}
+  options: { systemInstruction?: string; generationConfig?: any } = {}
 ): Promise<string> {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -44,6 +44,7 @@ export async function generateWithRetry(
     genAI.getGenerativeModel({
       model: modelName,
       ...(options.systemInstruction ? { systemInstruction: options.systemInstruction } : {}),
+      generationConfig: options.generationConfig,
     });
 
   try {

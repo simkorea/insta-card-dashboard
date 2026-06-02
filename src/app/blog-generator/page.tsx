@@ -36,7 +36,7 @@ const SUGGESTED_TOPICS = [
   '디지털 노마드 생활 가이드',
 ];
 
-const WORD_COUNT_MARKS = [500, 1000, 2000, 3000, 5000];
+const WORD_COUNT_MARKS = [500, 1000, 1500, 2000, 3000];
 
 interface BlogResult {
   title: string;
@@ -199,6 +199,10 @@ export default function BlogGeneratorPage() {
     setError('');
     setIsGenerating(true);
     setResult(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 53000);
+
     try {
       const res = await fetch('/api/generate/blog', {
         method: 'POST',
@@ -215,7 +219,9 @@ export default function BlogGeneratorPage() {
           instructions,
           cta: ctaText ? { text: ctaText, url: ctaUrl } : null,
         }),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setResult(data);
@@ -237,7 +243,12 @@ export default function BlogGeneratorPage() {
         })
         .catch(err => console.error('Auto-label generate failed:', err));
     } catch (e: any) {
-      setError('생성 실패: ' + e.message);
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        setError('생성 실패: 대기 시간(53초)이 초과되어 취소되었습니다. 잠시 후 다시 시도해주세요.');
+      } else {
+        setError('생성 실패: ' + e.message);
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -404,7 +415,7 @@ export default function BlogGeneratorPage() {
                     <input
                       type="range"
                       min={500}
-                      max={5000}
+                      max={3000}
                       step={500}
                       value={wordCount}
                       onChange={e => setWordCount(Number(e.target.value))}

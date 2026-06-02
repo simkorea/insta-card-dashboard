@@ -103,12 +103,32 @@ ${formatGuide[format] || formatGuide.naver}
   "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"]
 }`;
 
-    let text = (await generateWithRetry(prompt)).trim();
-    if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
-    else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('TIMEOUT')), 50000)
+    );
 
-    const data = JSON.parse(text);
-    return NextResponse.json(data);
+    try {
+      const generatePromise = (async () => {
+        // maxOutputTokens을 3000자 상한에 상응하는 3500토큰 수준으로 두어 응답 시간 과부하 억제
+        let text = (await generateWithRetry(prompt, {
+          generationConfig: { maxOutputTokens: 3500 }
+        })).trim();
+        if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
+        else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
+        return JSON.parse(text);
+      })();
+
+      const data = await Promise.race([generatePromise, timeoutPromise]);
+      return NextResponse.json(data);
+    } catch (err: any) {
+      if (err.message === 'TIMEOUT') {
+        return NextResponse.json(
+          { error: 'AI 생성 요청이 지연되어 시간 초과되었습니다. 잠시 후 다시 시도해주세요.' },
+          { status: 504 }
+        );
+      }
+      return NextResponse.json({ error: toKoreanError(err) }, { status: 500 });
+    }
   } catch (error: any) {
     return NextResponse.json({ error: toKoreanError(error) }, { status: 500 });
   }
