@@ -17,12 +17,14 @@ export function BlockRenderer({
   editable = false,
   onBlockOffsetChange,
   availableHeight,
+  isDraggingParent = false,
 }: {
   blocks: SlideBlock[];
   brandTone?: BrandTone;
   editable?: boolean;
   onBlockOffsetChange?: (index: number, offsetY: number) => void;
   availableHeight?: number;
+  isDraggingParent?: boolean;
 }) {
   const c = tone(brandTone);
   const [isDragging, setIsDragging] = useState(false);
@@ -45,6 +47,8 @@ export function BlockRenderer({
 
   // 1. Core useLayoutEffect for measuring and updating fitScale
   useLayoutEffect(() => {
+    if (isDragging || isDraggingParent) return; // Skip updating fitScale while dragging to freeze scale
+
     const el = outerRef.current;
     if (!el || !availableHeight || availableHeight <= 0) {
       if (fitScale !== 1) {
@@ -56,7 +60,21 @@ export function BlockRenderer({
     // Temporarily disable transform to measure absolute unscaled natural height
     const prevTransform = el.style.transform;
     el.style.transform = 'none';
+
+    // Temporarily clear children translateY transforms to prevent measuring height pollution
+    const childWrappers = el.querySelectorAll('[data-block-wrapper]') as NodeListOf<HTMLDivElement>;
+    const prevChildTransforms: string[] = [];
+    childWrappers.forEach((child, idx) => {
+      prevChildTransforms[idx] = child.style.transform;
+      child.style.transform = 'none';
+    });
+
     const naturalH = el.scrollHeight;
+
+    // Restore children transforms
+    childWrappers.forEach((child, idx) => {
+      child.style.transform = prevChildTransforms[idx];
+    });
     el.style.transform = prevTransform;
 
     // Minimum scale limit set to 0.55 for absolute safety against overflows
@@ -104,11 +122,11 @@ export function BlockRenderer({
     };
   }, [availableHeight, blocks]);
 
-  // 4. Drag and Drop Mouse Move Event Listeners
+  // 4. Drag and Drop Pointer Move Event Listeners
   useEffect(() => {
     if (!isDragging) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
       if (!dragStartRef.current || !onBlockOffsetChange) return;
       const { index, startY, startOffset } = dragStartRef.current;
       // Divide drag delta by scale so drag handles move 1:1 with user's pointer
@@ -119,22 +137,22 @@ export function BlockRenderer({
       onBlockOffsetChange(index, newOffset);
     };
 
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
       dragStartRef.current = null;
       setIsDragging(false);
       setActiveDragIndex(null);
       document.body.style.cursor = '';
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
     };
   }, [isDragging, onBlockOffsetChange]);
 
-  const handleHandleMouseDown = (e: React.MouseEvent, index: number, currentOffset: number) => {
+  const handleHandlePointerDown = (e: React.PointerEvent, index: number, currentOffset: number) => {
     e.stopPropagation();
     e.preventDefault();
     dragStartRef.current = {
@@ -301,11 +319,11 @@ export function BlockRenderer({
         };
 
         return (
-          <div key={i} style={wrapperStyle}>
+          <div key={i} style={wrapperStyle} data-block-wrapper>
             {innerContent}
             {editable && (
               <div
-                onMouseDown={(e) => handleHandleMouseDown(e, i, blockOffsetY)}
+                onPointerDown={(e) => handleHandlePointerDown(e, i, blockOffsetY)}
                 onMouseEnter={() => setHoveredGripIndex(i)}
                 onMouseLeave={() => setHoveredGripIndex(null)}
                 style={{
@@ -329,6 +347,7 @@ export function BlockRenderer({
                   pointerEvents: 'auto',
                   opacity: hoveredGripIndex === i ? 1.0 : 0.55,
                   transition: 'opacity 0.15s ease, background-color 0.15s ease',
+                  touchAction: 'none',
                 }}
                 title="드래그하여 개별 세로 위치 조절 (↕)"
               >

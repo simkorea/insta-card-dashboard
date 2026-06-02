@@ -42,3 +42,4 @@ next-env.d.ts
 
 .vercel
 update_persona_schema.sql
+test_supabase.js

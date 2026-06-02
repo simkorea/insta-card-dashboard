@@ -2725,9 +2725,9 @@ export default function EditorPage() {
   useEffect(() => {
     if (!isDraggingBlocks) return;
     
-    let currentVal = pagesData.find(p => p.id === currentPage)?.blocksOffsetY ?? 70;
+    let currentVal = pagesData[currentPage - 1]?.blocksOffsetY ?? 70;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
       if (!canvasElemRef.current) return;
       const rect = canvasElemRef.current.getBoundingClientRect();
       const relativeY = e.clientY - rect.top;
@@ -2735,23 +2735,23 @@ export default function EditorPage() {
       percent = Math.max(10, Math.min(90, percent));
       currentVal = percent;
       
-      setPagesData(prev => prev.map(p => p.id !== currentPage ? p : { ...p, blocksOffsetY: percent }));
+      setPagesData(prev => prev.map((p, idx) => idx + 1 !== currentPage ? p : { ...p, blocksOffsetY: percent }));
     };
 
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
       setIsDraggingBlocks(false);
       setPagesData(prev => {
-        const next = prev.map(p => p.id !== currentPage ? p : { ...p, blocksOffsetY: currentVal });
+        const next = prev.map((p, idx) => idx + 1 !== currentPage ? p : { ...p, blocksOffsetY: currentVal });
         pushHistory(next);
         return next;
       });
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
     };
   }, [isDraggingBlocks, currentPage, pushHistory, pagesData]);
 
@@ -2805,7 +2805,7 @@ export default function EditorPage() {
   const addElement = useCallback((elem: Omit<CanvasElement, 'id'>) => {
     const newElem: CanvasElement = { ...elem, id: `el_${Date.now()}` };
     setPagesData(prev => {
-      const next = prev.map(p => p.id !== currentPage ? p : { ...p, elements: [...(p.elements || []), newElem] });
+      const next = prev.map((p, idx) => idx + 1 !== currentPage ? p : { ...p, elements: [...(p.elements || []), newElem] });
       pushHistory(next);
       return next;
     });
@@ -2815,7 +2815,7 @@ export default function EditorPage() {
 
   const updateElement = useCallback((id: string, updates: Partial<CanvasElement>) => {
     setPagesData(prev => {
-      const next = prev.map(p => p.id !== currentPage ? p : {
+      const next = prev.map((p, idx) => idx + 1 !== currentPage ? p : {
         ...p, elements: (p.elements || []).map(e => e.id === id ? { ...e, ...updates } : e),
       });
       pushHistory(next);
@@ -2914,6 +2914,51 @@ export default function EditorPage() {
     setDragOverThumbId(pageId);
   }, []);
 
+  const handleTouchStart = useCallback((e: React.TouchEvent, pageId: number) => {
+    setDragThumbId(pageId);
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    if (!touch) return;
+    const elem = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (!elem) return;
+    const thumbElem = elem.closest('[data-page-id]');
+    if (thumbElem) {
+      const targetId = Number(thumbElem.getAttribute('data-page-id'));
+      if (targetId && targetId !== dragThumbId) {
+        setDragOverThumbId(targetId);
+      }
+    }
+  }, [dragThumbId]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (dragThumbId !== null && dragOverThumbId !== null && dragThumbId !== dragOverThumbId) {
+      setPagesData(prev => {
+        const fromIdx = prev.findIndex(p => p.id === dragThumbId);
+        const toIdx = prev.findIndex(p => p.id === dragOverThumbId);
+        if (fromIdx === -1 || toIdx === -1) return prev;
+        
+        const currentSelectedPageId = prev[currentPage - 1]?.id;
+        
+        const next = [...prev];
+        const [moved] = next.splice(fromIdx, 1);
+        next.splice(toIdx, 0, moved);
+        pushHistory(next);
+        
+        if (currentSelectedPageId !== undefined) {
+          const newSelectedIdx = next.findIndex(p => p.id === currentSelectedPageId);
+          if (newSelectedIdx !== -1) {
+            setCurrentPage(newSelectedIdx + 1);
+          }
+        }
+        return next;
+      });
+    }
+    setDragThumbId(null);
+    setDragOverThumbId(null);
+  }, [dragThumbId, dragOverThumbId, currentPage, pushHistory]);
+
   const handleThumbDrop = useCallback((e: React.DragEvent, targetId: number) => {
     e.preventDefault();
     if (dragThumbId === null || dragThumbId === targetId) { setDragThumbId(null); setDragOverThumbId(null); return; }
@@ -2921,15 +2966,25 @@ export default function EditorPage() {
       const fromIdx = prev.findIndex(p => p.id === dragThumbId);
       const toIdx = prev.findIndex(p => p.id === targetId);
       if (fromIdx === -1 || toIdx === -1) return prev;
+      
+      const currentSelectedPageId = prev[currentPage - 1]?.id;
+      
       const next = [...prev];
       const [moved] = next.splice(fromIdx, 1);
       next.splice(toIdx, 0, moved);
       pushHistory(next);
+      
+      if (currentSelectedPageId !== undefined) {
+        const newSelectedIdx = next.findIndex(p => p.id === currentSelectedPageId);
+        if (newSelectedIdx !== -1) {
+          setCurrentPage(newSelectedIdx + 1);
+        }
+      }
       return next;
     });
     setDragThumbId(null);
     setDragOverThumbId(null);
-  }, [dragThumbId, pushHistory]);
+  }, [dragThumbId, currentPage, pushHistory]);
 
   const addBlankPage = useCallback(() => {
     setPagesData(prev => {
@@ -2953,18 +3008,7 @@ export default function EditorPage() {
     });
   }, [pushHistory]);
 
-  const deleteElement = useCallback((id: string) => {
-    setPagesData(prev => {
-      const next = prev.map(p => p.id !== currentPage ? p : {
-        ...p, elements: (p.elements || []).filter(e => e.id !== id),
-      });
-      pushHistory(next);
-      return next;
-    });
-    setSelectedElementId(null);
-  }, [currentPage, pushHistory]);
-
-  const handleCanvasElemMouseDown = (e: React.MouseEvent, elem: CanvasElement) => {
+  const handleCanvasElemPointerDown = (e: React.PointerEvent, elem: CanvasElement) => {
     e.stopPropagation();
     setSelectedElementId(elem.id);
     setActiveTab('element');
@@ -2986,7 +3030,7 @@ export default function EditorPage() {
     return { snapped: val, guides: [] };
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+  const handleCanvasPointerMove = (e: React.PointerEvent) => {
     if (!draggingElemId || !dragStartRef.current) return;
     const { startX, startY, origX, origY, cw, ch } = dragStartRef.current;
     const rawX = Math.max(5, Math.min(95, origX + ((e.clientX - startX) / cw) * 100));
@@ -2997,7 +3041,7 @@ export default function EditorPage() {
     setGuideLines([...xGuides.map(g => ({ x: g })), ...yGuides.map(g => ({ y: g }))]);
   };
 
-  const handleCanvasMouseUp = () => {
+  const handleCanvasPointerUp = () => {
     if (draggingElemId && dragPos) {
       updateElement(draggingElemId, dragPos);
     }
@@ -3007,30 +3051,47 @@ export default function EditorPage() {
     dragStartRef.current = null;
   };
 
+  const deleteElement = useCallback((id: string) => {
+    setPagesData(prev => {
+      const next = prev.map((p, idx) => idx + 1 !== currentPage ? p : {
+        ...p, elements: (p.elements || []).filter(e => e.id !== id),
+      });
+      pushHistory(next);
+      return next;
+    });
+    setSelectedElementId(null);
+  }, [currentPage, pushHistory]);
+
   const totalPages = pagesData.length;
 
-  const pageData = pagesData[currentPage - 1];
-  const currentBgImage = pageImages[currentPage] ?? pageData.bgImage;
+  // Safe page index & data retrieval to prevent out of bounds/undefined crashes
+  const safePageIndex = pagesData.length > 0 ? Math.max(0, Math.min(currentPage - 1, pagesData.length - 1)) : 0;
+  const pageData = pagesData[safePageIndex] || PAGES_DATA[0];
+  const currentBgImage = pageData ? (pageImages[pageData.id] ?? pageData.bgImage) : '';
 
   // 이미지 레이어의 imageSrc를 현재 선택된 이미지로 교체
   const rawLayers = getLayersForPage(pageData);
   const pageLayers: CanvasLayerWithSrc[] = [
-    { ...rawLayers[0], imageSrc: currentBgImage },
+    { ...(rawLayers[0] || {}), imageSrc: currentBgImage } as CanvasLayerWithSrc,
     ...rawLayers.slice(1),
   ];
 
   // 카드 전체 텍스트 (Claude 검색 쿼리 생성에 사용)
-  const cardTextContent = [
-    pageData.title,
-    pageData.subtitle,
-    ...(pageData.bullets || []).map(b => b.replace(/<[^>]+>/g, '')),
-  ].filter(Boolean).join('\n');
+  const cardTextContent = pageData
+    ? [
+        pageData.title,
+        pageData.subtitle,
+        ...(pageData.bullets || []).map(b => b.replace(/<[^>]+>/g, '')),
+      ].filter(Boolean).join('\n')
+    : '';
 
   const handleSelectLayer = (layer: CanvasLayerWithSrc) => { setSelectedLayer(layer); setActiveTab('edit'); setIsPanelOpen(true); };
   const handleDeselect = () => { setSelectedLayer(null); setEditingElemId(null); };
 
   const handleSelectImage = (url: string) => {
-    setPageImages(prev => ({ ...prev, [currentPage]: url }));
+    if (pageData) {
+      setPageImages(prev => ({ ...prev, [pageData.id]: url }));
+    }
   };
 
   const [isSavingClose, setIsSavingClose] = useState(false);
@@ -3125,7 +3186,9 @@ export default function EditorPage() {
     setIsUploadingDrop(true);
     try {
       const url = await uploadImageFile(file);
-      setPageImages(prev => ({ ...prev, [currentPage]: url }));
+      if (pageData) {
+        setPageImages(prev => ({ ...prev, [pageData.id]: url }));
+      }
     } finally {
       setIsUploadingDrop(false);
     }
@@ -3168,7 +3231,7 @@ export default function EditorPage() {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
 
       if (e.key === 'c' && selectedElementId) {
-        const elem = (pagesData.find(p => p.id === currentPage)?.elements || []).find(el => el.id === selectedElementId);
+        const elem = (pageData?.elements || []).find(el => el.id === selectedElementId);
         if (elem) { copiedElementRef.current = elem; setClipboardToast(true); setTimeout(() => setClipboardToast(false), 1500); }
       }
       if (e.key === 'v' && copiedElementRef.current) {
@@ -3176,7 +3239,7 @@ export default function EditorPage() {
         const src = copiedElementRef.current;
         const newElem: CanvasElement = { ...src, id: `el_${Date.now()}`, x: Math.min(95, src.x + 5), y: Math.min(95, src.y + 5) };
         setPagesData(prev => {
-          const next = prev.map(p => p.id !== currentPage ? p : { ...p, elements: [...(p.elements || []), newElem] });
+          const next = prev.map((p, idx) => idx + 1 !== currentPage ? p : { ...p, elements: [...(p.elements || []), newElem] });
           pushHistory(next);
           return next;
         });
@@ -3226,8 +3289,8 @@ export default function EditorPage() {
               {pagesData.map((pg, idx) => (
                 <div
                   key={pg.id}
-                  onClick={() => { setCurrentPage(pg.id); setShowGridView(false); }}
-                  className={`relative rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-105 hover:shadow-2xl ${currentPage === pg.id ? 'ring-3 ring-primary-400 scale-105' : 'ring-1 ring-white/20'}`}
+                  onClick={() => { setCurrentPage(idx + 1); setShowGridView(false); }}
+                  className={`relative rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-105 hover:shadow-2xl ${currentPage === idx + 1 ? 'ring-3 ring-primary-400 scale-105' : 'ring-1 ring-white/20'}`}
                   style={{ aspectRatio: '4/5' }}
                 >
                   <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=300')} alt="" className="w-full h-full object-cover" />
@@ -3236,7 +3299,7 @@ export default function EditorPage() {
                     {pg.title && <p className="text-white text-[10px] font-bold leading-tight drop-shadow line-clamp-3">{pg.title}</p>}
                   </div>
                   <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 bg-black/60 text-white text-[9px] font-bold px-2 py-0.5 rounded-full">{idx + 1}</div>
-                  {currentPage === pg.id && (
+                  {currentPage === idx + 1 && (
                     <div className="absolute top-1.5 right-1.5 w-4 h-4 bg-primary-500 rounded-full flex items-center justify-center">
                       <Check size={10} className="text-white" />
                     </div>
@@ -3544,10 +3607,16 @@ export default function EditorPage() {
               ref={canvasElemRef}
               className="relative bg-white shadow-2xl flex-shrink-0 overflow-hidden"
               style={{ width: `${canvasW}px`, aspectRatio: '4/5' }}
-              onMouseMove={handleCanvasMouseMove}
-              onMouseUp={handleCanvasMouseUp}
-              onMouseLeave={handleCanvasMouseUp}
+              onPointerMove={handleCanvasPointerMove}
+              onPointerUp={handleCanvasPointerUp}
+              onPointerLeave={handleCanvasPointerUp}
             >
+              {/* 블록 위치 드래그 중 표시되는 상단 고정 반투명 배지 */}
+              {isDraggingBlocks && (
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-violet-600/85 text-white text-[10px] font-bold px-2 py-1 rounded-md shadow-lg pointer-events-none z-50">
+                  블록 위치 조절: {pageData.blocksOffsetY ?? 70}%
+                </div>
+              )}
               {/* 정렬 가이드 라인 */}
               {guideLines.map((g, i) => (
                 g.x !== undefined
@@ -3613,6 +3682,7 @@ export default function EditorPage() {
                                 brandTone={pageData.brandTone}
                                 editable={true}
                                 availableHeight={Math.floor(canvasW * 1.25 * (pageData.blocksOffsetY ?? 70) / 100 - 40)}
+                                isDraggingParent={isDraggingBlocks}
                                 onBlockOffsetChange={(index, offsetY) => {
                                   const updatedBlocks = [...(pageData.blocks || [])];
                                   if (updatedBlocks[index]) {
@@ -3620,38 +3690,46 @@ export default function EditorPage() {
                                       ...updatedBlocks[index],
                                       offsetY,
                                     };
-                                    updatePageData(currentPage, { blocks: updatedBlocks });
+                                    updatePageData(pageData.id, { blocks: updatedBlocks });
                                   }
                                 }}
                               />
                             </div>
                           </div>
-                          {/* Y-axis drag handlebar ⠿ 블록 위치 조절 */}
+                          {/* Y-axis drag line */}
                           <div
                             style={{
                               position: 'absolute',
                               left: 28,
                               right: 28,
-                              top: `${(pageData.blocksOffsetY ?? 70) - 5}%`, // 핸들이 블록 바로 위에 오도록
+                              top: `${pageData.blocksOffsetY ?? 70}%`,
+                              borderTop: '1px dashed rgba(139, 92, 246, 0.4)',
+                              pointerEvents: 'none',
+                              zIndex: 30,
+                            }}
+                          />
+                          {/* Y-axis drag handlebar ⠿ 블록 위치 조절 (좌측 모서리로 이동 및 투명도 조절) */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: 6,
+                              top: `${pageData.blocksOffsetY ?? 70}%`,
+                              transform: 'translateY(-50%)',
                               zIndex: 40,
                               pointerEvents: 'auto',
                             }}
-                            className="flex justify-center"
                           >
                             <div
-                              onMouseDown={e => {
+                              onPointerDown={e => {
                                 e.stopPropagation();
                                 e.preventDefault();
                                 setIsDraggingBlocks(true);
                               }}
-                              className="cursor-ns-resize bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-lg flex items-center gap-1.5 active:scale-95 transition-all select-none border border-violet-500"
+                              className="w-6 h-6 rounded-full bg-violet-600/70 hover:bg-violet-700 text-white text-xs flex items-center justify-center shadow-md cursor-ns-resize active:scale-95 transition-all select-none border border-violet-500/50"
+                              style={{ touchAction: 'none' }}
                               title="드래그하여 블록 위치 조절"
                             >
-                              <span className="font-mono">⠿</span>
-                              <span>블록 위치 조절</span>
-                              <span className="bg-white/20 px-1 py-0.2 rounded font-mono text-[9px]">
-                                {pageData.blocksOffsetY ?? 70}%
-                              </span>
+                              <span className="font-mono text-[10px]">⠿</span>
                             </div>
                           </div>
                         </>
@@ -3774,8 +3852,9 @@ export default function EditorPage() {
                             height: elem.type === 'text' ? 'auto' : `${pxSize}px`,
                             opacity: elem.opacity, zIndex: 15,
                             transform: 'translate(-50%, -50%)',
+                            touchAction: 'none',
                           }}
-                          onMouseDown={e => { if (!isEditing) handleCanvasElemMouseDown(e, elem); }}
+                          onPointerDown={e => { if (!isEditing) handleCanvasElemPointerDown(e, elem); }}
                           onDoubleClick={e => { if (elem.type === 'text') { e.stopPropagation(); setEditingElemId(elem.id); } }}
                         >
                           {elem.type === 'shape' && elem.shape && <ShapeSVG shape={elem.shape} color={elem.color} />}
@@ -3871,31 +3950,54 @@ export default function EditorPage() {
             {pagesData.map((pg, idx) => (
               <div
                 key={pg.id}
+                data-page-id={pg.id}
                 className="relative shrink-0 group"
                 draggable
                 onDragStart={e => handleThumbDragStart(e, pg.id)}
                 onDragOver={e => handleThumbDragOver(e, pg.id)}
                 onDrop={e => handleThumbDrop(e, pg.id)}
                 onDragEnd={() => { setDragThumbId(null); setDragOverThumbId(null); }}
+                onTouchStart={e => handleTouchStart(e, pg.id)}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                style={{ touchAction: 'none' }}
               >
                 <div
-                  onClick={e => { e.stopPropagation(); handlePageChange(pg.id); }}
+                  onClick={e => { e.stopPropagation(); handlePageChange(idx + 1); }}
                   className={`relative w-10 h-[52px] md:w-14 md:h-[72px] rounded-lg border-2 overflow-hidden cursor-grab active:cursor-grabbing transition-all ${
                     dragOverThumbId === pg.id ? 'border-primary-400 scale-105 ring-2 ring-primary-200' :
                     dragThumbId === pg.id ? 'opacity-40 border-gray-300' :
-                    currentPage === pg.id ? 'border-primary-600 shadow-md ring-2 ring-primary-100' : 'border-gray-200 hover:border-gray-400'
+                    currentPage === idx + 1 ? 'border-primary-600 shadow-md ring-2 ring-primary-100' : 'border-gray-200 hover:border-gray-400'
                   }`}
                 >
                   <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=120')} alt={`${pg.id}p`} className="w-full h-full object-cover" loading="lazy" />
                   <div className="absolute inset-0" style={{ background: pg.overlay }} />
                   <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-4 bg-black/60 rounded-full flex items-center justify-center text-[9px] text-white font-bold">{idx + 1}</div>
-                </div>
-                {/* hover 액션: 복제 / 삭제 */}
-                <div className="absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:flex items-center gap-0.5 bg-gray-800 rounded-lg px-1 py-0.5 z-20 shadow-lg">
-                  <button onClick={e => { e.stopPropagation(); duplicatePage(pg.id); }} title="슬라이드 복제" className="p-1 text-white hover:text-amber-300 transition-colors"><Copy size={11} /></button>
-                  {pagesData.length > 1 && (
-                    <button onClick={e => { e.stopPropagation(); deletePage(pg.id); }} title="슬라이드 삭제" className="p-1 text-white hover:text-red-400 transition-colors"><Trash2 size={11} /></button>
-                  )}
+                  
+                  {/* 복제 및 삭제 오버레이 버튼 (스트립 잘림 방지, 썸네일 내부 우상단/좌상단 고정) */}
+                  <div 
+                    className={`absolute inset-x-0 top-0 p-1 flex justify-between items-center bg-gradient-to-b from-black/60 to-transparent transition-opacity duration-150 ${
+                      currentPage === idx + 1 ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    }`}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <button 
+                      onClick={e => { e.stopPropagation(); duplicatePage(pg.id); }} 
+                      title="슬라이드 복제" 
+                      className="w-4 h-4 bg-gray-800/80 hover:bg-gray-900 rounded flex items-center justify-center text-white"
+                    >
+                      <Copy size={9} />
+                    </button>
+                    {pagesData.length > 1 && (
+                      <button 
+                        onClick={e => { e.stopPropagation(); deletePage(pg.id); }} 
+                        title="슬라이드 삭제" 
+                        className="w-4 h-4 bg-red-600/80 hover:bg-red-700 rounded flex items-center justify-center text-white"
+                      >
+                        <Trash2 size={9} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -3927,7 +4029,7 @@ export default function EditorPage() {
             </button>
           </div>
           <div className="flex-1 overflow-hidden flex flex-col">
-            {activeTab === 'ai' && <AIPanel pageData={pageData} onApplyChanges={(changes) => updatePageData(currentPage, changes)} messages={aiMessages} setMessages={setAiMessages} />}
+            {activeTab === 'ai' && <AIPanel pageData={pageData} onApplyChanges={(changes) => updatePageData(pageData.id, changes)} messages={aiMessages} setMessages={setAiMessages} />}
             {activeTab === 'element' && (
               <div className="flex-1 overflow-hidden">
                 <ElementPanel
@@ -3942,7 +4044,7 @@ export default function EditorPage() {
             {activeTab === 'edit' && selectedLayer?.type === 'image' && (
               <div className="flex-1 overflow-hidden">
                 <ImagePanel
-                  key={`${currentPage}-${selectedLayer.id}`}
+                  key={`${pageData.id}-${selectedLayer.id}`}
                   layer={selectedLayer}
                   currentImageUrl={currentBgImage}
                   cardContent={cardTextContent}
@@ -3955,11 +4057,11 @@ export default function EditorPage() {
                   initialBlocksOffsetY={(pageData.blocks?.length ?? 0) > 0 ? (pageData.blocksOffsetY ?? 70) : undefined}
                   onSelectImage={handleSelectImage}
                   onDeselect={handleDeselect}
-                  onUpdateBgTransform={(scale, pos) => updatePageData(currentPage, { bgScale: scale, bgPosition: pos })}
-                  onUpdateBrightness={b => updatePageData(currentPage, { bgBrightness: b })}
-                  onUpdateBrightnessFilter={v => updatePageData(currentPage, { bgBrightnessFilter: v })}
-                  onUpdateOverlayOpacity={v => updatePageData(currentPage, { overlayOpacity: v })}
-                  onUpdateBlocksOffsetY={v => updatePageData(currentPage, { blocksOffsetY: v })}
+                  onUpdateBgTransform={(scale, pos) => updatePageData(pageData.id, { bgScale: scale, bgPosition: pos })}
+                  onUpdateBrightness={b => updatePageData(pageData.id, { bgBrightness: b })}
+                  onUpdateBrightnessFilter={v => updatePageData(pageData.id, { bgBrightnessFilter: v })}
+                  onUpdateOverlayOpacity={v => updatePageData(pageData.id, { overlayOpacity: v })}
+                  onUpdateBlocksOffsetY={v => updatePageData(pageData.id, { blocksOffsetY: v })}
                   onApplySettingsAll={applyImageSettingsToAllPages}
                 />
               </div>
@@ -3969,7 +4071,7 @@ export default function EditorPage() {
                 <TextPanel
                   layer={selectedLayer}
                   onDeselect={handleDeselect}
-                  onUpdate={(content, style) => updatePageField(currentPage, selectedLayer.id, content, style)}
+                  onUpdate={(content, style) => updatePageField(pageData.id, selectedLayer.id, content, style)}
                   onApplyStyleAll={applyStyleToAllPages}
                 />
               </div>
@@ -4040,7 +4142,7 @@ export default function EditorPage() {
             </div>
           )}
           <div className="h-full overflow-y-auto">
-            {mobileActiveTab === 'ai' && <AIPanel pageData={pageData} onApplyChanges={(changes) => updatePageData(currentPage, changes)} messages={aiMessages} setMessages={setAiMessages} />}
+            {mobileActiveTab === 'ai' && <AIPanel pageData={pageData} onApplyChanges={(changes) => updatePageData(pageData.id, changes)} messages={aiMessages} setMessages={setAiMessages} />}
             {mobileActiveTab === 'element' && (
               <ElementPanel
                 onAdd={addElement}
@@ -4052,7 +4154,7 @@ export default function EditorPage() {
             {mobileActiveTab === 'edit' && !selectedLayer && <DefaultPanel layers={pageLayers} onSelectLayer={(layer) => { handleSelectLayer(layer); setMobilePanelOpen(true); }} />}
             {mobileActiveTab === 'edit' && selectedLayer?.type === 'image' && (
               <ImagePanel
-                key={`m-${currentPage}-${selectedLayer.id}`}
+                key={`m-${pageData.id}-${selectedLayer.id}`}
                 layer={selectedLayer}
                 currentImageUrl={currentBgImage}
                 cardContent={cardTextContent}
@@ -4065,11 +4167,11 @@ export default function EditorPage() {
                 initialBlocksOffsetY={(pageData.blocks?.length ?? 0) > 0 ? (pageData.blocksOffsetY ?? 70) : undefined}
                 onSelectImage={handleSelectImage}
                 onDeselect={handleDeselect}
-                onUpdateBgTransform={(scale, pos) => updatePageData(currentPage, { bgScale: scale, bgPosition: pos })}
-                onUpdateBrightness={b => updatePageData(currentPage, { bgBrightness: b })}
-                onUpdateBrightnessFilter={v => updatePageData(currentPage, { bgBrightnessFilter: v })}
-                onUpdateOverlayOpacity={v => updatePageData(currentPage, { overlayOpacity: v })}
-                onUpdateBlocksOffsetY={v => updatePageData(currentPage, { blocksOffsetY: v })}
+                onUpdateBgTransform={(scale, pos) => updatePageData(pageData.id, { bgScale: scale, bgPosition: pos })}
+                onUpdateBrightness={b => updatePageData(pageData.id, { bgBrightness: b })}
+                onUpdateBrightnessFilter={v => updatePageData(pageData.id, { bgBrightnessFilter: v })}
+                onUpdateOverlayOpacity={v => updatePageData(pageData.id, { overlayOpacity: v })}
+                onUpdateBlocksOffsetY={v => updatePageData(pageData.id, { blocksOffsetY: v })}
                 onApplySettingsAll={applyImageSettingsToAllPages}
               />
             )}
@@ -4077,7 +4179,7 @@ export default function EditorPage() {
               <TextPanel
                 layer={selectedLayer}
                 onDeselect={handleDeselect}
-                onUpdate={(content, style) => updatePageField(currentPage, selectedLayer.id, content, style)}
+                onUpdate={(content, style) => updatePageField(pageData.id, selectedLayer.id, content, style)}
                 onApplyStyleAll={applyStyleToAllPages}
               />
             )}
@@ -4293,17 +4395,19 @@ function FullscreenEditor({
   };
 
   const pageData = pagesData[fsPage - 1];
-  const currentBgImage = pageImages[fsPage] ?? pageData.bgImage;
+  const currentBgImage = pageData ? (pageImages[pageData.id] ?? pageData.bgImage) : '';
   const rawLayers = getLayersForPage(pageData);
   const pageLayers: CanvasLayerWithSrc[] = [
-    { ...rawLayers[0], imageSrc: currentBgImage },
+    { ...(rawLayers[0] || {}), imageSrc: currentBgImage } as CanvasLayerWithSrc,
     ...rawLayers.slice(1),
   ];
-  const cardTextContent = [
-    pageData.title,
-    pageData.subtitle,
-    ...(pageData.bullets || []).map(b => b.replace(/<[^>]+>/g, '')),
-  ].filter(Boolean).join('\n');
+  const cardTextContent = pageData
+    ? [
+        pageData.title,
+        pageData.subtitle,
+        ...(pageData.bullets || []).map(b => b.replace(/<[^>]+>/g, '')),
+      ].filter(Boolean).join('\n')
+    : '';
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -4327,22 +4431,25 @@ function FullscreenEditor({
   const handlePageChange = (id: number) => { setFsPage(id); setSelectedLayer(null); setSelectedElementId(null); setEditingElemId(null); };
 
   const fsAddElement = (elem: Omit<CanvasElement, 'id'>) => {
+    if (!pageData) return;
     const newElem: CanvasElement = { ...elem, id: `el_${Date.now()}` };
     const pd = pagesData[fsPage - 1];
-    onApplyPageChanges(fsPage, { elements: [...(pd.elements || []), newElem] });
+    onApplyPageChanges(pageData.id, { elements: [...(pd.elements || []), newElem] });
     setSelectedElementId(newElem.id);
     setActiveTab('element');
   };
   const fsUpdateElement = (id: string, updates: Partial<CanvasElement>) => {
+    if (!pageData) return;
     const pd = pagesData[fsPage - 1];
-    onApplyPageChanges(fsPage, { elements: (pd.elements || []).map(e => e.id === id ? { ...e, ...updates } : e) });
+    onApplyPageChanges(pageData.id, { elements: (pd.elements || []).map(e => e.id === id ? { ...e, ...updates } : e) });
   };
   const fsDeleteElement = (id: string) => {
+    if (!pageData) return;
     const pd = pagesData[fsPage - 1];
-    onApplyPageChanges(fsPage, { elements: (pd.elements || []).filter(e => e.id !== id) });
+    onApplyPageChanges(pageData.id, { elements: (pd.elements || []).filter(e => e.id !== id) });
     setSelectedElementId(null);
   };
-  const handleFSElemMouseDown = (e: React.MouseEvent, elem: CanvasElement) => {
+  const handleFSElemPointerDown = (e: React.PointerEvent, elem: CanvasElement) => {
     e.stopPropagation();
     setSelectedElementId(elem.id);
     setActiveTab('element');
@@ -4353,7 +4460,7 @@ function FullscreenEditor({
     setDraggingElemId(elem.id);
     setDragPos({ x: elem.x, y: elem.y });
   };
-  const handleFSCanvasMouseMove = (e: React.MouseEvent) => {
+  const handleFSCanvasPointerMove = (e: React.PointerEvent) => {
     if (!draggingElemId || !fsDragStartRef.current) return;
     const { startX, startY, origX, origY, cw, ch } = fsDragStartRef.current;
     const rawX = Math.max(5, Math.min(95, origX + ((e.clientX - startX) / cw) * 100));
@@ -4363,7 +4470,7 @@ function FullscreenEditor({
     setDragPos({ x: newX, y: newY });
     setFsGuideLines([...xGuides.map((g: number) => ({ x: g })), ...yGuides.map((g: number) => ({ y: g }))]);
   };
-  const handleFSCanvasMouseUp = () => {
+  const handleFSCanvasPointerUp = () => {
     if (draggingElemId && dragPos) fsUpdateElement(draggingElemId, dragPos);
     setDraggingElemId(null);
     setDragPos(null);
@@ -4432,9 +4539,9 @@ function FullscreenEditor({
               className="relative bg-white shadow-2xl ring-1 ring-white/10 flex-shrink-0 overflow-hidden"
               style={{ width: `${canvasW}px`, aspectRatio: '4/5' }}
               onClick={e => e.stopPropagation()}
-              onMouseMove={handleFSCanvasMouseMove}
-              onMouseUp={handleFSCanvasMouseUp}
-              onMouseLeave={handleFSCanvasMouseUp}
+              onPointerMove={handleFSCanvasPointerMove}
+              onPointerUp={handleFSCanvasPointerUp}
+              onPointerLeave={handleFSCanvasPointerUp}
             >
               {/* 정렬 가이드 라인 */}
               {fsGuideLines.map((g, i) => (
@@ -4602,8 +4709,9 @@ function FullscreenEditor({
                             width: elem.type === 'text' ? `${textW}px` : `${pxSize}px`,
                             height: elem.type === 'text' ? 'auto' : `${pxSize}px`,
                             opacity: elem.opacity, zIndex: 15, transform: 'translate(-50%,-50%)',
+                            touchAction: 'none',
                           }}
-                          onMouseDown={e => { if (!isEditing) handleFSElemMouseDown(e, elem); }}
+                          onPointerDown={e => { if (!isEditing) handleFSElemPointerDown(e, elem); }}
                           onDoubleClick={e => { if (elem.type === 'text') { e.stopPropagation(); setEditingElemId(elem.id); } }}
                         >
                           {elem.type === 'shape' && elem.shape && <ShapeSVG shape={elem.shape} color={elem.color} />}
@@ -4614,7 +4722,7 @@ function FullscreenEditor({
                                 autoFocus
                                 defaultValue={elem.text ?? ''}
                                 onBlur={e => { fsUpdateElement(elem.id, { text: e.target.value }); setEditingElemId(null); }}
-                                onMouseDown={e => e.stopPropagation()}
+                                onPointerDown={e => e.stopPropagation()}
                                 rows={3}
                                 style={{
                                   width: '100%', background: 'transparent', border: 'none', outline: '2px solid rgba(59,130,246,0.6)',
@@ -4637,8 +4745,8 @@ function FullscreenEditor({
                             )
                           )}
                           {isSelected && !isEditing && (
-                            <button className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center shadow-lg z-20 hover:bg-red-600"
-                              onMouseDown={e => e.stopPropagation()}
+                            <button className="absolute -top-2.5 -right-2.5 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center shadow-lg z-20 cursor-pointer hover:bg-red-600"
+                              onPointerDown={e => e.stopPropagation()}
                               onClick={e => { e.stopPropagation(); fsDeleteElement(elem.id); }}>×</button>
                           )}
                         </div>
@@ -4682,14 +4790,14 @@ function FullscreenEditor({
 
           {/* Thumbnail strip */}
           <div className="h-[88px] bg-[#13132a] border-t border-white/10 flex items-center gap-2.5 px-4 overflow-x-auto shrink-0">
-            {pagesData.map(pg => (
-              <div key={pg.id} onClick={() => handlePageChange(pg.id)}
-                className={`relative flex-shrink-0 rounded-lg overflow-hidden cursor-pointer transition-all ${fsPage === pg.id ? 'ring-2 ring-primary-400 ring-offset-2 ring-offset-[#13132a]' : 'opacity-60 hover:opacity-90'}`}
+            {pagesData.map((pg, idx) => (
+              <div key={pg.id} onClick={() => handlePageChange(idx + 1)}
+                className={`relative flex-shrink-0 rounded-lg overflow-hidden cursor-pointer transition-all ${fsPage === idx + 1 ? 'ring-2 ring-primary-400 ring-offset-2 ring-offset-[#13132a]' : 'opacity-60 hover:opacity-90'}`}
                 style={{ width: 44, height: 55 }}
               >
                 <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=80')} className="w-full h-full object-cover" />
                 <div className="absolute inset-0" style={{ background: pg.overlay }} />
-                <div className="absolute bottom-0.5 right-0.5 text-[7px] text-white font-bold bg-black/50 rounded px-0.5">{pg.id}</div>
+                <div className="absolute bottom-0.5 right-0.5 text-[7px] text-white font-bold bg-black/50 rounded px-0.5">{idx + 1}</div>
               </div>
             ))}
           </div>
@@ -4713,7 +4821,7 @@ function FullscreenEditor({
             </button>
           </div>
           <div className="flex-1 overflow-hidden flex flex-col">
-            {activeTab === 'ai' && <AIPanel pageData={pagesData[fsPage - 1]} onApplyChanges={(changes) => onApplyPageChanges(fsPage, changes)} messages={aiMessages} setMessages={setAiMessages} />}
+            {activeTab === 'ai' && pageData && <AIPanel pageData={pagesData[fsPage - 1]} onApplyChanges={(changes) => onApplyPageChanges(pageData.id, changes)} messages={aiMessages} setMessages={setAiMessages} />}
             {activeTab === 'element' && (
               <div className="flex-1 overflow-hidden">
                 <ElementPanel
@@ -4725,10 +4833,10 @@ function FullscreenEditor({
               </div>
             )}
             {activeTab === 'edit' && !selectedLayer && <div className="flex-1 overflow-y-auto"><DefaultPanel layers={pageLayers} onSelectLayer={handleSelectLayer} /></div>}
-            {activeTab === 'edit' && selectedLayer?.type === 'image' && (
+            {activeTab === 'edit' && selectedLayer?.type === 'image' && pageData && (
               <div className="flex-1 overflow-hidden">
                 <ImagePanel
-                  key={`fs-${fsPage}-${selectedLayer.id}`}
+                  key={`fs-${pageData.id}-${selectedLayer.id}`}
                   layer={selectedLayer}
                   currentImageUrl={currentBgImage}
                   cardContent={cardTextContent}
@@ -4739,22 +4847,22 @@ function FullscreenEditor({
                   initialBrightnessFilter={pagesData[fsPage - 1]?.bgBrightnessFilter}
                   initialOverlayOpacity={pagesData[fsPage - 1]?.overlayOpacity}
                   initialBlocksOffsetY={(pagesData[fsPage - 1]?.blocks?.length ?? 0) > 0 ? (pagesData[fsPage - 1]?.blocksOffsetY ?? 70) : undefined}
-                  onSelectImage={url => onSelectImage(url, fsPage)}
+                  onSelectImage={url => onSelectImage(url, pageData.id)}
                   onDeselect={handleDeselect}
-                  onUpdateBgTransform={(scale, pos) => onApplyPageChanges(fsPage, { bgScale: scale, bgPosition: pos })}
-                  onUpdateBrightness={b => onApplyPageChanges(fsPage, { bgBrightness: b })}
-                  onUpdateBrightnessFilter={v => onApplyPageChanges(fsPage, { bgBrightnessFilter: v })}
-                  onUpdateOverlayOpacity={v => onApplyPageChanges(fsPage, { overlayOpacity: v })}
-                  onUpdateBlocksOffsetY={v => onApplyPageChanges(fsPage, { blocksOffsetY: v })}
+                  onUpdateBgTransform={(scale, pos) => onApplyPageChanges(pageData.id, { bgScale: scale, bgPosition: pos })}
+                  onUpdateBrightness={b => onApplyPageChanges(pageData.id, { bgBrightness: b })}
+                  onUpdateBrightnessFilter={v => onApplyPageChanges(pageData.id, { bgBrightnessFilter: v })}
+                  onUpdateOverlayOpacity={v => onApplyPageChanges(pageData.id, { overlayOpacity: v })}
+                  onUpdateBlocksOffsetY={v => onApplyPageChanges(pageData.id, { blocksOffsetY: v })}
                 />
               </div>
             )}
-            {activeTab === 'edit' && selectedLayer?.type === 'text' && (
+            {activeTab === 'edit' && selectedLayer?.type === 'text' && pageData && (
               <div className="flex-1 overflow-hidden">
                 <TextPanel
                   layer={selectedLayer}
                   onDeselect={handleDeselect}
-                  onUpdate={(content, style) => onUpdatePage(fsPage, selectedLayer.id, content, style)}
+                  onUpdate={(content, style) => onUpdatePage(pageData.id, selectedLayer.id, content, style)}
                 />
               </div>
             )}
@@ -5208,7 +5316,9 @@ function DownloadModal({
     try {
       if (format === 'png') {
         setProgress('캡처 중...');
-        const [cap] = await capturePages([currentPage]);
+        const pageId = pagesData[currentPage - 1]?.id;
+        if (pageId === undefined) return;
+        const [cap] = await capturePages([pageId]);
         triggerDownload(cap.dataUrl, `카드뉴스_${currentPage}페이지${suffix}.png`);
         setDone(true);
         setTimeout(onClose, 800);
