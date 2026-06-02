@@ -107,15 +107,29 @@ ${formatGuide[format] || formatGuide.naver}
       setTimeout(() => reject(new Error('TIMEOUT')), 50000)
     );
 
+    const tryRepairJson = (rawText: string): string => {
+      let repaired = rawText.trim();
+      const openBraces = (repaired.match(/\{/g) || []).length;
+      const closeBraces = (repaired.match(/\}/g) || []).length;
+      if (openBraces > closeBraces) {
+        const quotes = (repaired.match(/"/g) || []).length;
+        if (quotes % 2 !== 0) {
+          repaired += '"';
+        }
+        repaired += '}'.repeat(openBraces - closeBraces);
+      }
+      return repaired;
+    };
+
     try {
       const generatePromise = (async () => {
-        // maxOutputTokens을 3000자 상한에 상응하는 3500토큰 수준으로 두어 응답 시간 과부하 억제
+        // maxOutputTokens를 8192로 늘려 JSON 잘림 방지 (충분히 긴 글 생성을 유연히 수용)
         let text = (await generateWithRetry(prompt, {
-          generationConfig: { maxOutputTokens: 3500 }
+          generationConfig: { maxOutputTokens: 8192 }
         })).trim();
         if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
         else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
-        return JSON.parse(text);
+        return JSON.parse(tryRepairJson(text));
       })();
 
       const data = await Promise.race([generatePromise, timeoutPromise]);

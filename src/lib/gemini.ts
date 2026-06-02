@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const PRIMARY_MODEL = 'gemini-2.5-flash';
-const FALLBACK_MODEL = 'gemini-1.5-flash';
+const FALLBACK_MODEL = 'gemini-2.5-flash-lite';
 const RETRY_DELAY_MS = 5000;
 
 function is503(err: unknown): boolean {
@@ -26,6 +26,9 @@ export function toKoreanError(err: unknown): string {
   }
   if (msg.includes('400') || msg.includes('INVALID_ARGUMENT')) {
     return '요청 내용을 확인해주세요.';
+  }
+  if (err instanceof SyntaxError || msg.includes('SyntaxError') || msg.includes('JSON')) {
+    return 'AI 생성 결과가 불완전하게 반환되었습니다. 글자 수를 조금 줄이거나 다시 시도해주세요.';
   }
   return 'AI 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
 }
