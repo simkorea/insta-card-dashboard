@@ -84,3 +84,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
+
+export async function GET() {
+  const apiKey = process.env.LEONARDO_API_KEY;
+  return NextResponse.json({ hasKey: !!apiKey });
+}
