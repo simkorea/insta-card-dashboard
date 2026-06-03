@@ -68,6 +68,7 @@ export default function BlogGeneratorPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [result, setResult] = useState<BlogResult | null>(null);
   const [copiedPart, setCopiedPart] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -78,6 +79,66 @@ export default function BlogGeneratorPage() {
   const [images, setImages] = useState<BlogImage[]>(() =>
     Array.from({ length: 5 }, (_, i) => ({ id: `img_${i + 1}`, url: '', source: '', label: '' }))
   );
+
+  const [currentPostId, setCurrentPostId] = useState<string | null>(null);
+  const [tagInput, setTagInput] = useState('');
+
+  const updateResultField = (key: keyof BlogResult, value: any) => {
+    setResult(prev => {
+      if (!prev) return null;
+      return { ...prev, [key]: value };
+    });
+  };
+
+  const addTag = () => {
+    const tag = tagInput.trim();
+    if (tag && result && !result.tags.includes(tag)) {
+      updateResultField('tags', [...result.tags, tag]);
+    }
+    setTagInput('');
+  };
+
+  const removeTag = (tagToRemove: string) => {
+    if (result) {
+      updateResultField('tags', result.tags.filter(t => t !== tagToRemove));
+    }
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const postId = searchParams.get('postId');
+    if (!postId) return;
+
+    const loadPost = async () => {
+      try {
+        const res = await fetch(`/api/blog-posts/${postId}`);
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        if (data.post) {
+          const post = data.post;
+          setCurrentPostId(post.id);
+          setTopic(post.topic || '');
+          setFormat(post.format || 'naver');
+          setResult({
+            title: post.title || '',
+            body: post.body || '',
+            metaDescription: post.meta_description || '',
+            tags: post.tags || []
+          });
+          if (post.images_data && Array.isArray(post.images_data)) {
+            setImages(post.images_data);
+            setImageCount(post.images_data.length);
+          }
+        }
+      } catch (err: any) {
+        console.error('Failed to load blog post:', err);
+        alert('블로그 글을 불러오는 데 실패했습니다: ' + err.message);
+      }
+    };
+
+    loadPost();
+  }, []);
 
   const handleImageCountChange = (newCount: number) => {
     if (newCount < 3 || newCount > 10) return;
@@ -192,6 +253,41 @@ export default function BlogGeneratorPage() {
     if (activeCropSlotIdx === null) return;
     setImages(prev => prev.map((img, idx) => idx === activeCropSlotIdx ? { ...img, url: croppedUrl } : img));
     setActiveCropSlotIdx(null);
+  };
+
+  const handleSave = async () => {
+    if (!result?.body) return;
+    setIsSaving(true);
+    try {
+      const url = currentPostId ? `/api/blog-posts/${currentPostId}` : '/api/blog-posts';
+      const method = currentPostId ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: result.title?.trim() || topic?.trim() || '제목 없는 블로그 글',
+          body: result.body,
+          metaDescription: result.metaDescription,
+          tags: result.tags,
+          images: images,
+          topic: topic,
+          format: format
+        })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+
+      if (!currentPostId && data.post?.id) {
+        setCurrentPostId(data.post.id);
+      }
+
+      alert(currentPostId ? '수정되었습니다.' : '저장되었습니다.');
+    } catch (e: any) {
+      alert('저장 실패: ' + e.message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleGenerate = async () => {
@@ -591,13 +687,23 @@ export default function BlogGeneratorPage() {
                   <span className="font-bold text-gray-700 text-sm">{selectedFormat?.label}</span>
                   <span className="text-xs text-gray-400">· {result.body.length}자</span>
                 </div>
-                <button
-                  onClick={copyAll}
-                  className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all ${copiedPart === 'all' ? 'bg-green-500 text-white' : 'bg-primary-50 text-primary-700 hover:bg-primary-100'}`}
-                >
-                  {copiedPart === 'all' ? <CheckCheck size={14} /> : <Copy size={14} />}
-                  {copiedPart === 'all' ? '복사됨!' : '전체 복사'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-primary-600 hover:bg-primary-700 disabled:bg-gray-200 disabled:text-gray-400 text-white transition-all shadow-sm"
+                  >
+                    {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    {isSaving ? '저장 중...' : '저장하기'}
+                  </button>
+                  <button
+                    onClick={copyAll}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold transition-all ${copiedPart === 'all' ? 'bg-green-500 text-white' : 'bg-primary-50 text-primary-700 hover:bg-primary-100'}`}
+                  >
+                    {copiedPart === 'all' ? <CheckCheck size={14} /> : <Copy size={14} />}
+                    {copiedPart === 'all' ? '복사됨!' : '전체 복사'}
+                  </button>
+                </div>
               </div>
 
               {/* Title */}
@@ -609,7 +715,13 @@ export default function BlogGeneratorPage() {
                     {copiedPart === 'title' ? <CheckCheck size={11} /> : <Copy size={11} />} 복사
                   </button>
                 </div>
-                <p className="font-bold text-gray-800 text-base">{result.title}</p>
+                <input
+                  type="text"
+                  value={result.title}
+                  onChange={e => updateResultField('title', e.target.value)}
+                  className="w-full font-bold text-gray-800 text-base border-b border-transparent focus:border-primary-400 outline-none bg-transparent py-1 transition-all"
+                  placeholder="제목을 입력하세요"
+                />
               </div>
 
               {/* Meta */}
@@ -621,7 +733,13 @@ export default function BlogGeneratorPage() {
                     {copiedPart === 'meta' ? <CheckCheck size={11} /> : <Copy size={11} />} 복사
                   </button>
                 </div>
-                <p className="text-sm text-gray-600">{result.metaDescription}</p>
+                <textarea
+                  value={result.metaDescription}
+                  onChange={e => updateResultField('metaDescription', e.target.value)}
+                  rows={2}
+                  className="w-full text-sm text-gray-600 border-b border-transparent focus:border-primary-400 outline-none bg-transparent py-1 resize-none transition-all"
+                  placeholder="메타 설명을 입력하세요"
+                />
               </div>
 
               {/* Body */}
@@ -641,14 +759,17 @@ export default function BlogGeneratorPage() {
                 {showRaw ? (
                   <textarea
                     value={result.body}
-                    readOnly
+                    onChange={e => updateResultField('body', e.target.value)}
                     rows={20}
-                    className="w-full text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3 resize-none font-mono"
+                    className="w-full text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3 resize-y font-mono outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-400"
                   />
                 ) : (
-                  <div className="prose prose-sm max-w-none text-gray-700 leading-relaxed whitespace-pre-line text-sm">
-                    {result.body}
-                  </div>
+                  <textarea
+                    value={result.body}
+                    onChange={e => updateResultField('body', e.target.value)}
+                    className="w-full text-sm text-gray-700 leading-relaxed bg-transparent border-0 border-b border-transparent focus:border-primary-400 focus:ring-0 outline-none resize-y min-h-[400px] font-sans"
+                    placeholder="본문 내용을 입력하세요"
+                  />
                 )}
               </div>
 
@@ -661,10 +782,26 @@ export default function BlogGeneratorPage() {
                     {copiedPart === 'tags' ? <CheckCheck size={11} /> : <Copy size={11} />} 복사
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 items-center">
                   {result.tags.map(tag => (
-                    <span key={tag} className="px-2.5 py-1 bg-primary-50 text-primary-700 rounded-full text-xs font-medium border border-primary-200">#{tag}</span>
+                    <span key={tag} className="flex items-center gap-1.5 px-2.5 py-1 bg-primary-50 text-primary-700 border border-primary-200 rounded-full text-xs font-medium">
+                      #{tag}
+                      <button onClick={() => removeTag(tag)} className="hover:text-red-500 transition-colors"><X size={10} /></button>
+                    </span>
                   ))}
+                  <input
+                    type="text"
+                    value={tagInput}
+                    onChange={e => setTagInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addTag();
+                      }
+                    }}
+                    placeholder="+ 태그 추가 (Enter)"
+                    className="border border-dashed border-gray-200 rounded-full px-3 py-0.5 text-xs text-gray-500 hover:border-primary-300 focus:border-primary-400 outline-none w-32 transition-all bg-transparent"
+                  />
                 </div>
               </div>
 

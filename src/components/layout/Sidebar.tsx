@@ -24,6 +24,7 @@ import {
   Sparkles,
   Palette,
   LogOut,
+  Archive,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -94,6 +95,12 @@ export default function Sidebar() {
           className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors mb-1 ${isActive('/') && pathname === '/' ? 'bg-primary-50 text-primary-700' : 'text-gray-700 hover:bg-gray-50'}`}>
           <LayoutDashboard size={16} className={pathname === '/' ? 'text-primary-600' : 'text-gray-400'} />
           <span>홈 대시보드</span>
+        </Link>
+
+        <Link href="/archive"
+          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-colors mb-1 ${isActive('/archive') ? 'bg-primary-50 text-primary-700' : 'text-gray-700 hover:bg-gray-50'}`}>
+          <Archive size={16} className={isActive('/archive') ? 'text-primary-600' : 'text-gray-400'} />
+          <span>내 보관함</span>
         </Link>
 
         <div className="my-2 border-t border-gray-100" />
