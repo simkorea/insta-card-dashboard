@@ -1,5 +1,5 @@
 'use client';
-import { useState, KeyboardEvent, useEffect } from 'react';
+import { useState, KeyboardEvent, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
 import {
   FileText, Sparkles, Copy, CheckCheck, Loader2, ChevronDown,
@@ -93,6 +93,13 @@ export default function BlogGeneratorPage() {
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>('none');
   const [urlInput, setUrlInput] = useState('');
   const [isZipDownloading, setIsZipDownloading] = useState(false);
+  const resultRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (result && resultRef.current) {
+      resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [result]);
 
   const fetchTrendRecommendations = async () => {
     setIsFetchingTrends(true);
@@ -532,16 +539,16 @@ ${result.body}
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 md:px-8 py-4 shrink-0">
-        <h1 className="text-lg md:text-xl font-black text-gray-900 flex items-center gap-2 ml-10 md:ml-0">
+      <div className="bg-white border-b border-gray-200 px-4 lg:px-8 py-4 shrink-0">
+        <h1 className="text-lg lg:text-xl font-black text-gray-900 flex items-center gap-2 ml-10 lg:ml-0">
           <FileText size={20} className="text-primary-500" /> 블로그 글 자동 생성
         </h1>
-        <p className="text-xs md:text-sm text-gray-500 mt-0.5 ml-10 md:ml-0">주제만 입력하면 AI가 SEO 최적화 블로그 글을 완성합니다</p>
+        <p className="text-xs lg:text-sm text-gray-500 mt-0.5 ml-10 lg:ml-0">주제만 입력하면 AI가 SEO 최적화 블로그 글을 완성합니다</p>
       </div>
 
-      <div className="flex flex-col md:flex-row flex-1 overflow-auto md:overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 overflow-auto lg:overflow-hidden">
         {/* Left: Input */}
-        <div className="w-full md:w-[420px] bg-white border-b md:border-b-0 md:border-r border-gray-200 flex flex-col shrink-0">
+        <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col shrink-0">
           <div className="flex-1 overflow-y-auto p-5 space-y-5">
 
             {/* Start Mode Tabs */}
@@ -1003,7 +1010,7 @@ ${result.body}
             {error && <p className="text-sm text-red-500 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
           </div>
 
-          <div className="p-4 pb-24 md:pb-4 border-t border-gray-100">
+          <div className="p-4 pb-24 lg:pb-4 border-t border-gray-100">
             <button
               onClick={handleGenerate}
               disabled={isGenerating || (inputMode === 'smart' ? !smartKeyword.trim() : inputMode === 'url' ? !urlInput.trim() : !topic.trim())}
@@ -1019,7 +1026,7 @@ ${result.body}
         </div>
 
         {/* Right: Result */}
-        <div className="flex-1 overflow-y-auto p-6 pb-24 md:pb-6">
+        <div ref={resultRef} className="flex-1 overflow-y-auto p-6 pb-24 lg:pb-6">
           {error && !result && !isGenerating && (
             <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto py-10">
               <div className="bg-red-50 border border-red-200 rounded-2xl p-6 shadow-sm w-full">
