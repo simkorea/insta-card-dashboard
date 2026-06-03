@@ -93,43 +93,99 @@ ${mainInput}
 ${extraSections ? `[추가 설정]\n${extraSections}\n` : ''}
 ${formatGuide[format] || formatGuide.naver}
 
-목표 분량: ${wordCount}자 이상
+[목표 분량]
+- 본문 분량: ${wordCount}자 내외 (시간 초과 방지를 위해 1800자~2300자 사이로 엄수하십시오)
 
-반드시 아래 JSON 형식으로만 응답하세요 (코드블록 없이):
-{
-  "title": "SEO 최적화 제목",
-  "body": "블로그 본문 전체",
-  "metaDescription": "검색 결과에 표시될 설명 (150자 이내)",
-  "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"]
-}`;
+[응답 형식]
+반드시 JSON 구조나 마크다운 코드블록 없이, 정확히 아래 지정된 대괄호 구분자 포맷으로만 작성하십시오:
+
+[TITLE]
+SEO 최적화 제목
+
+[BODY]
+블로그 본문 전체
+
+[META]
+검색 결과에 표시될 설명 (120자 이내)
+
+[TAGS]
+태그1, 태그2, 태그3, 태그4, 태그5`;
 
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('TIMEOUT')), 50000)
     );
 
-    const tryRepairJson = (rawText: string): string => {
-      let repaired = rawText.trim();
-      const openBraces = (repaired.match(/\{/g) || []).length;
-      const closeBraces = (repaired.match(/\}/g) || []).length;
-      if (openBraces > closeBraces) {
-        const quotes = (repaired.match(/"/g) || []).length;
-        if (quotes % 2 !== 0) {
-          repaired += '"';
-        }
-        repaired += '}'.repeat(openBraces - closeBraces);
+    const parseStructuredBlog = (cleanText: string): { title: string; body: string; metaDescription: string; tags: string[] } => {
+      const titleTag = '[TITLE]';
+      const bodyTag = '[BODY]';
+      const metaTag = '[META]';
+      const tagsTag = '[TAGS]';
+
+      const idxTitle = cleanText.indexOf(titleTag);
+      const idxBody = cleanText.indexOf(bodyTag);
+      const idxMeta = cleanText.indexOf(metaTag);
+      const idxTags = cleanText.indexOf(tagsTag);
+
+      const getSection = (currentTag: string, currentIdx: number): string => {
+        if (currentIdx === -1) return '';
+        const start = currentIdx + currentTag.length;
+        const nextIndices = [idxTitle, idxBody, idxMeta, idxTags]
+          .filter(idx => idx > currentIdx)
+          .sort((a, b) => a - b);
+        const end = nextIndices.length > 0 ? nextIndices[0] : cleanText.length;
+        return cleanText.substring(start, end).trim();
+      };
+
+      let title = getSection(titleTag, idxTitle);
+      let body = getSection(bodyTag, idxBody);
+      let metaDescription = getSection(metaTag, idxMeta);
+      const tagsText = getSection(tagsTag, idxTags);
+
+      // 제목 복구
+      if (!title && idxBody !== 0 && idxBody !== -1) {
+        title = cleanText.substring(0, idxBody).replace(/^[#\s[\]\w]+/, '').split('\n')[0].trim();
       }
-      return repaired;
+
+      // 본문 복구
+      if (!body && idxTitle !== -1) {
+        body = getSection(titleTag, idxTitle);
+      } else if (!body && idxTitle === -1 && idxBody === -1) {
+        body = cleanText;
+      }
+
+      // 메타 설명 복구 (잘렸거나 누락 시 본문 앞부분 발췌)
+      if (!metaDescription) {
+        const plainBody = body.replace(/[#*`_\-\[\]\(\)]/g, '').replace(/\s+/g, ' ').trim();
+        metaDescription = plainBody.substring(0, 120) + '...';
+      }
+
+      // 태그 복구
+      let tags: string[] = [];
+      if (tagsText) {
+        tags = tagsText
+          .split(/[,#\s]+/)
+          .map(t => t.trim())
+          .filter(t => t.length > 0 && t.length < 15);
+      }
+      if (tags.length === 0) {
+        tags = ['블로그', '정보', '포스팅'];
+      }
+
+      return {
+        title: title || '블로그 포스팅',
+        body: body || '본문을 생성하지 못했습니다. 다시 시도해 주세요.',
+        metaDescription: metaDescription.substring(0, 150),
+        tags: tags.slice(0, 8)
+      };
     };
 
     try {
       const generatePromise = (async () => {
-        // maxOutputTokens를 8192로 늘려 JSON 잘림 방지 (충분히 긴 글 생성을 유연히 수용)
+        // maxOutputTokens를 16384로 상향하여 출력 여유 공간 극대화
         let text = (await generateWithRetry(prompt, {
-          generationConfig: { maxOutputTokens: 8192 }
+          generationConfig: { maxOutputTokens: 16384 }
         })).trim();
-        if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
-        else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
-        return JSON.parse(tryRepairJson(text));
+        return parseStructuredBlog(text);
       })();
 
       const data = await Promise.race([generatePromise, timeoutPromise]);
