@@ -90,9 +90,7 @@ export async function POST(request: Request) {
     const formatGuide: Record<string, string> = {
       naver: `[네이버 블로그 스타일]
 - 제목: 검색 최적화 키워드 포함 (20-35자)
-- 소제목마다 ✅ 또는 📌 이모지 사용
 - 중간중간 개행으로 가독성 확보
-- 핵심 내용은 굵은 글씨 **단어** 표시
 - 친근하고 대화하듯 마무리 소통 문구
 - 해시태그 10-15개로 마무리`,
       tistory: `[티스토리/워드프레스 스타일]
@@ -105,7 +103,6 @@ export async function POST(request: Request) {
       instagram: `[인스타그램 캡처용 스타일]
 - 짧고 임팩트 있는 제목
 - 핵심 포인트 3-5개로 압축
-- 이모지 적극 활용
 - 줄바꿈으로 읽기 편하게
 - 강력한 CTA 문구로 마무리
 - 해시태그 20-30개`,
@@ -137,6 +134,19 @@ export async function POST(request: Request) {
 ${urlContent}`
       : '';
 
+    let markdownAndEmojiInstruction = '';
+    if (format === 'naver' || format === 'instagram') {
+      markdownAndEmojiInstruction = `
+[중요 - 마크다운 및 장식 이모지 사용 금지]
+- 본문에 **볼드** 및 ##, ### 같은 마크다운 헤딩 기호를 절대 사용하지 마십시오. 강조는 기호가 아닌 일반 문장 서술을 통해 진행하십시오.
+- 문단 앞이나 내용 강조를 위한 장식용 이모지(✅, 📌, 🎉, ⭐, 👉, ✨, 🔥, 📢, 📍, 🔔, 💡, 🚀, 👑 등)를 절대 사용하지 마십시오.
+- 오직 줄바꿈과 공백만을 사용하여 단락을 구분하고 가독성을 확보하십시오.`;
+    } else if (format === 'tistory') {
+      markdownAndEmojiInstruction = `
+[중요 - 장식 이모지 사용 금지]
+- 소제목 구성을 위해 마크다운 헤딩(##, ###)과 볼드(**단어**) 문법은 사용하되, 장식용 이모지(✅, 📌, 🎉, ⭐, 👉, ✨, 🔥, 📢, 📍, 🔔, 💡, 🚀, 👑 등)는 일체 사용하지 마십시오.`;
+    }
+
     const prompt = `당신은 SEO 전문가이자 블로그 작가입니다.
 ${langInstruction[language] || langInstruction.auto}
 
@@ -154,10 +164,10 @@ ${formatGuide[format] || formatGuide.naver}
 ${persona ? `- 글의 전반적인 말투와 분위기는 브랜드 페르소나의 '글의 톤/말투'(${persona.tone})를 적극 반영하여 통일성 있게 작성하세요.
 - 타겟 독자(${persona.target_audience || '일반 대중'})의 관심사와 수준에 맞는 단어와 설명 방식을 선택하세요.
 - 포스팅 목적(${persona.posting_goal || '정보 제공'})이 잘 달성되도록 유용한 내용 위주로 깊이 있게 글을 구성하세요.
-- 이모지 스타일(${persona.emoji_style || '적절히 사용'})을 제목 및 본문에 적절히 반영하여 가독성을 높이세요.
 - 글 마무리 시 브랜드(${persona.brand_name})와 부합하는 멘트나 행동 유도 멘트를 자연스럽게 작성하세요.` : `- 글의 전반적인 말투와 분위기는 지정된 톤(${toneLabel[tone] || '전문적인'})에 맞게 구성하세요.
 - 브랜드 언급이나 특정 페르소나 색채 없이 깔끔하고 객관적인 일반 글(정보성 콘텐츠) 형태로 작성하세요.
 ${cta ? `- 글 마지막 마무리 단락에 다음 행동 유도(CTA)를 자연스럽게 녹여내어 독자의 행동을 유도하세요: 문구: "${cta.text}"${cta.url ? `, 링크: ${cta.url}` : ''}` : '- 브랜드 멘트나 링크 없이 깔끔하게 일반적인 마무리 소통 문구로 포스팅을 마치십시오.'}`}
+${markdownAndEmojiInstruction}
 
 [목표 분량]
 - 본문 분량: ${wordCount}자 내외 (시간 초과 방지를 위해 1800자~2300자 사이로 엄수하십시오)
@@ -245,13 +255,41 @@ SEO 최적화 제목
       };
     };
 
+    const cleanContent = (text: string, fmt: string, isTitle = false): string => {
+      if (!text) return text;
+
+      // 1. 공통: 장식용/강조용 이모지 제거 (정규식 기반)
+      const decorativeEmojisRegex = /[✅📌🎉⭐👉✨🔥📢📍🔔💡🚀🔍👑✔️✔🔵🟢🔴⚫⚪🔸🔹🔺🔻]/g;
+      let cleaned = text.replace(decorativeEmojisRegex, '');
+
+      // 2. 네이버/인스타그램 마크다운 제거
+      if (fmt === 'naver' || fmt === 'instagram') {
+        if (!isTitle) {
+          // 행의 시작에 위치한 ## ### 등만 매칭하여 공백과 함께 기호만 제거 (해시태그 #태그 오인 제거 완벽 차단)
+          cleaned = cleaned.replace(/^(#{1,6})\s+(.+)$/gm, '$2');
+        }
+        // 짝이 맞는 볼드 기호만 변환하여 단순 아스테리스크(곱셈 5*5 등) 오인 제거 차단
+        cleaned = cleaned.replace(/\*\*(.*?)\*\*/g, '$1');
+        cleaned = cleaned.replace(/__(.*?)__/g, '$1');
+      }
+
+      return cleaned;
+    };
+
     try {
       const generatePromise = (async () => {
         // maxOutputTokens를 16384로 상향하여 출력 여유 공간 극대화
         let text = (await generateWithRetry(prompt, {
           generationConfig: { maxOutputTokens: 16384 }
         })).trim();
-        return parseStructuredBlog(text);
+        const parsed = parseStructuredBlog(text);
+        
+        // 후처리 청소 적용
+        parsed.title = cleanContent(parsed.title, format, true);
+        parsed.body = cleanContent(parsed.body, format, false);
+        parsed.metaDescription = cleanContent(parsed.metaDescription, format, false);
+        
+        return parsed;
       })();
 
       const data = await Promise.race([generatePromise, timeoutPromise]);
