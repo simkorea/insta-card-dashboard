@@ -94,12 +94,37 @@ export default function BlogGeneratorPage() {
   const [urlInput, setUrlInput] = useState('');
   const [isZipDownloading, setIsZipDownloading] = useState(false);
   const resultRef = useRef<HTMLDivElement>(null);
+  const metaTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const bodyTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const rawBodyTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (result && resultRef.current) {
       resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [result]);
+
+  useEffect(() => {
+    const adjustTextareaHeight = (el: HTMLTextAreaElement | null) => {
+      if (!el) return;
+      if (window.innerWidth < 1024) {
+        el.style.height = 'auto';
+        el.style.height = `${el.scrollHeight}px`;
+      } else {
+        el.style.height = '';
+      }
+    };
+
+    const handleResize = () => {
+      adjustTextareaHeight(metaTextareaRef.current);
+      adjustTextareaHeight(bodyTextareaRef.current);
+      adjustTextareaHeight(rawBodyTextareaRef.current);
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [result?.body, result?.metaDescription, showRaw]);
 
   const fetchTrendRecommendations = async () => {
     setIsFetchingTrends(true);
@@ -537,7 +562,7 @@ ${result.body}
   const wordCountLabel = wordCount >= 1000 ? `약 ${(wordCount / 1000).toFixed(wordCount % 1000 === 0 ? 0 : 1)}천자` : `약 ${wordCount}자`;
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
+    <div className="flex flex-col h-auto lg:h-full min-h-screen lg:min-h-0 bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-4 lg:px-8 py-4 shrink-0">
         <h1 className="text-lg lg:text-xl font-black text-gray-900 flex items-center gap-2 ml-10 lg:ml-0">
@@ -546,10 +571,10 @@ ${result.body}
         <p className="text-xs lg:text-sm text-gray-500 mt-0.5 ml-10 lg:ml-0">주제만 입력하면 AI가 SEO 최적화 블로그 글을 완성합니다</p>
       </div>
 
-      <div className="flex flex-col lg:flex-row flex-1 overflow-auto lg:overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 overflow-visible lg:overflow-hidden">
         {/* Left: Input */}
         <div className="w-full lg:w-[420px] bg-white border-b lg:border-b-0 lg:border-r border-gray-200 flex flex-col shrink-0">
-          <div className="flex-1 overflow-y-auto p-5 space-y-5">
+          <div className="flex-1 lg:overflow-y-auto overflow-visible p-5 space-y-5 lg:h-auto">
 
             {/* Start Mode Tabs */}
             <div className="flex gap-2.5 mb-5 border-b border-gray-100 overflow-x-auto pb-1 shrink-0">
@@ -1026,7 +1051,7 @@ ${result.body}
         </div>
 
         {/* Right: Result */}
-        <div ref={resultRef} className="flex-1 overflow-y-auto p-6 pb-24 lg:pb-6">
+        <div ref={resultRef} className="flex-1 lg:overflow-y-auto overflow-visible p-6 pb-24 lg:pb-6 lg:h-auto">
           {error && !result && !isGenerating && (
             <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto py-10">
               <div className="bg-red-50 border border-red-200 rounded-2xl p-6 shadow-sm w-full">
@@ -1091,13 +1116,13 @@ ${result.body}
           {result && (
             <div className="max-w-2xl space-y-4">
               {/* Top actions */}
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-xl">{selectedFormat?.icon}</span>
                   <span className="font-bold text-gray-700 text-sm">{selectedFormat?.label}</span>
                   <span className="text-xs text-gray-400">· {result.body.length}자</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full sm:w-auto justify-end">
                   <button
                     onClick={downloadZip}
                     disabled={isZipDownloading}
@@ -1152,10 +1177,17 @@ ${result.body}
                   </button>
                 </div>
                 <textarea
+                  ref={metaTextareaRef}
                   value={result.metaDescription}
-                  onChange={e => updateResultField('metaDescription', e.target.value)}
+                  onChange={e => {
+                    updateResultField('metaDescription', e.target.value);
+                    if (metaTextareaRef.current && window.innerWidth < 1024) {
+                      metaTextareaRef.current.style.height = 'auto';
+                      metaTextareaRef.current.style.height = `${metaTextareaRef.current.scrollHeight}px`;
+                    }
+                  }}
                   rows={2}
-                  className="w-full text-sm text-gray-600 border-b border-transparent focus:border-primary-400 outline-none bg-transparent py-1 resize-none transition-all"
+                  className="w-full text-sm text-gray-600 border-b border-transparent focus:border-primary-400 outline-none bg-transparent py-1 resize-none transition-all overflow-y-hidden lg:overflow-y-auto"
                   placeholder="메타 설명을 입력하세요"
                 />
               </div>
@@ -1176,16 +1208,30 @@ ${result.body}
                 </div>
                 {showRaw ? (
                   <textarea
+                    ref={rawBodyTextareaRef}
                     value={result.body}
-                    onChange={e => updateResultField('body', e.target.value)}
+                    onChange={e => {
+                      updateResultField('body', e.target.value);
+                      if (rawBodyTextareaRef.current && window.innerWidth < 1024) {
+                        rawBodyTextareaRef.current.style.height = 'auto';
+                        rawBodyTextareaRef.current.style.height = `${rawBodyTextareaRef.current.scrollHeight}px`;
+                      }
+                    }}
                     rows={20}
-                    className="w-full text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3 resize-y font-mono outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-400"
+                    className="w-full text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-3 resize-y font-mono outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-400 lg:overflow-y-auto overflow-y-hidden"
                   />
                 ) : (
                   <textarea
+                    ref={bodyTextareaRef}
                     value={result.body}
-                    onChange={e => updateResultField('body', e.target.value)}
-                    className="w-full text-sm text-gray-700 leading-relaxed bg-transparent border-0 border-b border-transparent focus:border-primary-400 focus:ring-0 outline-none resize-y min-h-[400px] font-sans"
+                    onChange={e => {
+                      updateResultField('body', e.target.value);
+                      if (bodyTextareaRef.current && window.innerWidth < 1024) {
+                        bodyTextareaRef.current.style.height = 'auto';
+                        bodyTextareaRef.current.style.height = `${bodyTextareaRef.current.scrollHeight}px`;
+                      }
+                    }}
+                    className="w-full text-sm text-gray-700 leading-relaxed bg-transparent border-0 border-b border-transparent focus:border-primary-400 focus:ring-0 outline-none resize-y min-h-[400px] font-sans overflow-y-hidden lg:overflow-y-auto"
                     placeholder="본문 내용을 입력하세요"
                   />
                 )}
