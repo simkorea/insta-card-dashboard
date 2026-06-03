@@ -1,5 +1,6 @@
 'use client';
 import { useState, KeyboardEvent, useEffect } from 'react';
+import JSZip from 'jszip';
 import {
   FileText, Sparkles, Copy, CheckCheck, Loader2, ChevronDown,
   ChevronUp, Plus, X, Link2, Target, AlignLeft, Hash,
@@ -91,6 +92,7 @@ export default function BlogGeneratorPage() {
   const [personas, setPersonas] = useState<any[]>([]);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>('none');
   const [urlInput, setUrlInput] = useState('');
+  const [isZipDownloading, setIsZipDownloading] = useState(false);
 
   const fetchTrendRecommendations = async () => {
     setIsFetchingTrends(true);
@@ -286,6 +288,73 @@ export default function BlogGeneratorPage() {
       const index = images.findIndex(x => x.id === img.id);
       await handleDownloadSingle(img.url, index, img.label);
       await new Promise(r => setTimeout(r, 300));
+    }
+  };
+
+  const downloadZip = async () => {
+    if (!result) return;
+    setIsZipDownloading(true);
+    try {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}${mm}${dd}`;
+
+      const rawTopic = topic.trim() || result.title.trim() || 'blog';
+      const cleanTopic = rawTopic.replace(/[\/\\:*?"<>|]/g, '_').substring(0, 30);
+      const baseFileName = `${dateStr}_${cleanTopic}`;
+
+      const zip = new JSZip();
+
+      // 글 내용 구성
+      const txtContent = `[제목]
+${result.title}
+
+[메타설명]
+${result.metaDescription}
+
+[태그]
+${result.tags.map(t => `#${t}`).join(', ')}
+
+[본문]
+${result.body}
+`;
+
+      zip.file(`${baseFileName}.txt`, txtContent);
+
+      // 이미지 추가
+      const activeImages = images.filter(img => img.url !== '');
+      for (let i = 0; i < activeImages.length; i++) {
+        const img = activeImages[i];
+        const index = images.findIndex(x => x.id === img.id);
+        const label = img.label.trim();
+        const cleanLabel = label ? label.replace(/[\/\\:*?"<>|]/g, '_') : `image_${index + 1}`;
+        const imgFileName = `${index + 1}_${cleanLabel}.jpg`;
+
+        try {
+          const proxyUrl = img.url.startsWith('http')
+            ? `/api/proxy-image?url=${encodeURIComponent(img.url)}`
+            : img.url;
+          const res = await fetch(proxyUrl);
+          if (!res.ok) throw new Error('Fetch failed');
+          const blob = await res.blob();
+          zip.file(imgFileName, blob);
+        } catch (err) {
+          console.error(`Failed to pack image ${imgFileName}:`, err);
+        }
+      }
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `${baseFileName}.zip`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (err: any) {
+      alert('전체 다운로드 실패: ' + err.message);
+    } finally {
+      setIsZipDownloading(false);
     }
   };
 
@@ -1003,6 +1072,14 @@ export default function BlogGeneratorPage() {
                   <span className="text-xs text-gray-400">· {result.body.length}자</span>
                 </div>
                 <div className="flex items-center gap-2">
+                  <button
+                    onClick={downloadZip}
+                    disabled={isZipDownloading}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold bg-indigo-50 hover:bg-indigo-100 disabled:bg-gray-200 disabled:text-gray-400 text-indigo-700 transition-all shadow-sm"
+                  >
+                    {isZipDownloading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    {isZipDownloading ? '압축 중...' : '전체 다운로드'}
+                  </button>
                   <button
                     onClick={handleSave}
                     disabled={isSaving}
