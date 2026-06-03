@@ -23,12 +23,53 @@ export async function POST(request: Request) {
       refLinks = [],
       instructions,
       cta,
+      personaId,
+      category,
+      sourceUrl,
     } = await request.json();
 
-    const mainInput = topic || content;
+    let urlContent = '';
+    if (sourceUrl) {
+      try {
+        const res = await fetch(sourceUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CardNewsBot/1.0)' },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (!res.ok) {
+          throw new Error('Fetch failed');
+        }
+        const html = await res.text();
+        const cleaned = html
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        
+        if (!cleaned) {
+          throw new Error('Empty content');
+        }
+        urlContent = cleaned.slice(0, 3000);
+      } catch (err) {
+        return NextResponse.json(
+          { error: '기사를 불러오지 못했습니다. URL을 확인해주세요' },
+          { status: 400 }
+        );
+      }
+    }
+
+    const mainInput = topic || content || (sourceUrl ? `[기사 URL 참고생성: ${sourceUrl}]` : '');
     if (!mainInput) return NextResponse.json({ error: '주제 또는 내용이 필요합니다' }, { status: 400 });
 
-    const { data: persona } = await supabase.from('brand_personas').select('*').limit(1).maybeSingle();
+    let persona = null;
+    if (personaId && personaId !== 'none') {
+      const { data } = await supabase
+        .from('brand_personas')
+        .select('*')
+        .eq('id', personaId)
+        .maybeSingle();
+      persona = data;
+    }
 
     const toneLabel: Record<string, string> = {
       professional: '전문적이고 신뢰감 있는',
@@ -71,10 +112,19 @@ export async function POST(request: Request) {
     };
 
     const personaSection = persona
-      ? `[브랜드 페르소나] 브랜드: ${persona.brand_name}, 타겟: ${persona.target_audience}, 업종: ${persona.industry}`
+      ? `[브랜드 페르소나]
+- 브랜드: ${persona.brand_name}
+- 페르소나 이름: ${persona.persona_name || persona.brand_name}
+- 타겟 독자: ${persona.target_audience || '일반 대중'}
+- 업종: ${persona.industry || '미정'}
+- 글의 톤/말투: ${persona.tone || '전문적인 말투'}
+- 포스팅 목적: ${persona.posting_goal || '정보 제공 및 신뢰 구축'}
+- 연관 키워드: ${Array.isArray(persona.keywords) ? persona.keywords.join(', ') : ''}
+- 이모지 스타일: ${persona.emoji_style || '적절히 사용'}`
       : '';
 
     const extraSections = [
+      category && `카테고리: ${category}`,
       targetAudience && `대상 독자: ${targetAudience}`,
       keywords.length > 0 && `반드시 포함할 검색 키워드: ${keywords.join(', ')}`,
       refLinks.length > 0 && `참고 링크 (내용 참고용, 직접 인용 금지): ${refLinks.join(', ')}`,
@@ -82,16 +132,32 @@ export async function POST(request: Request) {
       cta && `마지막에 CTA 포함 - 버튼 텍스트: "${cta.text}"${cta.url ? `, 링크: ${cta.url}` : ''}`,
     ].filter(Boolean).join('\n');
 
-    const prompt = `당신은 SEO 전문가이자 ${toneLabel[tone] || '전문적인'} 블로그 작가입니다.
+    const urlContentSection = urlContent
+      ? `[참고 원문 기사 본문 (반드시 이 내용을 바탕으로 새로운 블로그 글을 작성하십시오)]
+${urlContent}`
+      : '';
+
+    const prompt = `당신은 SEO 전문가이자 블로그 작가입니다.
 ${langInstruction[language] || langInstruction.auto}
 
 ${personaSection}
+
+${urlContentSection}
 
 [블로그 주제]
 ${mainInput}
 
 ${extraSections ? `[추가 설정]\n${extraSections}\n` : ''}
 ${formatGuide[format] || formatGuide.naver}
+
+[작성 및 톤 지침]
+${persona ? `- 글의 전반적인 말투와 분위기는 브랜드 페르소나의 '글의 톤/말투'(${persona.tone})를 적극 반영하여 통일성 있게 작성하세요.
+- 타겟 독자(${persona.target_audience || '일반 대중'})의 관심사와 수준에 맞는 단어와 설명 방식을 선택하세요.
+- 포스팅 목적(${persona.posting_goal || '정보 제공'})이 잘 달성되도록 유용한 내용 위주로 깊이 있게 글을 구성하세요.
+- 이모지 스타일(${persona.emoji_style || '적절히 사용'})을 제목 및 본문에 적절히 반영하여 가독성을 높이세요.
+- 글 마무리 시 브랜드(${persona.brand_name})와 부합하는 멘트나 행동 유도 멘트를 자연스럽게 작성하세요.` : `- 글의 전반적인 말투와 분위기는 지정된 톤(${toneLabel[tone] || '전문적인'})에 맞게 구성하세요.
+- 브랜드 언급이나 특정 페르소나 색채 없이 깔끔하고 객관적인 일반 글(정보성 콘텐츠) 형태로 작성하세요.
+${cta ? `- 글 마지막 마무리 단락에 다음 행동 유도(CTA)를 자연스럽게 녹여내어 독자의 행동을 유도하세요: 문구: "${cta.text}"${cta.url ? `, 링크: ${cta.url}` : ''}` : '- 브랜드 멘트나 링크 없이 깔끔하게 일반적인 마무리 소통 문구로 포스팅을 마치십시오.'}`}
 
 [목표 분량]
 - 본문 분량: ${wordCount}자 내외 (시간 초과 방지를 위해 1800자~2300자 사이로 엄수하십시오)

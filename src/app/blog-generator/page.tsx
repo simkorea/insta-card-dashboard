@@ -83,6 +83,35 @@ export default function BlogGeneratorPage() {
   const [currentPostId, setCurrentPostId] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
 
+  const [inputMode, setInputMode] = useState<'topic' | 'url' | 'trend' | 'smart'>('topic');
+  const [trendRecommendations, setTrendRecommendations] = useState<string[]>([]);
+  const [isFetchingTrends, setIsFetchingTrends] = useState(false);
+  const [smartCategory, setSmartCategory] = useState('부동산');
+  const [smartKeyword, setSmartKeyword] = useState('');
+  const [personas, setPersonas] = useState<any[]>([]);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string>('none');
+  const [urlInput, setUrlInput] = useState('');
+
+  const fetchTrendRecommendations = async () => {
+    setIsFetchingTrends(true);
+    try {
+      const res = await fetch('/api/generate/recommend-trends');
+      const data = await res.json();
+      if (data.trends) setTrendRecommendations(data.trends);
+    } catch {
+      // Fallback
+      setTrendRecommendations(['2026 부동산 전망', 'AI 업무 자동화', '퍼스널 브랜딩', '건강한 식습관', '주간 경제 뉴스', 'MZ세대 소비 트렌드', '인스타그램 알고리즘']);
+    } finally {
+      setIsFetchingTrends(false);
+    }
+  };
+
+  useEffect(() => {
+    if (inputMode === 'trend') {
+      fetchTrendRecommendations();
+    }
+  }, [inputMode]);
+
   const updateResultField = (key: keyof BlogResult, value: any) => {
     setResult(prev => {
       if (!prev) return null;
@@ -138,6 +167,17 @@ export default function BlogGeneratorPage() {
     };
 
     loadPost();
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/brand-persona')
+      .then(res => res.json())
+      .then(data => {
+        if (data.personas && Array.isArray(data.personas)) {
+          setPersonas(data.personas);
+        }
+      })
+      .catch(err => console.error('페르소나 목록 로드 실패:', err));
   }, []);
 
   const handleImageCountChange = (newCount: number) => {
@@ -291,7 +331,26 @@ export default function BlogGeneratorPage() {
   };
 
   const handleGenerate = async () => {
-    if (!topic.trim()) { setError('주제를 입력해주세요'); return; }
+    const isSmartMode = inputMode === 'smart';
+    const isUrlMode = inputMode === 'url';
+    
+    let activeTopic = topic;
+    if (isSmartMode) {
+      activeTopic = smartKeyword;
+    } else if (isUrlMode) {
+      activeTopic = urlInput;
+    }
+
+    if (!activeTopic.trim()) {
+      setError(
+        isSmartMode
+          ? '주제 키워드를 입력해주세요'
+          : isUrlMode
+          ? '기사 URL을 입력해주세요'
+          : '주제를 입력해주세요'
+      );
+      return;
+    }
     setError('');
     setIsGenerating(true);
     setResult(null);
@@ -300,11 +359,17 @@ export default function BlogGeneratorPage() {
     const timeoutId = setTimeout(() => controller.abort(), 53000);
 
     try {
+      if (isSmartMode) {
+        setTopic(smartKeyword);
+      } else if (isUrlMode) {
+        setTopic(urlInput);
+      }
+
       const res = await fetch('/api/generate/blog', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          topic,
+          topic: isUrlMode ? undefined : activeTopic,
           format,
           tone,
           language,
@@ -314,6 +379,9 @@ export default function BlogGeneratorPage() {
           refLinks: refLinks.filter(l => l.trim()),
           instructions,
           cta: ctaText ? { text: ctaText, url: ctaUrl } : null,
+          personaId: selectedPersonaId,
+          category: isSmartMode ? smartCategory : undefined,
+          sourceUrl: isUrlMode ? urlInput : undefined,
         }),
         signal: controller.signal
       });
@@ -407,30 +475,275 @@ export default function BlogGeneratorPage() {
         <div className="w-full md:w-[420px] bg-white border-b md:border-b-0 md:border-r border-gray-200 flex flex-col shrink-0">
           <div className="flex-1 overflow-y-auto p-5 space-y-5">
 
-            {/* Topic input */}
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-1.5">블로그 주제</label>
-              <p className="text-xs text-gray-400 mb-2">주제만 입력하면 AI가 리서치부터 글 작성까지 해드려요</p>
-              <textarea
-                value={topic}
-                onChange={e => setTopic(e.target.value)}
-                placeholder="블로그 주제를 입력하세요 (예: AI 콘텐츠 자동화의 미래)"
-                rows={3}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none resize-none"
-              />
-              {/* Suggested topics */}
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {SUGGESTED_TOPICS.map(t => (
-                  <button
-                    key={t}
-                    onClick={() => setTopic(t)}
-                    className="text-[11px] px-2.5 py-1 bg-gray-100 hover:bg-primary-50 hover:text-primary-700 text-gray-600 rounded-full transition-colors font-medium"
-                  >
-                    {t}
-                  </button>
-                ))}
-              </div>
+            {/* Start Mode Tabs */}
+            <div className="flex gap-2.5 mb-5 border-b border-gray-100 overflow-x-auto pb-1 shrink-0">
+              <button
+                onClick={() => setInputMode('topic')}
+                className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
+                  inputMode === 'topic' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+                }`}
+              >
+                📝 주제 입력
+              </button>
+              <button
+                onClick={() => setInputMode('url')}
+                className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
+                  inputMode === 'url' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+                }`}
+              >
+                🔗 기사 URL
+              </button>
+              <button
+                onClick={() => setInputMode('trend')}
+                className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
+                  inputMode === 'trend' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+                }`}
+              >
+                🔍 트렌드 키워드
+              </button>
+              <button
+                onClick={() => setInputMode('smart')}
+                className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
+                  inputMode === 'smart' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+                }`}
+              >
+                ⚡ 자동 생성
+              </button>
             </div>
+
+            {/* 브랜드 페르소나 공통 선택 */}
+            <div className="bg-gray-50 border border-gray-100 rounded-2xl p-4 shadow-sm space-y-2">
+              <label className="block text-xs font-bold text-gray-500 flex items-center gap-1.5">
+                <Target size={12} className="text-primary-500" /> 적용할 브랜드 페르소나
+              </label>
+              {personas.length === 0 ? (
+                <div className="text-xs text-gray-400 bg-white rounded-xl p-3 border border-gray-200 flex items-center justify-between">
+                  <span>보관된 페르소나가 없습니다. 기본 톤으로 생성됩니다.</span>
+                  <a
+                    href="/persona"
+                    className="text-primary-600 hover:text-primary-700 font-bold ml-2 underline transition-all shrink-0 font-medium"
+                  >
+                    설정하러 가기
+                  </a>
+                </div>
+              ) : (
+                <select
+                  value={selectedPersonaId || 'none'}
+                  onChange={e => setSelectedPersonaId(e.target.value)}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-primary-400 bg-white cursor-pointer hover:border-primary-300 transition-colors font-semibold text-gray-700 shadow-sm"
+                >
+                  <option value="none">🚫 페르소나 적용 안 함 (일반 글 생성)</option>
+                  {personas.map(p => (
+                    <option key={p.id} value={p.id}>
+                      👤 {p.persona_name || p.brand_name} (@{p.brand_name})
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* Mode Specific Inputs */}
+            {inputMode === 'topic' && (
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1.5">블로그 주제</label>
+                <p className="text-xs text-gray-400 mb-2">주제만 입력하면 AI가 리서치부터 글 작성까지 해드려요</p>
+                <textarea
+                  value={topic}
+                  onChange={e => setTopic(e.target.value)}
+                  placeholder="블로그 주제를 입력하세요 (예: AI 콘텐츠 자동화의 미래)"
+                  rows={3}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none resize-none"
+                />
+                {/* Suggested topics */}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {SUGGESTED_TOPICS.map(t => (
+                    <button
+                      key={t}
+                      onClick={() => setTopic(t)}
+                      className="text-[11px] px-2.5 py-1 bg-gray-100 hover:bg-primary-50 hover:text-primary-700 text-gray-600 rounded-full transition-colors font-medium"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {inputMode === 'url' && (
+              <div className="space-y-4">
+                {/* 헤더 */}
+                <div className="bg-gradient-to-br from-primary-600 to-indigo-600 rounded-2xl p-5 text-white shadow-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Link2 size={18} />
+                    <p className="font-black text-base">기사 URL로 블로그 생성</p>
+                  </div>
+                  <p className="text-primary-100 text-xs">참고할 뉴스나 포스팅의 URL을 입력하면 AI가 본문을 크롤링하여 블로그 글을 재구성합니다.</p>
+                </div>
+
+                {/* URL 입력란 */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1.5">참고 기사 URL</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="url"
+                      value={urlInput}
+                      onChange={e => setUrlInput(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && !isGenerating && handleGenerate()}
+                      placeholder="https://news.naver.com/..."
+                      className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-primary-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleGenerate}
+                      disabled={isGenerating || !urlInput.trim()}
+                      className="px-5 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm disabled:opacity-40 transition-all flex items-center gap-2 whitespace-nowrap shadow-md"
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Loader2 size={15} className="animate-spin" />
+                          생성 중...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={15} />
+                          AI 생성
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {inputMode === 'trend' && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1.5">선택된 주제 (또는 직접 입력)</label>
+                  <textarea
+                    value={topic}
+                    onChange={e => setTopic(e.target.value)}
+                    placeholder="아래 추천 키워드를 클릭하거나 직접 입력하세요"
+                    rows={2}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none resize-none"
+                  />
+                </div>
+                
+                <div>
+                  <span className="text-xs font-semibold text-gray-500 block mb-2.5">🔥 인기 트렌드 추천 키워드</span>
+                  
+                  {isFetchingTrends && (
+                    <div className="flex items-center gap-1.5 py-3 text-xs text-gray-400 font-semibold justify-center">
+                      <Loader2 size={12} className="animate-spin text-primary-500" />
+                      <span>추천 키워드를 가져오고 있습니다...</span>
+                    </div>
+                  )}
+
+                  {!isFetchingTrends && trendRecommendations.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {trendRecommendations.map(tag => (
+                        <button
+                          key={tag}
+                          onClick={() => setTopic(tag)}
+                          className="px-3.5 py-2 rounded-full border border-gray-200 text-xs text-gray-600 hover:border-primary-400 hover:text-primary-600 hover:bg-primary-50/20 transition-all bg-white font-medium shadow-sm hover:shadow-md"
+                        >
+                          #{tag}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {!isFetchingTrends && trendRecommendations.length === 0 && (
+                    <p className="text-xs text-red-500 py-2">추천 데이터를 불러오지 못했습니다. 다시 시도해주세요.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {inputMode === 'smart' && (
+              <div className="space-y-4">
+                {/* 헤더 */}
+                <div className="bg-gradient-to-br from-primary-600 to-indigo-600 rounded-2xl p-5 text-white shadow-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Sparkles size={18} />
+                    <p className="font-black text-base">AI 완전 자동 블로그 생성</p>
+                  </div>
+                  <p className="text-primary-100 text-xs">키워드와 카테고리를 고르고 페르소나를 선택하면 AI가 맞춤형 글을 완성합니다.</p>
+                </div>
+
+                {/* 카테고리 선택 */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1.5">카테고리</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {['부동산', '세금/금융', '재테크', '비즈니스', '라이프스타일', '건강', '교육', 'IT/트렌드'].map(cat => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setSmartCategory(cat)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                          smartCategory === cat
+                            ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
+                            : 'border-gray-200 text-gray-600 hover:border-primary-300 hover:text-primary-600 bg-white'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+
+
+                {/* 주제 키워드 입력 */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-1.5">주제 키워드</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={smartKeyword}
+                      onChange={e => setSmartKeyword(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && !isGenerating && handleGenerate()}
+                      placeholder="예: 다주택자 양도세, 전세사기 예방, 금리 인상"
+                      className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-400 focus:border-primary-400"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleGenerate}
+                      disabled={isGenerating || !smartKeyword.trim()}
+                      className="px-5 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold text-sm disabled:opacity-40 transition-all flex items-center gap-2 whitespace-nowrap shadow-md"
+                    >
+                      {isGenerating ? (
+                        <>
+                          <Loader2 size={15} className="animate-spin" />
+                          생성 중...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles size={15} />
+                          AI 생성
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  {/* 추천 키워드 */}
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {(smartCategory === '부동산' ? ['다주택자 양도세', '재건축 투자 전략', '전세사기 예방법', '청약 당첨 꿀팁', '아파트 시세 분석'] :
+                      smartCategory === '세금/금융' ? ['종합소득세 절세', '금융소득 분리과세', '연말정산 전략', '상속세 개편', '증여세 줄이기'] :
+                      smartCategory === '재테크' ? ['월급쟁이 재테크', 'ETF 투자 입문', '배당주 포트폴리오', '달러 환전 타이밍', '적금 vs 펀드'] :
+                      ['AI 자동화 트렌드', '사이드잡 수익화', '디지털 노마드 준비', '온라인 창업 아이템', '소셜미디어 마케팅']
+                    ).map(kw => (
+                      <button
+                        key={kw}
+                        type="button"
+                        onClick={() => setSmartKeyword(kw)}
+                        className="text-[11px] px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-full text-gray-600 hover:bg-primary-50 hover:border-primary-300 hover:text-primary-600 transition-colors"
+                      >
+                        {kw}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Platform */}
             <div>
@@ -624,13 +937,15 @@ export default function BlogGeneratorPage() {
           <div className="p-4 pb-24 md:pb-4 border-t border-gray-100">
             <button
               onClick={handleGenerate}
-              disabled={isGenerating || !topic.trim()}
+              disabled={isGenerating || (inputMode === 'smart' ? !smartKeyword.trim() : inputMode === 'url' ? !urlInput.trim() : !topic.trim())}
               className="w-full flex items-center justify-center gap-2 py-3.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition-all shadow-sm"
             >
               {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
               {isGenerating ? '생성 중... (15-30초)' : '글 생성 시작'}
             </button>
-            {!topic.trim() && <p className="text-center text-xs text-gray-400 mt-2">주제를 입력해주세요</p>}
+            {(inputMode === 'smart' ? !smartKeyword.trim() : inputMode === 'url' ? !urlInput.trim() : !topic.trim()) && (
+              <p className="text-center text-xs text-gray-400 mt-2">주제를 입력해주세요</p>
+            )}
           </div>
         </div>
 
