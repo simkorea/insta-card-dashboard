@@ -425,7 +425,7 @@ ${result.body}
     setResult(null);
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 53000);
+    const timeoutId = setTimeout(() => controller.abort(), 70000);
 
     try {
       if (isSmartMode) {
@@ -478,7 +478,7 @@ ${result.body}
     } catch (e: any) {
       clearTimeout(timeoutId);
       if (e.name === 'AbortError') {
-        setError('생성 실패: 대기 시간(53초)이 초과되어 취소되었습니다. 잠시 후 다시 시도해주세요.');
+        setError('응답이 지연되고 있습니다. 네트워크 상태를 확인하시거나 잠시 후 다시 시도해주세요.');
       } else {
         setError('생성 실패: ' + e.message);
       }
@@ -1020,7 +1020,26 @@ ${result.body}
 
         {/* Right: Result */}
         <div className="flex-1 overflow-y-auto p-6 pb-24 md:pb-6">
-          {!result && !isGenerating && (
+          {error && !result && !isGenerating && (
+            <div className="flex flex-col items-center justify-center h-full text-center max-w-md mx-auto py-10">
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-6 shadow-sm w-full">
+                <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <X size={20} className="text-red-600" />
+                </div>
+                <p className="font-bold text-red-800 text-sm mb-1.5">글 생성 실패</p>
+                <p className="text-xs text-red-600 leading-relaxed mb-5">{error}</p>
+                <button
+                  onClick={handleGenerate}
+                  className="w-full py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+                >
+                  <Sparkles size={12} />
+                  다시 시도하기
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!result && !isGenerating && !error && (
             <div className="flex flex-col items-center justify-center h-full text-center text-gray-400 gap-3">
               <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center">
                 <FileText size={28} className="text-gray-300" />
