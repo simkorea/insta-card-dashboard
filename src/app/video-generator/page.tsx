@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle } from 'lucide-react';
+import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle, Wand2, Copy } from 'lucide-react';
 
 // ─── 슬라이드 렌더러 (영상 캡처용) ──────────────────────────────────────────
 function SlideFrame({ page, width, height }: { page: any; width: number; height: number }) {
@@ -62,6 +62,17 @@ const RATIOS = [
 
 export default function VideoGeneratorPage() {
   const [videoMode, setVideoMode] = useState<'slideshow' | 'script' | 'prompt'>('slideshow');
+  
+  // 모드3 영상 프롬프트 생성기 상태
+  const [promptSource, setPromptSource] = useState<'design' | 'manual'>('design');
+  const [manualText, setManualText] = useState('');
+  const [sceneCount, setSceneCount] = useState(5);
+  const [promptLoading, setPromptLoading] = useState(false);
+  const [scenes, setScenes] = useState<any[]>([]);
+  const [promptError, setPromptError] = useState('');
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
+
   const [designs, setDesigns] = useState<any[]>([]);
   const [isLoadingDesigns, setIsLoadingDesigns] = useState(true);
   const [selectedDesign, setSelectedDesign] = useState<any>(null);
@@ -243,6 +254,54 @@ export default function VideoGeneratorPage() {
       setExportProgress('');
     }
   }, [selectedDesign, pages, duration, transition, ratio, ratioInfo]);
+
+  const handleGeneratePrompts = async () => {
+    let source = '';
+    if (promptSource === 'design') {
+      if (!selectedDesign || !selectedDesign.pages_data) return;
+      source = selectedDesign.pages_data
+        .map((page: any, idx: number) => {
+          const pageNum = `[장면 ${idx + 1}]`;
+          const title = page.title ? `제목: ${page.title}` : '';
+          const subtitle = page.subtitle ? `서브카피: ${page.subtitle}` : '';
+          const bullets = page.bullets && page.bullets.length > 0 ? `불릿: ${page.bullets.join(', ')}` : '';
+          return [pageNum, title, subtitle, bullets].filter(Boolean).join('\n');
+        })
+        .join('\n\n');
+    } else {
+      source = manualText;
+    }
+
+    if (!source.trim()) {
+      setPromptError('생성할 원본 텍스트 소스가 비어 있습니다.');
+      return;
+    }
+
+    setPromptLoading(true);
+    setPromptError('');
+    setScenes([]);
+    setCopiedAll(false);
+    setCopiedIndex(null);
+
+    try {
+      const res = await fetch('/api/generate/video-prompt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, sceneCount }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      if (data.scenes) {
+        setScenes(data.scenes);
+      }
+    } catch (e: any) {
+      setPromptError(e.message || '프롬프트 생성 실패');
+    } finally {
+      setPromptLoading(false);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8">
@@ -514,8 +573,188 @@ export default function VideoGeneratorPage() {
       )}
 
       {videoMode === 'prompt' && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-gray-600">프롬프트 생성 + 영상 업로드·이어붙이기 (준비 중)</p>
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm space-y-5">
+            <div>
+              <h2 className="text-sm font-bold text-gray-700 mb-3">입력 소스 선택</h2>
+              {/* 입력 소스 탭 */}
+              <div className="flex gap-2.5 mb-4 border-b border-gray-100 overflow-x-auto pb-1 shrink-0">
+                <button
+                  onClick={() => setPromptSource('design')}
+                  className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                    promptSource === 'design' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+                  }`}
+                >
+                  📁 저장된 카드뉴스에서
+                </button>
+                <button
+                  onClick={() => setPromptSource('manual')}
+                  className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                    promptSource === 'manual' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+                  }`}
+                >
+                  ✍️ 직접 입력
+                </button>
+              </div>
+            </div>
+
+            {/* 디자인에서 가져오기 */}
+            {promptSource === 'design' && (
+              <div className="space-y-3">
+                <h3 className="text-xs font-bold text-gray-500">저장된 디자인 선택</h3>
+                {isLoadingDesigns ? (
+                  <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-gray-300" /></div>
+                ) : designs.length === 0 ? (
+                  <div className="text-center py-8 text-gray-400">
+                    <p className="text-sm">저장된 디자인이 없습니다</p>
+                    <a href="/cardnews" className="text-xs text-primary-600 hover:underline mt-1 block">카드뉴스 만들기 →</a>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+                    {designs.map(d => {
+                      const fp = d.pages_data?.[0];
+                      const isSelected = selectedDesign?.id === d.id;
+                      return (
+                        <button
+                          key={d.id}
+                          onClick={() => handleSelectDesign(d)}
+                          className={`rounded-xl overflow-hidden border-2 transition-all text-left ${isSelected ? 'border-pink-500 shadow-md' : 'border-gray-100 hover:border-gray-300'}`}
+                        >
+                          <div className="relative h-20 bg-gray-800 overflow-hidden">
+                            {fp?.bgImage && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={fp.bgImage.replace('w=800', 'w=120')} alt="" className="w-full h-full object-cover" />
+                            )}
+                            <div style={{ position: 'absolute', inset: 0, background: fp?.overlay || 'rgba(0,0,0,0.4)' }} />
+                            {isSelected && (
+                              <div className="absolute inset-0 bg-pink-500/20 flex items-center justify-center">
+                                <Check size={20} className="text-white" />
+                              </div>
+                            )}
+                            <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                              {d.pages_data?.length ?? 0}장
+                            </div>
+                          </div>
+                          <div className="px-2 py-1.5 bg-white">
+                            <p className="text-[11px] font-bold text-gray-700 truncate">{d.name}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {selectedDesign && (
+                  <div className="text-xs text-gray-500 bg-gray-50 rounded-xl p-3 border border-gray-100 leading-relaxed">
+                    🎯 선택된 디자인: <strong>{selectedDesign.name}</strong> (총 {selectedDesign.pages_data?.length ?? 0}개 슬라이드 텍스트 추출 가능)
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 직접 입력 */}
+            {promptSource === 'manual' && (
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-gray-500">영상 주제 및 텍스트 소스</label>
+                <textarea
+                  value={manualText}
+                  onChange={e => setManualText(e.target.value)}
+                  placeholder="영상으로 만들 주제나 내용을 입력하세요 (예: 부동산 소액 투자 전략, 아파트 청약 꿀팁 등)"
+                  rows={4}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none resize-none"
+                />
+              </div>
+            )}
+
+            {/* 장면 개수 선택 및 실행 버튼 */}
+            <div className="flex flex-col sm:flex-row gap-4 items-end pt-2 border-t border-gray-100">
+              <div className="w-full sm:w-auto space-y-1.5">
+                <label className="block text-xs font-bold text-gray-500">장면 개수 (3~8개)</label>
+                <select
+                  value={sceneCount}
+                  onChange={e => setSceneCount(Number(e.target.value))}
+                  className="w-full sm:w-32 px-3 py-2 border border-gray-200 rounded-xl text-xs bg-white cursor-pointer"
+                >
+                  {[3, 4, 5, 6, 7, 8].map(num => (
+                    <option key={num} value={num}>{num}개 장면</option>
+                  ))}
+                </select>
+              </div>
+
+              <button
+                onClick={handleGeneratePrompts}
+                disabled={promptLoading || (promptSource === 'design' ? !selectedDesign : !manualText.trim())}
+                className="w-full sm:flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold text-sm hover:from-pink-600 hover:to-rose-600 disabled:opacity-40 transition-all shadow-sm active:scale-[0.99] cursor-pointer"
+              >
+                {promptLoading ? (
+                  <><Loader2 size={16} className="animate-spin" /> 프롬프트 생성 중...</>
+                ) : (
+                  <><Wand2 size={16} /> AI 영상 프롬프트 생성</>
+                )}
+              </button>
+            </div>
+
+            {promptError && (
+              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
+                <AlertCircle size={14} className="text-red-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-red-600">{promptError}</p>
+              </div>
+            )}
+          </div>
+
+          {/* 생성 결과 영역 */}
+          {scenes.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between pl-1">
+                <h3 className="text-sm font-bold text-gray-700 flex items-center gap-1.5">
+                  ✨ 추천 영상 프롬프트 결과
+                </h3>
+                <button
+                  onClick={() => {
+                    const allPrompts = scenes.map(s => s.prompt).join('\n');
+                    navigator.clipboard.writeText(allPrompts);
+                    setCopiedAll(true);
+                    setTimeout(() => setCopiedAll(false), 2000);
+                  }}
+                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer ${copiedAll ? 'bg-green-600 text-white' : 'bg-gray-900 text-white hover:bg-gray-800'}`}
+                >
+                  {copiedAll ? <><Check size={12} /> 전체 복사 완료</> : <><Copy size={12} /> 전체 프롬프트 복사</>}
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                {scenes.map((sceneObj, index) => {
+                  const isCopied = copiedIndex === index;
+                  return (
+                    <div key={index} className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm space-y-3">
+                      <div className="flex justify-between items-start gap-3">
+                        <div>
+                          <span className="text-[10px] bg-pink-100 text-pink-700 px-2 py-0.5 rounded-full font-bold">장면 {sceneObj.scene ?? index + 1}</span>
+                          <h4 className="text-sm font-bold text-gray-800 mt-1">{sceneObj.ko}</h4>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(sceneObj.prompt);
+                            setCopiedIndex(index);
+                            setTimeout(() => setCopiedIndex(null), 2000);
+                          }}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition-colors shrink-0 cursor-pointer ${
+                            isCopied
+                              ? 'bg-green-50 border-green-200 text-green-700'
+                              : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          {isCopied ? <><Check size={10} /> 복사됨</> : <><Copy size={10} /> 복사</>}
+                        </button>
+                      </div>
+                      <div className="bg-gray-50 border border-gray-100 rounded-xl p-3.5 font-mono text-xs text-gray-600 leading-relaxed select-all">
+                        {sceneObj.prompt}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
