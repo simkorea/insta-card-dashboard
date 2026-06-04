@@ -61,6 +61,7 @@ const RATIOS = [
 ];
 
 export default function VideoGeneratorPage() {
+  const [videoMode, setVideoMode] = useState<'slideshow' | 'script' | 'prompt'>('slideshow');
   const [designs, setDesigns] = useState<any[]>([]);
   const [isLoadingDesigns, setIsLoadingDesigns] = useState(true);
   const [selectedDesign, setSelectedDesign] = useState<any>(null);
@@ -257,220 +258,264 @@ export default function VideoGeneratorPage() {
         <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold">Beta</span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-        {/* Left: Design selection + Preview */}
-        <div className="space-y-6">
-          {/* Design selection */}
-          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-            <h2 className="text-sm font-bold text-gray-700 mb-4">저장된 디자인 선택</h2>
-            {isLoadingDesigns ? (
-              <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-gray-300" /></div>
-            ) : designs.length === 0 ? (
-              <div className="text-center py-8 text-gray-400">
-                <p className="text-sm">저장된 디자인이 없습니다</p>
-                <a href="/cardnews" className="text-xs text-primary-600 hover:underline mt-1 block">카드뉴스 만들기 →</a>
-              </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
-                {designs.map(d => {
-                  const fp = d.pages_data?.[0];
-                  const isSelected = selectedDesign?.id === d.id;
-                  return (
-                    <button
-                      key={d.id}
-                      onClick={() => handleSelectDesign(d)}
-                      className={`rounded-xl overflow-hidden border-2 transition-all text-left ${isSelected ? 'border-pink-500 shadow-md' : 'border-gray-100 hover:border-gray-300'}`}
-                    >
-                      <div className="relative h-20 bg-gray-800 overflow-hidden">
-                        {fp?.bgImage && (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={fp.bgImage.replace('w=800', 'w=120')} alt="" className="w-full h-full object-cover" />
-                        )}
-                        <div style={{ position: 'absolute', inset: 0, background: fp?.overlay || 'rgba(0,0,0,0.4)' }} />
-                        {isSelected && (
-                          <div className="absolute inset-0 bg-pink-500/20 flex items-center justify-center">
-                            <Check size={20} className="text-white" />
-                          </div>
-                        )}
-                        <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                          {d.pages_data?.length ?? 0}장
-                        </div>
-                      </div>
-                      <div className="px-2 py-1.5 bg-white">
-                        <p className="text-[11px] font-bold text-gray-700 truncate">{d.name}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Preview */}
-          {selectedDesign && pages.length > 0 && (
-            <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-sm font-bold text-gray-700">미리보기</h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setCurrentSlide(p => Math.max(0, p - 1))}
-                    disabled={currentSlide === 0}
-                    className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center hover:bg-gray-50 disabled:opacity-30 transition-colors"
-                  >
-                    <ChevronLeft size={14} />
-                  </button>
-                  <span className="text-xs font-bold text-gray-600">{currentSlide + 1} / {pages.length}</span>
-                  <button
-                    onClick={() => setCurrentSlide(p => Math.min(pages.length - 1, p + 1))}
-                    disabled={currentSlide === pages.length - 1}
-                    className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center hover:bg-gray-50 disabled:opacity-30 transition-colors"
-                  >
-                    <ChevronRight size={14} />
-                  </button>
-                  <button
-                    onClick={() => setIsPlaying(p => !p)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isPlaying ? 'bg-gray-900 text-white' : 'bg-pink-500 text-white hover:bg-pink-600'}`}
-                  >
-                    {isPlaying ? <><Pause size={12} /> 정지</> : <><Play size={12} /> 재생</>}
-                  </button>
-                </div>
-              </div>
-
-              {/* Slide preview */}
-              <div className="flex justify-center">
-                <div style={{ width: ratioInfo.w, height: ratioInfo.h, overflow: 'hidden', borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}>
-                  <SlideFrame page={pages[currentSlide]} width={ratioInfo.w} height={ratioInfo.h} />
-                </div>
-              </div>
-
-              {/* Slide dots */}
-              <div className="flex justify-center gap-1.5 mt-4">
-                {pages.map((_, i) => (
-                  <button
-                    key={i}
-                    onClick={() => { setCurrentSlide(i); setIsPlaying(false); }}
-                    className={`rounded-full transition-all ${i === currentSlide ? 'w-4 h-1.5 bg-pink-500' : 'w-1.5 h-1.5 bg-gray-300 hover:bg-gray-400'}`}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Right: Settings + Export */}
-        <div className="space-y-4">
-          {/* Settings */}
-          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-            <h2 className="text-sm font-bold text-gray-700 mb-4">영상 설정</h2>
-
-            {/* Duration */}
-            <div className="mb-5">
-              <label className="block text-xs font-bold text-gray-600 mb-2">
-                슬라이드 표시 시간 <span className="text-pink-600">{duration}초</span>
-              </label>
-              <input
-                type="range"
-                min={1} max={5} step={0.5}
-                value={duration}
-                onChange={e => setDuration(Number(e.target.value))}
-                className="w-full accent-pink-500"
-              />
-              <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-                <span>1초 (빠름)</span><span>3초</span><span>5초 (천천히)</span>
-              </div>
-            </div>
-
-            {/* Transition */}
-            <div className="mb-5">
-              <label className="block text-xs font-bold text-gray-600 mb-2">전환 효과</label>
-              <div className="grid grid-cols-3 gap-2">
-                {TRANSITIONS.map(t => (
-                  <button
-                    key={t.id}
-                    onClick={() => setTransition(t.id)}
-                    className={`py-2 rounded-lg text-xs font-bold border-2 transition-all ${transition === t.id ? 'border-pink-500 bg-pink-50 text-pink-700' : 'border-gray-100 text-gray-600 hover:border-gray-200'}`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Ratio */}
-            <div>
-              <label className="block text-xs font-bold text-gray-600 mb-2">비율</label>
-              <div className="space-y-1.5">
-                {RATIOS.map(r => (
-                  <button
-                    key={r.id}
-                    onClick={() => setRatio(r.id)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs border-2 transition-all ${ratio === r.id ? 'border-pink-500 bg-pink-50 text-pink-700 font-bold' : 'border-gray-100 text-gray-600 hover:border-gray-200'}`}
-                  >
-                    <span>{r.label}</span>
-                    <span className="text-[10px] opacity-60">{r.w}×{r.h}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Export Info */}
-          <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-            <p className="text-[11px] text-gray-500 leading-relaxed">
-              {selectedDesign
-                ? `총 ${pages.length}장 × ${duration}초 = 약 ${(pages.length * duration).toFixed(0)}초 영상`
-                : '디자인을 선택하면 영상 길이가 표시됩니다'}
-            </p>
-            <p className="text-[10px] text-gray-400 mt-1">출력 형식: WebM (대부분 SNS 업로드 지원)</p>
-          </div>
-
-          {/* Export Button */}
-          <button
-            onClick={handleExport}
-            disabled={!selectedDesign || isExporting || pages.length === 0}
-            className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm transition-all shadow-sm ${
-              exportDone
-                ? 'bg-green-500 text-white'
-                : 'bg-gradient-to-r from-pink-500 to-rose-500 text-white hover:from-pink-600 hover:to-rose-600 disabled:opacity-50 active:scale-[0.99]'
-            }`}
-          >
-            {isExporting ? (
-              <><Loader2 size={16} className="animate-spin" /> {exportProgress || '영상 생성 중...'}</>
-            ) : exportDone ? (
-              <><Check size={16} /> 다운로드 완료!</>
-            ) : (
-              <><Download size={16} /> 영상 생성 및 다운로드</>
-            )}
-          </button>
-
-          {exportError && (
-            <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
-              <AlertCircle size={14} className="text-red-500 mt-0.5 shrink-0" />
-              <p className="text-xs text-red-600">{exportError}</p>
-            </div>
-          )}
-
-          {/* Tips */}
-          <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-            <p className="text-xs font-bold text-blue-700 mb-2">💡 사용 팁</p>
-            <ul className="text-[11px] text-blue-600 space-y-1 leading-relaxed">
-              <li>• 릴스/스토리: 9:16 비율 권장</li>
-              <li>• 피드 업로드: 4:5 또는 1:1</li>
-              <li>• 슬라이드당 2-3초가 최적</li>
-              <li>• WebM → MP4 변환: 클라우드컨버트 등 사용</li>
-            </ul>
-          </div>
-        </div>
+      {/* Video Mode Tabs */}
+      <div className="flex gap-2.5 mb-6 border-b border-gray-100 overflow-x-auto pb-1 shrink-0">
+        <button
+          onClick={() => setVideoMode('slideshow')}
+          className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+            videoMode === 'slideshow' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+          }`}
+        >
+          🎞 카드뉴스 → 슬라이드쇼
+        </button>
+        <button
+          onClick={() => setVideoMode('script')}
+          className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+            videoMode === 'script' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+          }`}
+        >
+          📝 글 → 음성 → 영상
+        </button>
+        <button
+          onClick={() => setVideoMode('prompt')}
+          className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+            videoMode === 'prompt' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+          }`}
+        >
+          ✨ 프롬프트 생성 + 영상 업로드
+        </button>
       </div>
 
-      {/* 오프스크린 고해상도 렌더 (캡처용) */}
-      {selectedDesign && (
-        <div style={{ position: 'fixed', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
-          {pages.map((page: any, i: number) => (
-            <div key={i} ref={el => { captureRefs.current[i] = el; }}>
-              <SlideFrame page={page} width={ratioInfo.w * 2} height={ratioInfo.h * 2} />
+      {videoMode === 'slideshow' && (
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
+            {/* Left: Design selection + Preview */}
+            <div className="space-y-6">
+              {/* Design selection */}
+              <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+                <h2 className="text-sm font-bold text-gray-700 mb-4">저장된 디자인 선택</h2>
+                {isLoadingDesigns ? (
+                  <div className="flex justify-center py-8"><Loader2 size={24} className="animate-spin text-gray-300" /></div>
+                ) : designs.length === 0 ? (
+                  <div className="text-center py-8 text-gray-400">
+                    <p className="text-sm">저장된 디자인이 없습니다</p>
+                    <a href="/cardnews" className="text-xs text-primary-600 hover:underline mt-1 block">카드뉴스 만들기 →</a>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+                    {designs.map(d => {
+                      const fp = d.pages_data?.[0];
+                      const isSelected = selectedDesign?.id === d.id;
+                      return (
+                        <button
+                          key={d.id}
+                          onClick={() => handleSelectDesign(d)}
+                          className={`rounded-xl overflow-hidden border-2 transition-all text-left ${isSelected ? 'border-pink-500 shadow-md' : 'border-gray-100 hover:border-gray-300'}`}
+                        >
+                          <div className="relative h-20 bg-gray-800 overflow-hidden">
+                            {fp?.bgImage && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={fp.bgImage.replace('w=800', 'w=120')} alt="" className="w-full h-full object-cover" />
+                            )}
+                            <div style={{ position: 'absolute', inset: 0, background: fp?.overlay || 'rgba(0,0,0,0.4)' }} />
+                            {isSelected && (
+                              <div className="absolute inset-0 bg-pink-500/20 flex items-center justify-center">
+                                <Check size={20} className="text-white" />
+                              </div>
+                            )}
+                            <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
+                              {d.pages_data?.length ?? 0}장
+                            </div>
+                          </div>
+                          <div className="px-2 py-1.5 bg-white">
+                            <p className="text-[11px] font-bold text-gray-700 truncate">{d.name}</p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Preview */}
+              {selectedDesign && pages.length > 0 && (
+                <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-sm font-bold text-gray-700">미리보기</h2>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setCurrentSlide(p => Math.max(0, p - 1))}
+                        disabled={currentSlide === 0}
+                        className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center hover:bg-gray-50 disabled:opacity-30 transition-colors"
+                      >
+                        <ChevronLeft size={14} />
+                      </button>
+                      <span className="text-xs font-bold text-gray-600">{currentSlide + 1} / {pages.length}</span>
+                      <button
+                        onClick={() => setCurrentSlide(p => Math.min(pages.length - 1, p + 1))}
+                        disabled={currentSlide === pages.length - 1}
+                        className="w-7 h-7 rounded-full border border-gray-200 flex items-center justify-center hover:bg-gray-50 disabled:opacity-30 transition-colors"
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                      <button
+                        onClick={() => setIsPlaying(p => !p)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${isPlaying ? 'bg-gray-900 text-white' : 'bg-pink-500 text-white hover:bg-pink-600'}`}
+                      >
+                        {isPlaying ? <><Pause size={12} /> 정지</> : <><Play size={12} /> 재생</>}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Slide preview */}
+                  <div className="flex justify-center">
+                    <div style={{ width: ratioInfo.w, height: ratioInfo.h, overflow: 'hidden', borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}>
+                      <SlideFrame page={pages[currentSlide]} width={ratioInfo.w} height={ratioInfo.h} />
+                    </div>
+                  </div>
+
+                  {/* Slide dots */}
+                  <div className="flex justify-center gap-1.5 mt-4">
+                    {pages.map((_, i) => (
+                      <button
+                        key={i}
+                        onClick={() => { setCurrentSlide(i); setIsPlaying(false); }}
+                        className={`rounded-full transition-all ${i === currentSlide ? 'w-4 h-1.5 bg-pink-500' : 'w-1.5 h-1.5 bg-gray-300 hover:bg-gray-400'}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
-          ))}
+
+            {/* Right: Settings + Export */}
+            <div className="space-y-4">
+              {/* Settings */}
+              <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+                <h2 className="text-sm font-bold text-gray-700 mb-4">영상 설정</h2>
+
+                {/* Duration */}
+                <div className="mb-5">
+                  <label className="block text-xs font-bold text-gray-600 mb-2">
+                    슬라이드 표시 시간 <span className="text-pink-600">{duration}초</span>
+                  </label>
+                  <input
+                    type="range"
+                    min={1} max={5} step={0.5}
+                    value={duration}
+                    onChange={e => setDuration(Number(e.target.value))}
+                    className="w-full accent-pink-500"
+                  />
+                  <div className="flex justify-between text-[10px] text-gray-400 mt-1">
+                    <span>1초 (빠름)</span><span>3초</span><span>5초 (천천히)</span>
+                  </div>
+                </div>
+
+                {/* Transition */}
+                <div className="mb-5">
+                  <label className="block text-xs font-bold text-gray-600 mb-2">전환 효과</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {TRANSITIONS.map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => setTransition(t.id)}
+                        className={`py-2 rounded-lg text-xs font-bold border-2 transition-all ${transition === t.id ? 'border-pink-500 bg-pink-50 text-pink-700' : 'border-gray-100 text-gray-600 hover:border-gray-200'}`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Ratio */}
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-2">비율</label>
+                  <div className="space-y-1.5">
+                    {RATIOS.map(r => (
+                      <button
+                        key={r.id}
+                        onClick={() => setRatio(r.id)}
+                        className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs border-2 transition-all ${ratio === r.id ? 'border-pink-500 bg-pink-50 text-pink-700 font-bold' : 'border-gray-100 text-gray-600 hover:border-gray-200'}`}
+                      >
+                        <span>{r.label}</span>
+                        <span className="text-[10px] opacity-60">{r.w}×{r.h}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Export Info */}
+              <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
+                <p className="text-[11px] text-gray-500 leading-relaxed">
+                  {selectedDesign
+                    ? `총 ${pages.length}장 × ${duration}초 = 약 ${(pages.length * duration).toFixed(0)}초 영상`
+                    : '디자인을 선택하면 영상 길이가 표시됩니다'}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-1">출력 형식: WebM (대부분 SNS 업로드 지원)</p>
+              </div>
+
+              {/* Export Button */}
+              <button
+                onClick={handleExport}
+                disabled={!selectedDesign || isExporting || pages.length === 0}
+                className={`w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm transition-all shadow-sm ${
+                  exportDone
+                    ? 'bg-green-500 text-white'
+                    : 'bg-gradient-to-r from-pink-500 to-rose-500 text-white hover:from-pink-600 hover:to-rose-600 disabled:opacity-50 active:scale-[0.99]'
+                }`}
+              >
+                {isExporting ? (
+                  <><Loader2 size={16} className="animate-spin" /> {exportProgress || '영상 생성 중...'}</>
+                ) : exportDone ? (
+                  <><Check size={16} /> 다운로드 완료!</>
+                ) : (
+                  <><Download size={16} /> 영상 생성 및 다운로드</>
+                )}
+              </button>
+
+              {exportError && (
+                <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
+                  <AlertCircle size={14} className="text-red-500 mt-0.5 shrink-0" />
+                  <p className="text-xs text-red-600">{exportError}</p>
+                </div>
+              )}
+
+              {/* Tips */}
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                <p className="text-xs font-bold text-blue-700 mb-2">💡 사용 팁</p>
+                <ul className="text-[11px] text-blue-600 space-y-1 leading-relaxed">
+                  <li>• 릴스/스토리: 9:16 비율 권장</li>
+                  <li>• 피드 업로드: 4:5 또는 1:1</li>
+                  <li>• 슬라이드당 2-3초가 최적</li>
+                  <li>• WebM → MP4 변환: 클라우드컨버트 등 사용</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* 오프스크린 고해상도 렌더 (캡처용) */}
+          {selectedDesign && (
+            <div style={{ position: 'fixed', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
+              {pages.map((page: any, i: number) => (
+                <div key={i} ref={el => { captureRefs.current[i] = el; }}>
+                  <SlideFrame page={page} width={ratioInfo.w * 2} height={ratioInfo.h * 2} />
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {videoMode === 'script' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <p className="text-sm text-gray-600">글 → 대본 → 음성 → 영상 (준비 중)</p>
+        </div>
+      )}
+
+      {videoMode === 'prompt' && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <p className="text-sm text-gray-600">프롬프트 생성 + 영상 업로드·이어붙이기 (준비 중)</p>
         </div>
       )}
     </div>
