@@ -16,13 +16,13 @@ function SlideFrame({ page, width, height }: { page: any; width: number; height:
       <div style={{ position: 'absolute', inset: 0 }}>
         {page.layout === 'center' && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 40px', textAlign: 'center' }}>
-            {page.title && <h1 style={{ fontSize: `${(page.titleStyle?.fontSize ?? 38) * s}px`, fontWeight: page.titleStyle?.fontWeight ?? '900', fontFamily: page.titleStyle?.fontFamily ?? 'Noto Sans KR', color: page.titleStyle?.color ?? '#fff', lineHeight: 1.2, whiteSpace: 'pre-line', margin: 0 }}>{page.title}</h1>}
-            {page.subtitle && <p style={{ fontSize: `${(page.subtitleStyle?.fontSize ?? 14) * s}px`, fontWeight: page.subtitleStyle?.fontWeight ?? '400', fontFamily: page.titleStyle?.fontFamily ?? 'Noto Sans KR', color: page.subtitleStyle?.color ?? '#e5e7eb', lineHeight: 1.6, whiteSpace: 'pre-line', marginTop: 16 }}>{page.subtitle}</p>}
+            {page.title && <h1 style={{ fontSize: `${(page.titleStyle?.fontSize ?? 38) * s}px`, fontWeight: page.titleStyle?.fontWeight ?? '900', fontFamily: page.titleStyle?.fontFamily ?? 'Noto Sans KR', color: page.titleStyle?.color ?? '#fff', lineHeight: 1.2, whiteSpace: 'pre-line', margin: 0, maxWidth: '100%', wordBreak: 'keep-all', overflowWrap: 'break-word' }}>{page.title}</h1>}
+            {page.subtitle && <p style={{ fontSize: `${(page.subtitleStyle?.fontSize ?? 14) * s}px`, fontWeight: page.subtitleStyle?.fontWeight ?? '400', fontFamily: page.titleStyle?.fontFamily ?? 'Noto Sans KR', color: page.subtitleStyle?.color ?? '#e5e7eb', lineHeight: 1.6, whiteSpace: 'pre-line', marginTop: 16, maxWidth: '100%', wordBreak: 'keep-all', overflowWrap: 'break-word' }}>{page.subtitle}</p>}
           </div>
         )}
         {(page.layout === 'bottom-left' || page.layout === 'bottom-left-list') && (
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', padding: `0 ${32 * s}px ${40 * s}px`, gap: 20 * s }}>
-            {page.title && <h2 style={{ fontSize: `${(page.titleStyle?.fontSize ?? 24) * s}px`, fontWeight: '900', fontFamily: page.titleStyle?.fontFamily ?? 'Noto Sans KR', color: page.titleStyle?.color ?? (page.accent || '#ffd700'), lineHeight: 1.2, margin: 0 }}>{page.title}</h2>}
+            {page.title && <h2 style={{ fontSize: `${(page.titleStyle?.fontSize ?? 24) * s}px`, fontWeight: '900', fontFamily: page.titleStyle?.fontFamily ?? 'Noto Sans KR', color: page.titleStyle?.color ?? (page.accent || '#ffd700'), lineHeight: 1.2, margin: 0, maxWidth: '100%', wordBreak: 'keep-all', overflowWrap: 'break-word' }}>{page.title}</h2>}
             {page.bullets && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 * s }}>
                 {page.bullets.map((b: string, i: number) => (
