@@ -82,6 +82,13 @@ export default function VideoGeneratorPage() {
   const [burnProgress, setBurnProgress] = useState('');
   const [burnError, setBurnError] = useState('');
 
+  // 모드2 TTS 테스트 상태
+  const [ttsText, setTtsText] = useState('');
+  const [ttsVoice, setTtsVoice] = useState('ko-KR-InJoonNeural');
+  const [ttsAudio, setTtsAudio] = useState('');
+  const [ttsLoading, setTtsLoading] = useState(false);
+  const [ttsError, setTtsError] = useState('');
+
   const [designs, setDesigns] = useState<any[]>([]);
   const [isLoadingDesigns, setIsLoadingDesigns] = useState(true);
   const [selectedDesign, setSelectedDesign] = useState<any>(null);
@@ -440,6 +447,36 @@ export default function VideoGeneratorPage() {
     }
   };
 
+  const handleGenerateTTS = async () => {
+    if (!ttsText.trim()) {
+      setTtsError('텍스트를 입력해주세요.');
+      return;
+    }
+
+    setTtsLoading(true);
+    setTtsError('');
+    setTtsAudio('');
+
+    try {
+      const res = await fetch('/api/generate/tts-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: ttsText, voice: ttsVoice }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        throw new Error(data.error);
+      }
+      if (data.audio) {
+        setTtsAudio(`data:audio/mp3;base64,${data.audio}`);
+      }
+    } catch (e: any) {
+      setTtsError(e.message || '음성 합성에 실패했습니다.');
+    } finally {
+      setTtsLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8">
       {/* Header */}
@@ -704,8 +741,62 @@ export default function VideoGeneratorPage() {
       )}
 
       {videoMode === 'script' && (
-        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
-          <p className="text-sm text-gray-600">글 → 대본 → 음성 → 영상 (준비 중)</p>
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm space-y-4">
+          <div>
+            <h3 className="text-sm font-bold text-gray-700 mb-1.5">📢 한국어 음성 생성 테스트 (Edge-TTS)</h3>
+            <p className="text-xs text-gray-400 mb-4">텍스트를 입력하고 목소리를 선택한 뒤 음성을 테스트 생성해보세요.</p>
+          </div>
+
+          <div className="space-y-3">
+            <textarea
+              value={ttsText}
+              onChange={e => setTtsText(e.target.value)}
+              placeholder="음성으로 변환할 내용을 입력하세요"
+              rows={4}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none resize-none"
+            />
+            
+            <div className="flex flex-col sm:flex-row gap-3 items-end">
+              <div className="w-full sm:w-auto space-y-1.5">
+                <label className="block text-xs font-bold text-gray-500">목소리 선택</label>
+                <select
+                  value={ttsVoice}
+                  onChange={e => setTtsVoice(e.target.value)}
+                  className="w-full sm:w-48 px-3 py-2.5 border border-gray-200 rounded-xl text-xs bg-white cursor-pointer"
+                >
+                  <option value="ko-KR-InJoonNeural">👨 인준 (InJoon - 남성)</option>
+                  <option value="ko-KR-SunHiNeural">👩 선희 (SunHi - 여성)</option>
+                  <option value="ko-KR-HyunsuNeural">👨 현수 (Hyunsu - 남성)</option>
+                </select>
+              </div>
+
+              <button
+                onClick={handleGenerateTTS}
+                disabled={ttsLoading || !ttsText.trim()}
+                className="w-full sm:flex-1 py-3 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold text-sm hover:from-pink-600 hover:to-rose-600 disabled:opacity-40 transition-all shadow-sm active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {ttsLoading ? (
+                  <><Loader2 size={16} className="animate-spin" /> 음성 생성 중...</>
+                ) : (
+                  <><Wand2 size={16} /> 음성 생성 테스트</>
+                )}
+              </button>
+            </div>
+
+            {ttsError && (
+              <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
+                <AlertCircle size={14} className="text-red-500 mt-0.5 shrink-0" />
+                <p className="text-xs text-red-600">{ttsError}</p>
+              </div>
+            )}
+
+            {ttsAudio && (
+              <div className="pt-4 border-t border-gray-100 space-y-2">
+                <label className="block text-xs font-bold text-gray-600">🎧 생성된 음성 재생</label>
+                <audio src={ttsAudio} controls className="w-full" />
+              </div>
+            )}
+          </div>
         </div>
       )}
 
