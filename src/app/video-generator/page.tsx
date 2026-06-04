@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle, Wand2, Copy } from 'lucide-react';
+import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle, Wand2, Copy, Upload, Plus, Trash2 } from 'lucide-react';
 
 // ─── 슬라이드 렌더러 (영상 캡처용) ──────────────────────────────────────────
 function SlideFrame({ page, width, height }: { page: any; width: number; height: number }) {
@@ -73,6 +73,15 @@ export default function VideoGeneratorPage() {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [copiedAll, setCopiedAll] = useState(false);
 
+  // 모드3 영상 업로드 및 자막 굽기 상태
+  const [uploadedVideo, setUploadedVideo] = useState<string>('');
+  const [videoFileName, setVideoFileName] = useState<string>('');
+  const [captions, setCaptions] = useState<{ text: string; start: number; end: number }[]>([]);
+  const [subtitleStyle] = useState({ fontSize: 48, color: '#fff', bottom: 120 });
+  const [burning, setBurning] = useState(false);
+  const [burnProgress, setBurnProgress] = useState('');
+  const [burnError, setBurnError] = useState('');
+
   const [designs, setDesigns] = useState<any[]>([]);
   const [isLoadingDesigns, setIsLoadingDesigns] = useState(true);
   const [selectedDesign, setSelectedDesign] = useState<any>(null);
@@ -88,6 +97,7 @@ export default function VideoGeneratorPage() {
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const captureRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const videoElRef = useRef<HTMLVideoElement | null>(null);
 
   const ratioInfo = RATIOS.find(r => r.id === ratio) ?? RATIOS[0];
   const pages: any[] = selectedDesign?.pages_data ?? [];
@@ -300,6 +310,133 @@ export default function VideoGeneratorPage() {
       setPromptError(e.message || '프롬프트 생성 실패');
     } finally {
       setPromptLoading(false);
+    }
+  };
+
+  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    setUploadedVideo(url);
+    setVideoFileName(file.name);
+    setBurnError('');
+    setBurnProgress('');
+  };
+
+  const handleBurnSubtitle = async () => {
+    const video = videoElRef.current;
+    if (!video || !uploadedVideo) return;
+
+    setBurning(true);
+    setBurnError('');
+    setBurnProgress('인코딩 시작 대기 중...');
+
+    try {
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+
+      // MediaRecorder setup
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : 'video/webm';
+      const stream = canvas.captureStream(30);
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4000000 });
+      const chunks: Blob[] = [];
+      
+      recorder.ondataavailable = e => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+
+      const recordingDone = new Promise<void>(resolve => {
+        recorder.onstop = () => resolve();
+      });
+
+      // 영상 처음으로 이동 및 재생 대기
+      video.currentTime = 0;
+      video.muted = true; // 브라우저 자동 재생 정책 및 녹화 중 소리 방지
+      await video.play();
+
+      recorder.start(100);
+
+      // 자막 스타일
+      const fontSize = subtitleStyle.fontSize * (w / 1280); // 가변 폰트 크기 계산
+      const textBottom = subtitleStyle.bottom * (h / 720); // 가변 위치 계산
+      ctx.font = `bold ${fontSize}px Noto Sans KR, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+
+      let active = true;
+      const drawLoop = () => {
+        if (!active) return;
+
+        // 프레임 복사
+        ctx.drawImage(video, 0, 0, w, h);
+
+        // 자막 렌더링
+        const t = video.currentTime;
+        const currentCaption = captions.find(c => {
+          const start = Number(c.start);
+          const end = Number(c.end);
+          if (isNaN(start) || isNaN(end)) return false;
+          return t >= start && t <= end;
+        });
+
+        if (currentCaption && currentCaption.text.trim()) {
+          const text = currentCaption.text;
+          const x = w / 2;
+          const y = h - textBottom;
+
+          // 검은 외곽선
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = Math.max(4, w / 150);
+          ctx.lineJoin = 'round';
+          ctx.strokeText(text, x, y);
+
+          // 흰 글씨
+          ctx.fillStyle = subtitleStyle.color;
+          ctx.fillText(text, x, y);
+        }
+
+        // 진척도
+        const pct = video.duration ? Math.min(100, Math.round((t / video.duration) * 100)) : 0;
+        setBurnProgress(`자막 굽는 중... (${pct}%)`);
+
+        if (video.ended || video.paused) {
+          active = false;
+          recorder.stop();
+          return;
+        }
+
+        requestAnimationFrame(() => {
+          drawLoop();
+        });
+      };
+
+      // 루프 시작
+      drawLoop();
+
+      await recordingDone;
+
+      // 파일 다운로드
+      setBurnProgress('파일 저장 중...');
+      const blob = new Blob(chunks, { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const baseName = videoFileName ? videoFileName.substring(0, videoFileName.lastIndexOf('.')) || videoFileName : 'video';
+      a.download = `${baseName}_subtitled.webm`;
+      a.click();
+      URL.revokeObjectURL(url);
+
+      setBurnProgress('자막 굽기 완료!');
+    } catch (err: any) {
+      setBurnError(err.message || '인코딩 중 에러가 발생했습니다.');
+    } finally {
+      setBurning(false);
     }
   };
 
@@ -755,6 +892,148 @@ export default function VideoGeneratorPage() {
               </div>
             </div>
           )}
+
+          {/* 영상 업로드 및 자막 굽기 영역 */}
+          <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm space-y-5">
+            <div>
+              <h3 className="text-sm font-bold text-gray-700 mb-1.5 flex items-center gap-1.5">
+                🎬 영상 업로드 & 자막 굽기
+              </h3>
+              <p className="text-[11px] text-gray-400 leading-relaxed mb-3">
+                외부 도구(Seedance/Kling 등)에서 만든 영상을 올려 자막을 입히세요.
+                출력은 WebM 형식이며, 브라우저 렌더링 재인코딩 방식이므로 원본 음성은 포함되지 않습니다.
+              </p>
+
+              {/* 업로드 Input */}
+              <div className="relative border-2 border-dashed border-gray-200 rounded-xl p-6 bg-gray-50 hover:bg-gray-100/50 transition-colors flex flex-col items-center justify-center text-center cursor-pointer group">
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={handleVideoUpload}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+                <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center text-gray-400 group-hover:text-pink-500 transition-colors shadow-sm mb-2">
+                  <Upload size={18} />
+                </div>
+                <p className="text-xs font-bold text-gray-600">
+                  {videoFileName ? `선택된 파일: ${videoFileName}` : '비디오 파일 업로드'}
+                </p>
+                <p className="text-[10px] text-gray-400 mt-0.5">클릭하거나 비디오 파일을 드래그하여 놓으세요</p>
+              </div>
+            </div>
+
+            {/* 업로드된 비디오 미리보기 */}
+            {uploadedVideo && (
+              <div className="space-y-4">
+                <div className="flex justify-center bg-gray-900 rounded-xl p-2 max-h-[360px] overflow-hidden">
+                  <video
+                    ref={videoElRef}
+                    src={uploadedVideo}
+                    controls
+                    className="max-h-[340px] rounded-lg"
+                  />
+                </div>
+
+                {/* 자막 리스트 편집 */}
+                <div className="space-y-3.5 pt-2 border-t border-gray-100">
+                  <div className="flex justify-between items-center">
+                    <label className="block text-xs font-bold text-gray-600">자막 목록 ({captions.length}개)</label>
+                    <button
+                      onClick={() => setCaptions(prev => [...prev, { text: '', start: 0, end: 3 }])}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-gray-200 text-[10px] font-bold text-gray-600 hover:bg-gray-50 transition-colors cursor-pointer"
+                    >
+                      <Plus size={10} /> 자막 줄 추가
+                    </button>
+                  </div>
+
+                  {captions.length === 0 ? (
+                    <div className="text-center py-6 bg-gray-50 rounded-xl border border-gray-100 text-xs text-gray-400">
+                      추가된 자막이 없습니다. 위의 버튼을 눌러 자막을 추가해보세요.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                      {captions.map((caption, idx) => (
+                        <div key={idx} className="flex gap-2 items-center bg-gray-50 p-2.5 rounded-xl border border-gray-100">
+                          <input
+                            type="text"
+                            value={caption.text}
+                            onChange={e => {
+                              const text = e.target.value;
+                              setCaptions(prev => prev.map((c, i) => i === idx ? { ...c, text } : c));
+                            }}
+                            placeholder="자막 내용을 입력하세요"
+                            className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-pink-300"
+                          />
+                          <div className="flex items-center gap-1 shrink-0">
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder="시작(초)"
+                              value={caption.start || 0}
+                              onChange={e => {
+                                const start = parseFloat(e.target.value) || 0;
+                                setCaptions(prev => prev.map((c, i) => i === idx ? { ...c, start } : c));
+                              }}
+                              className="w-16 px-2 py-1.5 border border-gray-200 rounded-lg text-xs text-center bg-white"
+                            />
+                            <span className="text-[10px] text-gray-400">~</span>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              placeholder="종료(초)"
+                              value={caption.end || 0}
+                              onChange={e => {
+                                const end = parseFloat(e.target.value) || 0;
+                                setCaptions(prev => prev.map((c, i) => i === idx ? { ...c, end } : c));
+                              }}
+                              className="w-16 px-2 py-1.5 border border-gray-200 rounded-lg text-xs text-center bg-white"
+                            />
+                          </div>
+                          <button
+                            onClick={() => setCaptions(prev => prev.filter((_, i) => i !== idx))}
+                            className="p-1.5 hover:bg-red-50 text-red-500 rounded-lg transition-colors cursor-pointer shrink-0"
+                            title="자막 삭제"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 굽기 버튼 */}
+                <div className="pt-4 border-t border-gray-100 flex flex-col sm:flex-row gap-3 items-center">
+                  <button
+                    onClick={handleBurnSubtitle}
+                    disabled={burning || captions.length === 0}
+                    className="w-full py-3 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold text-sm hover:from-pink-600 hover:to-rose-600 disabled:opacity-40 transition-all shadow-sm active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    {burning ? (
+                      <><Loader2 size={16} className="animate-spin" /> {burnProgress || '자막 굽는 중...'}</>
+                    ) : (
+                      <><Wand2 size={16} /> 자막 입혀서 영상 굽기</>
+                    )}
+                  </button>
+                </div>
+
+                {burnError && (
+                  <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
+                    <AlertCircle size={14} className="text-red-500 mt-0.5 shrink-0" />
+                    <p className="text-xs text-red-600">{burnError}</p>
+                  </div>
+                )}
+                {burning && burnProgress && !burnError && (
+                  <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-100 text-blue-700 rounded-xl text-xs font-semibold">
+                    <Loader2 size={14} className="animate-spin text-blue-500 shrink-0" />
+                    <span>{burnProgress}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
