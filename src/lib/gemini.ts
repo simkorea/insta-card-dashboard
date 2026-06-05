@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { callOpenRouter } from '@/lib/ai/openrouter';
 
 const PRIMARY_MODEL = 'gemini-2.5-flash';
 const FALLBACK_MODEL = 'gemini-2.5-flash-lite';
@@ -65,7 +66,18 @@ export async function generateWithRetry(
     // 503 or 429: wait 5 s then retry with fallback model
     await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
 
-    const result = await makeModel(FALLBACK_MODEL).generateContent(input);
-    return result.response.text();
+    try {
+      const result = await makeModel(FALLBACK_MODEL).generateContent(input);
+      return result.response.text();
+    } catch (fallbackErr: unknown) {
+      if (typeof input === 'string') {
+        try {
+          return await callOpenRouter(input, options.systemInstruction ? { system: options.systemInstruction } : undefined);
+        } catch {
+          throw fallbackErr;
+        }
+      }
+      throw fallbackErr;
+    }
   }
 }
