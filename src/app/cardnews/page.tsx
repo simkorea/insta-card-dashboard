@@ -965,6 +965,7 @@ export default function CardNewsPage() {
       else if (type === 'trend') body.originalText = trendInput;
       else body.originalText = prompt;
       body.templateTitle = selectedTemplate?.title || '';
+      body.slideCount = quickSlideAuto ? 'auto' : slideCountNumber;
 
       const res = await fetch('/api/generate/unified', {
         method: 'POST',
