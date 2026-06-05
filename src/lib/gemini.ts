@@ -13,6 +13,11 @@ function is503(err: unknown): boolean {
   );
 }
 
+function is429(err: unknown): boolean {
+  const msg = String((err as any)?.message ?? err ?? '');
+  return msg.includes('429') || msg.includes('Too Many Requests') || msg.includes('RESOURCE_EXHAUSTED');
+}
+
 export function toKoreanError(err: unknown): string {
   const msg = String((err as any)?.message ?? err ?? '');
   if (is503(err)) {
@@ -39,7 +44,7 @@ export function toKoreanError(err: unknown): string {
 // - array of parts (mixed text + image)
 export async function generateWithRetry(
   input: Parameters<ReturnType<GoogleGenerativeAI['getGenerativeModel']>['generateContent']>[0],
-  options: { systemInstruction?: string; generationConfig?: any } = {}
+  options: { systemInstruction?: string; generationConfig?: any; tools?: any } = {}
 ): Promise<string> {
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -47,6 +52,7 @@ export async function generateWithRetry(
     genAI.getGenerativeModel({
       model: modelName,
       ...(options.systemInstruction ? { systemInstruction: options.systemInstruction } : {}),
+      ...(options.tools ? { tools: options.tools } : {}),
       generationConfig: options.generationConfig,
     });
 
@@ -54,9 +60,9 @@ export async function generateWithRetry(
     const result = await makeModel(PRIMARY_MODEL).generateContent(input);
     return result.response.text();
   } catch (primaryErr: unknown) {
-    if (!is503(primaryErr)) throw primaryErr;
+    if (!is503(primaryErr) && !is429(primaryErr)) throw primaryErr;
 
-    // 503: wait 5 s then retry with fallback model
+    // 503 or 429: wait 5 s then retry with fallback model
     await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
 
     const result = await makeModel(FALLBACK_MODEL).generateContent(input);

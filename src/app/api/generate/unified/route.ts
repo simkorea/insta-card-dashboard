@@ -58,12 +58,14 @@ export async function POST(request: Request) {
       const data = JSON.parse(text);
       return NextResponse.json(data);
     } catch {
+      console.error('[unified] JSON 파싱 실패. 원본 응답:', text);
       return NextResponse.json({
         error: 'AI 응답 데이터 형식이 올바르지 않습니다. 다시 시도해 주세요.',
         raw: text.slice(0, 100),
       }, { status: 500 });
     }
   } catch (error: any) {
+    console.error('[unified] 생성 실패 원본 에러:', error);
     return NextResponse.json({ error: toKoreanError(error) }, { status: 500 });
   }
 }
