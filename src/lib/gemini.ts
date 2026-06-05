@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { callOpenRouter } from '@/lib/ai/openrouter';
+import { callAI } from '@/lib/ai/openrouter';
 
 const PRIMARY_MODEL = 'gemini-2.5-flash';
 const FALLBACK_MODEL = 'gemini-2.5-flash-lite';
@@ -72,7 +72,10 @@ export async function generateWithRetry(
     } catch (fallbackErr: unknown) {
       if (typeof input === 'string') {
         try {
-          return await callOpenRouter(input, options.systemInstruction ? { system: options.systemInstruction } : undefined);
+          return await callAI({
+            prompt: input,
+            system: options.systemInstruction,
+          });
         } catch {
           throw fallbackErr;
         }

@@ -1,4 +1,5 @@
 import { generateWithRetry, toKoreanError } from '@/lib/gemini';
+import { callAI } from '@/lib/ai/openrouter';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -50,7 +51,11 @@ export async function POST(request: Request) {
 
 내용: ${inputContent}`;
 
-    let text = await generateWithRetry(prompt);
+    // let text = await generateWithRetry(prompt);
+    let text = await callAI({
+      prompt,
+      model: 'anthropic/claude-haiku-4.5',
+    });
 
     try {
       if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();

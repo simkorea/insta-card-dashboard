@@ -45,6 +45,7 @@ export default function DashboardPage() {
   const [trendIdx, setTrendIdx] = useState(0);
   const [userEmail, setUserEmail] = useState('');
   const [greeting, setGreeting] = useState('안녕하세요');
+  const [isGeneratingBriefing, setIsGeneratingBriefing] = useState(false);
 
   useEffect(() => {
     const h = new Date().getHours();
@@ -71,9 +72,27 @@ export default function DashboardPage() {
     }
   };
 
+  const triggerBriefing = async () => {
+    setIsGeneratingBriefing(true);
+    try {
+      const res = await fetch('/api/briefing');
+      const json = await res.json();
+      if (json.success) {
+        fetchDashboard();
+      } else {
+        alert("브리핑 생성 실패: " + json.error);
+      }
+    } catch (err: any) {
+      alert("에러가 발생했습니다: " + err.message);
+    } finally {
+      setIsGeneratingBriefing(false);
+    }
+  };
+
   const stats = data?.stats ?? {};
   const recentDesigns: any[] = data?.recentDesigns ?? [];
   const upcomingPosts: any[] = data?.upcomingPosts ?? [];
+  const briefing = data?.briefing;
 
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-7 pb-20 md:pb-8">
@@ -141,7 +160,101 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
 
         {/* 최근 디자인 */}
-        <div>
+        <div className="space-y-6">
+          {/* ── 오늘의 브리핑 ────────────────────────────────────────────────── */}
+          {isLoading ? (
+            <div className="bg-white border border-gray-100 rounded-3xl p-5 md:p-6 shadow-sm h-[200px] animate-pulse flex flex-col justify-between">
+              <div className="h-6 w-1/3 bg-gray-200 rounded" />
+              <div className="space-y-2">
+                <div className="h-4 w-full bg-gray-200 rounded" />
+                <div className="h-4 w-5/6 bg-gray-200 rounded" />
+              </div>
+            </div>
+          ) : briefing ? (
+            <div className="bg-white border border-gray-100 rounded-3xl p-5 md:p-6 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-violet-100 flex items-center justify-center text-violet-600">
+                    <FileText size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900">오늘의 일일 브리핑</h3>
+                    <p className="text-[10px] text-gray-400 mt-0.5">매일 오전 8시 자동 업데이트</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <span className="px-2.5 py-1 bg-violet-50 text-violet-700 text-[10px] font-bold rounded-lg border border-violet-100">
+                    📅 {briefing.date}
+                  </span>
+                  <button 
+                    onClick={triggerBriefing} 
+                    disabled={isGeneratingBriefing}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-600 disabled:opacity-50 text-[10px] font-semibold rounded-lg border border-gray-200 transition-colors cursor-pointer"
+                  >
+                    <RefreshCw size={10} className={isGeneratingBriefing ? 'animate-spin' : ''} />
+                    수동 갱신
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                {/* 부동산 뉴스 요약 */}
+                <div className="space-y-2">
+                  <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">🏢 부동산 정책 & 시장 브리핑</h4>
+                  <div className="bg-gray-50/50 rounded-2xl p-4 border border-gray-100 text-xs text-gray-600 leading-relaxed whitespace-pre-wrap max-h-[160px] overflow-y-auto">
+                    {briefing.real_estate_summary}
+                  </div>
+                </div>
+
+                {/* 광고 성과 리포트 */}
+                <div className="space-y-2">
+                  <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">📢 소셜 광고 성과 (Meta Ads)</h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-blue-50/40 border border-blue-100/50 rounded-xl p-3">
+                      <p className="text-[10px] font-semibold text-blue-500 leading-none mb-1">지출액</p>
+                      <p className="text-xs font-black text-gray-950">{(briefing.ad_performance?.spend ?? 0).toLocaleString()}원</p>
+                    </div>
+                    <div className="bg-emerald-50/40 border border-emerald-100/50 rounded-xl p-3">
+                      <p className="text-[10px] font-semibold text-emerald-500 leading-none mb-1">획득 리드</p>
+                      <p className="text-xs font-black text-gray-950">{(briefing.ad_performance?.leads ?? 0).toLocaleString()}건</p>
+                      <p className="text-[9px] text-gray-400 mt-0.5">CPL: {(briefing.ad_performance?.cpl ?? 0).toLocaleString()}원</p>
+                    </div>
+                    <div className="bg-violet-50/40 border border-violet-100/50 rounded-xl p-3">
+                      <p className="text-[10px] font-semibold text-violet-500 leading-none mb-1">노출수</p>
+                      <p className="text-xs font-black text-gray-950">{(briefing.ad_performance?.impressions ?? 0).toLocaleString()}회</p>
+                    </div>
+                    <div className="bg-amber-50/40 border border-amber-100/50 rounded-xl p-3">
+                      <p className="text-[10px] font-semibold text-amber-500 leading-none mb-1">클릭수</p>
+                      <p className="text-xs font-black text-gray-950">{(briefing.ad_performance?.clicks ?? 0).toLocaleString()}회</p>
+                      <p className="text-[9px] text-gray-400 mt-0.5">CTR: {((briefing.ad_performance?.ctr ?? 0) * 100).toFixed(2)}%</p>
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-gray-400 italic text-right mt-1">※ Meta Ads API 연동 상태: Stub 모드 활성화됨</p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-white border border-gray-100 rounded-3xl p-5 md:p-6 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gray-50 border border-gray-100 flex items-center justify-center text-xl shadow-sm shrink-0">
+                  📊
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-gray-800">오늘 생성된 일일 브리핑이 아직 없습니다</h3>
+                  <p className="text-[11px] text-gray-500 mt-0.5">매일 오전 8시(KST)에 자동으로 생성되거나, 지금 수동으로 생성할 수 있습니다.</p>
+                </div>
+              </div>
+              <button
+                onClick={triggerBriefing}
+                disabled={isGeneratingBriefing}
+                className="self-start sm:self-auto inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 active:scale-[0.98] transition-all text-white text-xs font-bold rounded-xl shadow-sm disabled:opacity-50 shrink-0 cursor-pointer"
+              >
+                <RefreshCw size={12} className={isGeneratingBriefing ? 'animate-spin' : ''} />
+                지금 브리핑 생성하기
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-bold text-gray-900">최근 작업</h2>
             <div className="flex items-center gap-2">
