@@ -2158,11 +2158,13 @@ const GOOGLE_FONTS_URL =
   '&display=swap';
 
 // ─── Text Panel ───────────────────────────────────────────────────────────────
-function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll }: {
+function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onUpdatePageData }: {
   layer: CanvasLayer;
   onDeselect: () => void;
   onUpdate: (content: string, style: TextStyle) => void;
   onApplyStyleAll?: (layerId: number, style: TextStyle) => void;
+  pageData?: PageData;
+  onUpdatePageData?: (pageId: string, changes: Partial<PageData>) => void;
 }) {
   const [fontSize, setFontSize] = useState(layer.style?.fontSize ?? 38);
   const [fontWeight, setFontWeight] = useState(WEIGHT_LABEL[layer.style?.fontWeight ?? '900'] ?? 'B');
@@ -2173,6 +2175,41 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll }: {
   const [align, setAlign] = useState<'left' | 'center' | 'right'>(layer.style?.align ?? 'left');
   const [textContent, setTextContent] = useState(layer.content || '');
   const [viralHooks, setViralHooks] = useState<string[]>([]);
+  const [loadingHookIndex, setLoadingHookIndex] = useState<number | null>(null);
+
+  const handleHookClick = async (hook: string, index: number) => {
+    if (loadingHookIndex !== null) return;
+
+    // 1. 즉시 텍스트 버퍼 교체 및 캔버스 제목 변경 (사용성 향상)
+    setTextContent(hook);
+    if (pageData && onUpdatePageData) {
+      onUpdatePageData(pageData.id, { title: hook });
+    }
+
+    setLoadingHookIndex(index);
+    try {
+      const draft = typeof window !== 'undefined' ? localStorage.getItem('cardNewsDraft') : null;
+      const topic = draft || pageData?.title || undefined;
+
+      const res = await fetch('/api/generate/hook-body', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hook, topic }),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        alert(`본문 생성 실패: ${data.error}`);
+      } else if (data.body && pageData && onUpdatePageData) {
+        // 2. 표지 본문(subtitle)도 AI 생성 결과로 함께 교체
+        onUpdatePageData(pageData.id, { subtitle: data.body });
+      }
+    } catch (err) {
+      alert('본문 생성 중 오류가 발생했습니다.');
+    } finally {
+      setLoadingHookIndex(null);
+    }
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem('cardNewsHooks');
@@ -2226,15 +2263,30 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll }: {
               <span className="text-[11px] font-bold text-primary-700">추천 바이럴 훅 (클릭 시 교체)</span>
             </div>
             <div className="space-y-1.5">
-              {viralHooks.map((hook, i) => (
-                <button 
-                  key={i}
-                  onClick={() => setTextContent(hook)}
-                  className="w-full text-left text-[11px] bg-white border border-primary-100 p-2 rounded-lg hover:border-primary-400 hover:text-primary-700 transition-all text-gray-600 leading-snug shadow-sm"
-                >
-                  {hook}
-                </button>
-              ))}
+              {viralHooks.map((hook, i) => {
+                const isLoading = loadingHookIndex === i;
+                return (
+                  <button 
+                    key={i}
+                    onClick={() => handleHookClick(hook, i)}
+                    disabled={loadingHookIndex !== null}
+                    className={`w-full text-left text-[11px] bg-white border p-2 rounded-lg hover:border-primary-400 hover:text-primary-700 transition-all leading-snug shadow-sm flex items-center justify-between gap-2 ${
+                      isLoading ? 'border-primary-400 text-primary-700 bg-primary-50/50' : 'border-primary-100 text-gray-600'
+                    } disabled:opacity-75`}
+                  >
+                    <span className="flex-1">{hook}</span>
+                    {isLoading && (
+                      <span className="flex items-center gap-1 text-[10px] text-primary-600 font-bold shrink-0">
+                        <svg className="animate-spin h-3.5 w-3.5 text-primary-600" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        생성 중...
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -4247,6 +4299,8 @@ export default function EditorPage() {
                   onDeselect={handleDeselect}
                   onUpdate={(content, style) => updatePageField(pageData.id, selectedLayer.id, content, style)}
                   onApplyStyleAll={applyStyleToAllPages}
+                  pageData={pageData}
+                  onUpdatePageData={updatePageData}
                 />
               </div>
             )}
@@ -4355,6 +4409,8 @@ export default function EditorPage() {
                 onDeselect={handleDeselect}
                 onUpdate={(content, style) => updatePageField(pageData.id, selectedLayer.id, content, style)}
                 onApplyStyleAll={applyStyleToAllPages}
+                pageData={pageData}
+                onUpdatePageData={updatePageData}
               />
             )}
           </div>
@@ -5051,6 +5107,8 @@ function FullscreenEditor({
                   layer={selectedLayer}
                   onDeselect={handleDeselect}
                   onUpdate={(content, style) => onUpdatePage(pageData.id, selectedLayer.id, content, style)}
+                  pageData={pageData}
+                  onUpdatePageData={onApplyPageChanges}
                 />
               </div>
             )}
