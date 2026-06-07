@@ -1021,6 +1021,35 @@ export default function CardNewsPage() {
   const handleGenerateFromUrl = () => handleGenerateUnified('url');
   const handleGenerateFromTrend = () => handleGenerateUnified('trend');
 
+  const handleConvertToBlog = () => {
+    if (!generatedBlogPost) {
+      alert('먼저 카드뉴스를 생성해주세요.');
+      return;
+    }
+    
+    let images: string[] = [];
+    try {
+      const rawData = localStorage.getItem('cardNewsData');
+      if (rawData) {
+        const parsed = JSON.parse(rawData);
+        if (Array.isArray(parsed)) {
+          images = parsed
+            .map((item: any) => item.backgroundImage || item.bgImage || '')
+            .filter((url: string) => url.trim() !== '');
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse cardNewsData for blog conversion:', e);
+    }
+    
+    localStorage.setItem('convertSourceBlog', JSON.stringify({
+      content: generatedBlogPost,
+      images: images,
+    }));
+    
+    router.push('/blog-generator?from=cardnews');
+  };
+
   const renderStepper = (steps: string[], currentStep: number) => {
     return (
       <div className="flex justify-center items-center py-8">
@@ -2502,13 +2531,19 @@ export default function CardNewsPage() {
                           >📝 블로그 포스팅</button>
                         </div>
                         {resultTab === 'blog' && (
-                          <button 
-                            onClick={() => {
-                              navigator.clipboard.writeText(generatedBlogPost);
-                              alert('블로그 글이 클립보드에 복사되었습니다.');
-                            }}
-                            className="text-xs font-bold text-primary-600 hover:underline"
-                          >복사하기</button>
+                          <div className="flex gap-3">
+                            <button 
+                              onClick={() => {
+                                navigator.clipboard.writeText(generatedBlogPost);
+                                alert('블로그 글이 클립보드에 복사되었습니다.');
+                              }}
+                              className="text-xs font-bold text-primary-600 hover:underline"
+                            >복사하기</button>
+                            <button 
+                              onClick={handleConvertToBlog}
+                              className="text-xs font-bold text-primary-600 hover:underline"
+                            >블로그로 전환 →</button>
+                          </div>
                         )}
                       </div>
 

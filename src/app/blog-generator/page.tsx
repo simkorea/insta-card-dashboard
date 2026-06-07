@@ -204,6 +204,34 @@ export default function BlogGeneratorPage() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const searchParams = new URLSearchParams(window.location.search);
+    if (searchParams.has('postId')) return;
+
+    const rawData = localStorage.getItem('convertSourceBlog');
+    if (!rawData) return;
+
+    try {
+      const parsed = JSON.parse(rawData);
+      if (parsed) {
+        if (parsed.content) {
+          setTopic(parsed.content);
+        }
+        if (parsed.images && Array.isArray(parsed.images)) {
+          const urls = parsed.images;
+          setImages(prev => prev.map((img, idx) =>
+            urls[idx] ? { ...img, url: urls[idx], source: 'upload' } : img
+          ));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse convertSourceBlog from localStorage:', e);
+    } finally {
+      localStorage.removeItem('convertSourceBlog');
+    }
+  }, []);
+
+  useEffect(() => {
     fetch('/api/brand-persona')
       .then(res => res.json())
       .then(data => {
