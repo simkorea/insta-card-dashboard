@@ -343,11 +343,44 @@ export default function BlogGeneratorPage() {
       alert("다운로드할 이미지가 등록된 슬롯이 없습니다.");
       return;
     }
-    for (let i = 0; i < activeImages.length; i++) {
-      const img = activeImages[i];
-      const index = images.findIndex(x => x.id === img.id);
-      await handleDownloadSingle(img.url, index, img.label);
-      await new Promise(r => setTimeout(r, 300));
+
+    try {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}${mm}${dd}`;
+
+      const zip = new JSZip();
+
+      for (let i = 0; i < activeImages.length; i++) {
+        const img = activeImages[i];
+        const index = images.findIndex(x => x.id === img.id);
+        const label = img.label.trim();
+        const cleanLabel = label ? label.replace(/[\/\\:*?"<>|]/g, '_') : `image_${index + 1}`;
+        const imgFileName = `${index + 1}_${cleanLabel}.jpg`;
+
+        try {
+          const proxyUrl = img.url.startsWith('http')
+            ? `/api/proxy-image?url=${encodeURIComponent(img.url)}`
+            : img.url;
+          const res = await fetch(proxyUrl);
+          if (!res.ok) throw new Error('Fetch failed');
+          const blob = await res.blob();
+          zip.file(imgFileName, blob);
+        } catch (err) {
+          console.error(`Failed to pack image ${imgFileName}:`, err);
+        }
+      }
+
+      const content = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `${dateStr}_images.zip`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (err: any) {
+      alert('이미지 전체 다운로드 실패: ' + err.message);
     }
   };
 
@@ -362,7 +395,13 @@ export default function BlogGeneratorPage() {
       const dateStr = `${yyyy}${mm}${dd}`;
 
       const rawTopic = topic.trim() || result.title.trim() || 'blog';
-      const cleanTopic = rawTopic.replace(/[\/\\:*?"<>|]/g, '_').substring(0, 30);
+      const cleanTopic = rawTopic
+        .replace(/[\r\n]+/g, ' ')           // 줄바꿈을 공백으로
+        .replace(/[\/\\:*?"<>|\[\]]/g, '_')  // 윈도우 금지문자 + 대괄호 제거
+        .replace(/\s+/g, '_')                // 연속 공백을 _ 로
+        .replace(/_+/g, '_')                 // 연속 _ 를 하나로
+        .replace(/^_+|_+$/g, '')             // 앞뒤 _ 제거
+        .substring(0, 30) || 'blog';         // 30자 제한, 비면 'blog'
       const baseFileName = `${dateStr}_${cleanTopic}`;
 
       const zip = new JSZip();
