@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 
 [지침]
 1. cardNews: ${slideInstruction}.
-2. blogPost: 마크다운 형식을 지키되, 줄바꿈은 \\n으로 처리하여 JSON 형식을 깨뜨리지 말 것.
+2. blogPost: 마크다운 형식을 지키되, 줄바꿈은 \\n으로 처리하여 JSON 형식을 깨뜨리지 말 것. 블로그 본문은 공백 포함 800자 이내로 핵심만 간결하게 작성할 것 (상세한 긴 글은 불필요, 카드뉴스 요점 위주).
 3. imageKeyword: Unsplash 검색용 영어 키워드. 템플릿 스타일 '${templateTitle}' 반영.
 
 내용: ${inputContent}`;
@@ -60,6 +60,7 @@ export async function POST(request: Request) {
     let text = await callAI({
       prompt,
       model: 'anthropic/claude-haiku-4.5',
+      maxTokens: 4000,
     });
 
     try {

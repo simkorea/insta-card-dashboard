@@ -10,10 +10,12 @@ export async function callAI({
   prompt,
   model = "deepseek/deepseek-v4-flash",
   system,
+  maxTokens,
 }: {
   prompt: string;
   model?: string;
   system?: string;
+  maxTokens?: number;
 }): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -31,6 +33,7 @@ export async function callAI({
     const response = await openai.chat.completions.create({
       model,
       messages,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
     });
 
     const content = response.choices[0]?.message?.content;
