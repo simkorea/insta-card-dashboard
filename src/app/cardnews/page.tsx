@@ -221,7 +221,7 @@ export default function CardNewsPage() {
   const [quickSlideAuto, setQuickSlideAuto] = useState(true);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
-  const [inputMode, setInputMode] = useState<'text' | 'url' | 'trend' | 'smart'>('text');
+  const [inputMode, setInputMode] = useState<'text' | 'url' | 'trend' | 'smart' | 'step9'>('text');
   const [urlInput, setUrlInput] = useState('');
   const [trendInput, setTrendInput] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -238,6 +238,13 @@ export default function CardNewsPage() {
   const [smartSlideCount, setSmartSlideCount] = useState(7);
   const [smartGenerating, setSmartGenerating] = useState(false);
   const [smartStep, setSmartStep] = useState('');
+
+  // 9단계 정밀 제작 관련 상태
+  const [step9Input, setStep9Input] = useState('');
+  const [step9Category, setStep9Category] = useState('');
+  const [step9Topics, setStep9Topics] = useState<string[]>([]);
+  const [step9SelectedTopic, setStep9SelectedTopic] = useState('');
+  const [isSuggestingTopics, setIsSuggestingTopics] = useState(false);
 
   // Tab: 브랜드 키트 (Brand Kit)
   const [brandKit, setBrandKit] = useState<{ logo: string; color: string; name: string; useAutoAccent: boolean }>({
@@ -913,6 +920,29 @@ export default function CardNewsPage() {
       setTrendRecommendations(['2026 부동산', 'AI 자동화', '인기 카페', '주간 경제', 'MZ 트렌드']);
     } finally {
       setIsFetchingTrends(false);
+    }
+  };
+
+  const handleSuggestTopics = async () => {
+    if (!step9Input.trim() && !step9Category) {
+      alert('자유 입력 또는 카테고리를 선택해주세요.');
+      return;
+    }
+    setIsSuggestingTopics(true);
+    setStep9Topics([]);
+    try {
+      const res = await fetch('/api/generate/topic-suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: step9Input, category: step9Category }),
+      });
+      const data = await res.json();
+      if (data.topics) setStep9Topics(data.topics);
+      else alert(data.error || '주제 추천에 실패했습니다.');
+    } catch {
+      alert('주제 추천 중 오류가 발생했습니다.');
+    } finally {
+      setIsSuggestingTopics(false);
     }
   };
 
@@ -2084,6 +2114,10 @@ export default function CardNewsPage() {
                     onClick={() => setInputMode('smart')}
                     className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap flex items-center gap-1 ${inputMode === 'smart' ? 'border-violet-600 text-violet-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
                   ><Wand2 size={14} /> AI 완전 자동 생성</button>
+                  <button
+                    onClick={() => setInputMode('step9')}
+                    className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap flex items-center gap-1 ${inputMode === 'step9' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+                  >✨ 9단계 정밀 제작</button>
                 </div>
 
                 {inputMode === 'text' && (
@@ -2382,6 +2416,59 @@ export default function CardNewsPage() {
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+
+                {inputMode === 'step9' && (
+                  <div className="space-y-4">
+                    {/* 1단계: 큰틀 선택 */}
+                    <div>
+                      <label className="text-sm font-bold text-gray-700 mb-2 block">1단계. 어떤 카드뉴스를 만들까요?</label>
+                      <input
+                        type="text"
+                        value={step9Input}
+                        onChange={e => setStep9Input(e.target.value)}
+                        placeholder="예: 오늘 부동산 이슈 찾아줘 / 3기 신도시 관련 / 자유롭게 입력"
+                        className="w-full p-3 border border-gray-200 rounded-xl text-sm focus:border-emerald-500 outline-none"
+                      />
+                    </div>
+                    {/* 카테고리 버튼 */}
+                    <div>
+                      <span className="text-xs text-gray-400 mb-2 block">또는 카테고리만 선택</span>
+                      <div className="flex flex-wrap gap-2">
+                        {['부동산', '경제', '라이프스타일', '마케팅', '자기계발', '기술'].map(cat => (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => setStep9Category(step9Category === cat ? '' : cat)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${step9Category === cat ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'border-gray-200 text-gray-500 hover:border-emerald-300'}`}
+                          >{cat}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {/* 주제 추천 버튼 */}
+                    <button
+                      type="button"
+                      onClick={handleSuggestTopics}
+                      disabled={isSuggestingTopics}
+                      className="w-full py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all"
+                    >{isSuggestingTopics ? '주제 찾는 중...' : '✨ 주제 추천받기'}</button>
+                    {/* 2단계: 주제 후보 표시 */}
+                    {step9Topics.length > 0 && (
+                      <div className="pt-2">
+                        <label className="text-sm font-bold text-gray-700 mb-2 block">2단계. 마음에 드는 주제를 고르세요</label>
+                        <div className="space-y-2">
+                          {step9Topics.map((topic, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => setStep9SelectedTopic(topic)}
+                              className={`w-full text-left p-3 rounded-xl border text-sm transition-all ${step9SelectedTopic === topic ? 'bg-emerald-50 border-emerald-400 text-emerald-800 font-semibold' : 'border-gray-200 text-gray-600 hover:border-emerald-300'}`}
+                            >{topic}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
