@@ -987,12 +987,13 @@ export default function CardNewsPage() {
     }
   };
 
-  const handleGenerateUnified = async (type: 'url' | 'trend' | 'text') => {
+  const handleGenerateUnified = async (type: 'url' | 'trend' | 'text' | 'step9') => {
     setIsGenerating(true);
     try {
       const body: any = {};
       if (type === 'url') body.url = urlInput;
       else if (type === 'trend') body.originalText = trendInput;
+      else if (type === 'step9') body.originalText = step9SelectedTopic;
       else body.originalText = prompt;
       body.templateTitle = selectedTemplate?.title || '';
       body.slideCount = quickSlideAuto ? 'auto' : slideCountNumber;
@@ -2467,6 +2468,16 @@ export default function CardNewsPage() {
                             >{topic}</button>
                           ))}
                         </div>
+                        {step9SelectedTopic && (
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateUnified('step9')}
+                            disabled={isGenerating}
+                            className="w-full mt-3 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all"
+                          >
+                            {isGenerating ? '카드뉴스 생성 중...' : '✨ 이 주제로 카드뉴스 만들기'}
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
