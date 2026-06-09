@@ -3,10 +3,22 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
-    const { input, category } = await request.json().catch(() => ({}));
+    const { input, category, recency } = await request.json().catch(() => ({}));
 
     if (!input && !category) {
       return NextResponse.json({ error: 'input 또는 category 필요' }, { status: 400 });
+    }
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric' });
+
+    let recencyInstruction = '';
+    if (recency === 'today') {
+      recencyInstruction = `\n- 기준 날짜: 오늘은 ${dateStr}입니다. 오늘~최근 2~3일 내 실시간 이슈/뉴스 위주의 주제로.`;
+    } else if (recency === 'week') {
+      recencyInstruction = `\n- 기준 날짜: 오늘은 ${dateStr}입니다. 최근 1주일 내 화제가 된 트렌드 위주의 주제로.`;
+    } else if (recency === 'month') {
+      recencyInstruction = `\n- 기준 날짜: 오늘은 ${dateStr}입니다. 최근 한 달 내 흐름·이슈 위주의 주제로.`;
     }
 
     const prompt = `당신은 프로페셔널한 한국 SNS 카드뉴스 기획자입니다.
@@ -14,7 +26,7 @@ export async function POST(request: Request) {
 
 [정보]
 - 자유 입력 서두: ${input || '제공되지 않음'}
-- 카테고리: ${category || '제공되지 않음'}
+- 카테고리: ${category || '제공되지 않음'}${recencyInstruction}
 
 [지침]
 1. 시의성 및 최신성 극대화: 오래되거나 유행이 지난 주제는 제외하고, 2026년 현재 트렌드와 시의성에 알맞은 최신 주제로 구성하세요. 날짜가 지난 이슈나 과거 데이터는 배제합니다.
