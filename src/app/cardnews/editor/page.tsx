@@ -2819,26 +2819,41 @@ export default function EditorPage() {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0) {
             let theme = BUSINESS_THEME_DATA;
-            const selectedTpl = localStorage.getItem('selectedTemplate');
-            if (selectedTpl) {
-              try {
-                const tpl = JSON.parse(selectedTpl);
-                const cat = (tpl.category || '').toLowerCase();
-                const title = (tpl.title || '').toLowerCase();
-                if (cat.includes('카페') || cat.includes('커피') || title.includes('카페')) {
-                  theme = CAFE_THEME_DATA;
-                } else if (cat.includes('라이프스타일') || cat.includes('wellness') || title.includes('라이프')) {
-                  theme = LIFESTYLE_THEME_DATA;
-                } else if (cat.includes('여행') || cat.includes('travel') || title.includes('여행') || title.includes('핫플')) {
-                  theme = TRAVEL_THEME_DATA;
-                } else if (cat.includes('패션') || cat.includes('뷰티') || cat.includes('fashion') || title.includes('패션') || title.includes('뷰티')) {
-                  theme = FASHION_THEME_DATA;
-                } else if (cat.includes('음식') || cat.includes('맛집') || cat.includes('food') || title.includes('맛집') || title.includes('레시피') || title.includes('음식')) {
-                  theme = FOOD_THEME_DATA;
-                } else if (cat.includes('교육') || cat.includes('자기계발') || cat.includes('학습') || title.includes('공부') || title.includes('배우')) {
-                  theme = EDUCATION_THEME_DATA;
-                }
-              } catch {}
+            const selectedStyleKey = localStorage.getItem('cardnews_selected_style');
+            const styleThemeMap: Record<string, any[]> = {
+              business: BUSINESS_THEME_DATA,
+              cafe: CAFE_THEME_DATA,
+              lifestyle: LIFESTYLE_THEME_DATA,
+              travel: TRAVEL_THEME_DATA,
+              fashion: FASHION_THEME_DATA,
+              food: FOOD_THEME_DATA,
+              education: EDUCATION_THEME_DATA,
+            };
+
+            if (selectedStyleKey && styleThemeMap[selectedStyleKey]) {
+              theme = styleThemeMap[selectedStyleKey];
+            } else {
+              const selectedTpl = localStorage.getItem('selectedTemplate');
+              if (selectedTpl) {
+                try {
+                  const tpl = JSON.parse(selectedTpl);
+                  const cat = (tpl.category || '').toLowerCase();
+                  const title = (tpl.title || '').toLowerCase();
+                  if (cat.includes('카페') || cat.includes('커피') || title.includes('카페')) {
+                    theme = CAFE_THEME_DATA;
+                  } else if (cat.includes('라이프스타일') || cat.includes('wellness') || title.includes('라이프')) {
+                    theme = LIFESTYLE_THEME_DATA;
+                  } else if (cat.includes('여행') || cat.includes('travel') || title.includes('여행') || title.includes('핫플')) {
+                    theme = TRAVEL_THEME_DATA;
+                  } else if (cat.includes('패션') || cat.includes('뷰티') || cat.includes('fashion') || title.includes('패션') || title.includes('뷰티')) {
+                    theme = FASHION_THEME_DATA;
+                  } else if (cat.includes('음식') || cat.includes('맛집') || cat.includes('food') || title.includes('맛집') || title.includes('레시피') || title.includes('음식')) {
+                    theme = FOOD_THEME_DATA;
+                  } else if (cat.includes('교육') || cat.includes('자기계발') || cat.includes('학습') || title.includes('공부') || title.includes('배우')) {
+                    theme = EDUCATION_THEME_DATA;
+                  }
+                } catch {}
+              }
             }
 
             const converted = normalizePages(cardNewsToPages(parsed, theme));
@@ -2847,6 +2862,7 @@ export default function EditorPage() {
             historyIdxRef.current = 0;
 
             localStorage.removeItem('cardNewsData');
+            localStorage.removeItem('cardnews_selected_style');
 
             let targetPage = 1;
             if (urlPage) {
