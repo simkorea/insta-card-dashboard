@@ -169,6 +169,16 @@ const ratioOptions = [
   { label: '3:4 (세로형)', value: '3:4' }
 ];
 
+const BUILT_IN_THEMES = [
+  { id: 'business', label: '비즈니스', emoji: '🏢' },
+  { id: 'cafe', label: '카페', emoji: '☕' },
+  { id: 'lifestyle', label: '라이프스타일', emoji: '🌿' },
+  { id: 'travel', label: '여행', emoji: '✈️' },
+  { id: 'fashion', label: '패션/뷰티', emoji: '👗' },
+  { id: 'food', label: '음식/맛집', emoji: '🍜' },
+  { id: 'education', label: '교육', emoji: '📚' },
+];
+
 export default function CardNewsPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'create' | 'learn' | 'history' | 'schedule' | 'analytics'>('create');
@@ -245,6 +255,7 @@ export default function CardNewsPage() {
   const [step9Topics, setStep9Topics] = useState<string[]>([]);
   const [step9SelectedTopic, setStep9SelectedTopic] = useState('');
   const [isSuggestingTopics, setIsSuggestingTopics] = useState(false);
+  const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
 
   // Tab: 브랜드 키트 (Brand Kit)
   const [brandKit, setBrandKit] = useState<{ logo: string; color: string; name: string; useAutoAccent: boolean }>({
@@ -2722,6 +2733,34 @@ export default function CardNewsPage() {
                       </div>
                     </div>
                     
+                    {/* 스타일 구성 (Style Configuration) */}
+                    <div className="bg-white border border-gray-200 rounded-2xl p-5 mb-4 shadow-sm">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-[14px] font-bold text-gray-800">🎨 카드뉴스 스타일 구성</span>
+                        <span className="text-[11px] text-gray-400 font-medium">(선택사항 - 미선택 시 템플릿 기본 적용)</span>
+                      </div>
+                      <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+                        {BUILT_IN_THEMES.map(theme => {
+                          const isSelected = selectedStyle === theme.id;
+                          return (
+                            <button
+                              key={theme.id}
+                              type="button"
+                              onClick={() => setSelectedStyle(isSelected ? null : theme.id)}
+                              className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl border transition-all text-center select-none cursor-pointer ${
+                                isSelected
+                                  ? 'border-primary-500 bg-primary-50 text-primary-700 font-bold ring-2 ring-primary-100'
+                                  : 'border-gray-200 hover:border-primary-300 hover:bg-gray-50/50 text-gray-600'
+                              }`}
+                            >
+                              <span className="text-xl mb-1">{theme.emoji}</span>
+                              <span className="text-[11px] truncate w-full px-0.5">{theme.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     {/* Submit Button moved to left column bottom */}
                     <button 
                       onClick={() => {
@@ -2751,6 +2790,11 @@ export default function CardNewsPage() {
                         localStorage.setItem('viralHooks', JSON.stringify(viralHooks));
                         localStorage.setItem('cardNewsDraft', prompt);
                         localStorage.setItem('selectedTemplate', JSON.stringify(selectedTemplate)); // 선택한 템플릿 정보 저장
+                        if (selectedStyle) {
+                          localStorage.setItem('cardnews_selected_style', selectedStyle);
+                        } else {
+                          localStorage.removeItem('cardnews_selected_style');
+                        }
                         localStorage.removeItem('editingDesign'); // 편집기로 넘어가기 전 이전 기록 확실히 삭제
                         window.location.href = '/cardnews/editor';
                       }}
