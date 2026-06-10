@@ -257,6 +257,8 @@ export default function CardNewsPage() {
   const [step9SelectedTopic, setStep9SelectedTopic] = useState('');
   const [isSuggestingTopics, setIsSuggestingTopics] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
+  const [useAiStyle, setUseAiStyle] = useState(false);
+  const [aiRecommendedStyle, setAiRecommendedStyle] = useState<string | null>(null);
 
   // Tab: 브랜드 키트 (Brand Kit)
   const [brandKit, setBrandKit] = useState<{ logo: string; color: string; name: string; useAutoAccent: boolean }>({
@@ -1018,6 +1020,15 @@ export default function CardNewsPage() {
       const data = await res.json();
       
       if (data.cardNews) {
+        const validThemes = ['business', 'cafe', 'lifestyle', 'travel', 'fashion', 'food', 'education'];
+        if (data.themeKey && validThemes.includes(data.themeKey)) {
+          setAiRecommendedStyle(data.themeKey);
+          setUseAiStyle(true);
+        } else {
+          setAiRecommendedStyle(null);
+          setUseAiStyle(false);
+        }
+
         // 배경 이미지 자동 매칭 (Unsplash API 호출)
         const updatedCardNews = await Promise.all(data.cardNews.map(async (card: any) => {
           try {
@@ -2759,14 +2770,44 @@ export default function CardNewsPage() {
                         <span className="text-[14px] font-bold text-gray-800">🎨 카드뉴스 스타일 구성</span>
                         <span className="text-[11px] text-gray-400 font-medium">(선택사항 - 미선택 시 템플릿 기본 적용)</span>
                       </div>
-                      <div className="grid grid-cols-4 sm:grid-cols-7 gap-2">
+                      
+                      {/* AI 추천 토글 버튼 */}
+                      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newValue = !useAiStyle;
+                            setUseAiStyle(newValue);
+                            if (newValue) {
+                              setSelectedStyle(null);
+                            }
+                          }}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                            useAiStyle
+                              ? 'bg-indigo-50 border-indigo-400 text-indigo-700 font-bold ring-2 ring-indigo-100'
+                              : 'border-gray-200 text-gray-500 hover:border-indigo-300'
+                          }`}
+                        >
+                          <span>✨ AI가 골라주기</span>
+                        </button>
+                        {aiRecommendedStyle && (
+                          <span className="text-[11px] text-indigo-600 bg-indigo-50/50 px-2 py-0.5 rounded-md font-medium">
+                            추천: {BUILT_IN_THEMES.find(t => t.id === aiRecommendedStyle)?.label || ''}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className={`grid grid-cols-4 sm:grid-cols-7 gap-2 transition-opacity duration-200 ${useAiStyle ? 'opacity-40' : 'opacity-100'}`}>
                         {BUILT_IN_THEMES.map(theme => {
                           const isSelected = selectedStyle === theme.id;
                           return (
                             <button
                               key={theme.id}
                               type="button"
-                              onClick={() => setSelectedStyle(isSelected ? null : theme.id)}
+                              onClick={() => {
+                                setSelectedStyle(isSelected ? null : theme.id);
+                                setUseAiStyle(false);
+                              }}
                               className={`flex flex-col items-center justify-center py-2.5 px-1 rounded-xl border transition-all text-center select-none cursor-pointer ${
                                 isSelected
                                   ? 'border-primary-500 bg-primary-50 text-primary-700 font-bold ring-2 ring-primary-100'
