@@ -2511,14 +2511,131 @@ export default function CardNewsPage() {
                           ))}
                         </div>
                         {step9SelectedTopic && (
-                          <button
-                            type="button"
-                            onClick={() => handleGenerateUnified('step9')}
-                            disabled={isGenerating}
-                            className="w-full mt-3 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all"
-                          >
-                            {isGenerating ? '카드뉴스 생성 중...' : '✨ 이 주제로 카드뉴스 만들기'}
-                          </button>
+                          <>
+                            {/* 7단계 상세 설정 */}
+                            <div className="mt-4 p-4 border border-gray-200 rounded-2xl bg-gray-50/50 space-y-4 shadow-sm text-left">
+                              <div className="flex items-center gap-1.5 border-b border-gray-100 pb-2 mb-2">
+                                <span className="text-sm font-bold text-gray-800">⚙️ 7단계 상세 설정</span>
+                              </div>
+
+                              {/* 1. 슬라이드 장수 */}
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-semibold text-gray-700">슬라이드 장수</span>
+                                  <div className="flex bg-gray-100 p-0.5 rounded-lg border border-gray-200">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSlideCountType('auto')}
+                                      className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all ${
+                                        slideCountType === 'auto'
+                                          ? 'bg-white text-gray-800 shadow-sm border border-gray-200/50'
+                                          : 'text-gray-500 hover:text-gray-800'
+                                      }`}
+                                    >
+                                      자동
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setSlideCountType('manual')}
+                                      className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition-all ${
+                                        slideCountType === 'manual'
+                                          ? 'bg-white text-gray-800 shadow-sm border border-gray-200/50'
+                                          : 'text-gray-500 hover:text-gray-800'
+                                      }`}
+                                    >
+                                      직접 지정
+                                    </button>
+                                  </div>
+                                </div>
+                                {slideCountType === 'manual' && (
+                                  <div className="flex items-center justify-between bg-white p-2 rounded-xl border border-gray-100 shadow-sm">
+                                    <span className="text-[11px] text-gray-400 font-medium">수량 설정 (1~10장)</span>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (slideCountNumber > 1) setSlideCountNumber(slideCountNumber - 1);
+                                        }}
+                                        className="w-6 h-6 flex items-center justify-center bg-gray-50 border border-gray-200 rounded-md text-xs font-bold text-gray-600 hover:bg-gray-100 active:scale-95 transition-all"
+                                      >
+                                        -
+                                      </button>
+                                      <span className="text-xs font-bold text-gray-700 w-4 text-center">{slideCountNumber}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          if (slideCountNumber < 10) setSlideCountNumber(slideCountNumber + 1);
+                                        }}
+                                        className="w-6 h-6 flex items-center justify-center bg-gray-50 border border-gray-200 rounded-md text-xs font-bold text-gray-600 hover:bg-gray-100 active:scale-95 transition-all"
+                                      >
+                                        +
+                                      </button>
+                                      <span className="text-[11px] text-gray-400">장</span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* 2. 이미지 비율 */}
+                              <div className="space-y-2">
+                                <span className="text-xs font-semibold text-gray-700 block">이미지 비율</span>
+                                <div className="flex flex-wrap gap-1.5 bg-gray-100 p-0.5 rounded-lg border border-gray-200 w-fit">
+                                  {['4:5', '9:16', '1:1'].map(r => (
+                                    <button
+                                      key={r}
+                                      type="button"
+                                      onClick={() => setSelectedRatio(r)}
+                                      className={`px-3 py-1 text-[11px] font-semibold rounded-md transition-all ${
+                                        selectedRatio === r
+                                          ? 'bg-white text-gray-800 shadow-sm border border-gray-200/50'
+                                          : 'text-gray-500 hover:bg-gray-200'
+                                      }`}
+                                    >
+                                      {r}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* 3. 생성 스타일 */}
+                              <div className="space-y-2">
+                                <span className="text-xs font-semibold text-gray-700 block">생성 스타일</span>
+                                <div className="flex bg-gray-100 p-0.5 rounded-lg border border-gray-200 w-fit">
+                                  <button
+                                    type="button"
+                                    onClick={() => setGenStyle('free')}
+                                    className={`px-3 py-1 text-[11px] font-semibold rounded-md transition-all ${
+                                      genStyle === 'free'
+                                        ? 'bg-white text-gray-800 shadow-sm border border-gray-200/50'
+                                        : 'text-gray-500 hover:text-gray-800'
+                                    }`}
+                                  >
+                                    자유롭게 변형
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setGenStyle('origin')}
+                                    className={`px-3 py-1 text-[11px] font-semibold rounded-md transition-all ${
+                                      genStyle === 'origin'
+                                        ? 'bg-white text-gray-800 shadow-sm border border-gray-200/50'
+                                        : 'text-gray-500 hover:text-gray-800'
+                                    }`}
+                                  >
+                                    원본 유지
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleGenerateUnified('step9')}
+                              disabled={isGenerating}
+                              className="w-full mt-3 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all"
+                            >
+                              {isGenerating ? '카드뉴스 생성 중...' : '✨ 이 주제로 카드뉴스 만들기'}
+                            </button>
+                          </>
                         )}
                       </div>
                     )}
