@@ -2853,6 +2853,13 @@ export default function CardNewsPage() {
                         localStorage.setItem('selectedTemplate', JSON.stringify(selectedTemplate)); // 선택한 템플릿 정보 저장
                         if (selectedStyle) {
                           localStorage.setItem('cardnews_selected_style', selectedStyle);
+                        } else if (useAiStyle) {
+                          const validThemes = ['business', 'cafe', 'lifestyle', 'travel', 'fashion', 'food', 'education'];
+                          if (aiRecommendedStyle && validThemes.includes(aiRecommendedStyle)) {
+                            localStorage.setItem('cardnews_selected_style', aiRecommendedStyle);
+                          } else {
+                            localStorage.removeItem('cardnews_selected_style');
+                          }
                         } else {
                           localStorage.removeItem('cardnews_selected_style');
                         }
