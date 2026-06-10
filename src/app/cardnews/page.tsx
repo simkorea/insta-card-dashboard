@@ -252,6 +252,7 @@ export default function CardNewsPage() {
   // 9단계 정밀 제작 관련 상태
   const [step9Input, setStep9Input] = useState('');
   const [step9Category, setStep9Category] = useState('');
+  const [step9Recency, setStep9Recency] = useState<'today' | 'week' | 'month' | 'evergreen'>('evergreen');
   const [step9Topics, setStep9Topics] = useState<string[]>([]);
   const [step9SelectedTopic, setStep9SelectedTopic] = useState('');
   const [isSuggestingTopics, setIsSuggestingTopics] = useState(false);
@@ -945,7 +946,7 @@ export default function CardNewsPage() {
       const res = await fetch('/api/generate/topic-suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: step9Input, category: step9Category }),
+        body: JSON.stringify({ input: step9Input, category: step9Category, recency: step9Recency }),
       });
       const data = await res.json();
       if (data.topics) setStep9Topics(data.topics);
@@ -2455,6 +2456,25 @@ export default function CardNewsPage() {
                             onClick={() => setStep9Category(step9Category === cat ? '' : cat)}
                             className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${step9Category === cat ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'border-gray-200 text-gray-500 hover:border-emerald-300'}`}
                           >{cat}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {/* 최신성 필터 */}
+                    <div>
+                      <span className="text-xs text-gray-400 mb-2 block">최신성</span>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          { value: 'today', label: '오늘' },
+                          { value: 'week', label: '이번 주' },
+                          { value: 'month', label: '이번 달' },
+                          { value: 'evergreen', label: '상시' }
+                        ] as const).map(opt => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => setStep9Recency(opt.value)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${step9Recency === opt.value ? 'bg-indigo-50 border-indigo-400 text-indigo-700' : 'border-gray-200 text-gray-500 hover:border-indigo-300'}`}
+                          >{opt.label}</button>
                         ))}
                       </div>
                     </div>
