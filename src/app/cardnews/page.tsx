@@ -1010,7 +1010,13 @@ export default function CardNewsPage() {
       else if (type === 'step9') body.originalText = step9SelectedTopic;
       else body.originalText = prompt;
       body.templateTitle = selectedTemplate?.title || '';
-      body.slideCount = quickSlideAuto ? 'auto' : slideCountNumber;
+      if (type === 'step9') {
+        body.slideCount = slideCountType === 'auto' ? 'auto' : slideCountNumber;
+        body.ratio = selectedRatio;
+        body.genStyle = genStyle;
+      } else {
+        body.slideCount = quickSlideAuto ? 'auto' : slideCountNumber;
+      }
 
       const res = await fetch('/api/generate/unified', {
         method: 'POST',

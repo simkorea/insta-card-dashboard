@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
-    const { url, originalText, templateTitle, slideCount } = await request.json();
+    const { url, originalText, templateTitle, slideCount, ratio, genStyle } = await request.json();
 
     let inputContent = originalText || '';
 
@@ -36,9 +36,16 @@ export async function POST(request: Request) {
         ? '카드뉴스는 내용에 맞춰 4~7장 사이로 적절히 생성할 것'
         : `카드뉴스는 정확히 ${slideCount}장으로 생성할 것`;
 
+    let genStyleInstruction = '';
+    if (genStyle === 'origin') {
+      genStyleInstruction = `\n- 스타일 지침: 원본 유지 스타일입니다. 템플릿의 고유한 색상 배합과 레이아웃 구조를 최대한 그대로 재사용하여 브랜딩의 통일성을 기하세요.`;
+    } else if (genStyle === 'free') {
+      genStyleInstruction = `\n- 스타일 지침: 자유 변형 스타일입니다. 템플릿의 분위기를 일부 참고하되, 생성된 콘텐츠의 개별 맥락과 내용적 필요에 따라 AI가 창의적이고 자유롭게 레이아웃 및 디자인 요소를 다채롭게 구성해 꾸미도록 지시하세요.`;
+    }
+
     const prompt = `당신은 프로페셔널한 SNS 마케터이자 전문 카피라이터입니다.
     제공된 내용을 바탕으로 카드뉴스, 블로그 포스팅, 바이럴 후킹 문구를 생성하세요.
-    사용자가 선택한 템플릿 스타일(${templateTitle || '일반'})을 고려하여 톤앤매너와 이미지 키워드를 결정하세요.
+    사용자가 선택한 템플릿 스타일(${templateTitle || '일반'})을 고려하여 톤앤매너와 이미지 키워드를 결정하세요.${genStyleInstruction}
 
     반드시 아래 JSON 구조로 응답하세요:
     {
