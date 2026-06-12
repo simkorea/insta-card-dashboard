@@ -5861,7 +5861,7 @@ function SnsUploadModal({
     if (selected.size === 0) { alert('플랫폼을 하나 이상 선택하세요'); return; }
 
     if (!bypassFactCheck && !factCheckConfirmed) {
-      const texts = collectCardTexts(pagesData);
+      const texts = collectCardTexts(pagesData) + '\n' + (caption || '');
       const facts = extractFactCheckItems(texts);
       if (facts.length > 0) {
         setFactsList(facts);
@@ -6448,6 +6448,12 @@ function extractFactCheckItems(text: string): { type: string; value: string }[] 
       ]
     },
     {
+      type: '날짜(연도)',
+      regexes: [
+        /\d{4}년/g
+      ]
+    },
+    {
       type: '금액/비율',
       regexes: [
         /\d+억(\s?\d+천?만?)?원?/g,
@@ -6482,10 +6488,21 @@ function extractFactCheckItems(text: string): { type: string; value: string }[] 
     });
   });
 
+  // 날짜(연도) 중복 제거 후처리: 연도단독 매칭값이 다른 날짜 항목의 부분문자열인 경우 제외
+  const filteredItems = items.filter(item => {
+    if (item.type === '날짜(연도)') {
+      const isSubstringOfOtherDate = items.some(other =>
+        other.type === '날짜' && other.value.includes(item.value)
+      );
+      if (isSubstringOfOtherDate) return false;
+    }
+    return true;
+  });
+
   // 중복 제거 (type, value) 기준
   const uniqueItems: { type: string; value: string }[] = [];
   const seen = new Set<string>();
-  items.forEach(item => {
+  filteredItems.forEach(item => {
     const key = `${item.type}|||${item.value}`;
     if (!seen.has(key)) {
       seen.add(key);
