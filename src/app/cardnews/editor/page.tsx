@@ -5840,6 +5840,9 @@ function SnsUploadModal({
   const [status, setStatus] = React.useState<SnsStatus>('idle');
   const [progress, setProgress] = React.useState('');
   const [results, setResults] = React.useState<Record<string, SnsResult>>({});
+  const [factCheckConfirmed, setFactCheckConfirmed] = React.useState(false);
+  const [showFcGate, setShowFcGate] = React.useState(false);
+  const [factsList, setFactsList] = React.useState<{ type: string; value: string }[]>([]);
 
   const toggle = (id: string) => {
     setSelected(prev => {
@@ -5854,8 +5857,19 @@ function SnsUploadModal({
       canvas.toBlob(b => b ? resolve(b) : reject(new Error('blob 변환 실패')), 'image/jpeg', 0.85);
     });
 
-  const handleUpload = async () => {
+  const handleUpload = async (bypassFactCheck = false) => {
     if (selected.size === 0) { alert('플랫폼을 하나 이상 선택하세요'); return; }
+
+    if (!bypassFactCheck && !factCheckConfirmed) {
+      const texts = collectCardTexts(pagesData);
+      const facts = extractFactCheckItems(texts);
+      if (facts.length > 0) {
+        setFactsList(facts);
+        setShowFcGate(true);
+        return;
+      }
+    }
+
     setStatus('uploading');
     setResults({});
 
@@ -6060,14 +6074,14 @@ function SnsUploadModal({
             </div>
           ) : status === 'done' ? (
             <button
-              onClick={() => { setStatus('idle'); setResults({}); setProgress(''); }}
+              onClick={() => { setStatus('idle'); setResults({}); setProgress(''); setFactCheckConfirmed(false); }}
               className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-bold rounded-xl transition-all"
             >
               다시 업로드
             </button>
           ) : status === 'error' ? (
             <button
-              onClick={() => { setStatus('idle'); setResults({}); setProgress(''); }}
+              onClick={() => { setStatus('idle'); setResults({}); setProgress(''); setFactCheckConfirmed(false); }}
               className="w-full py-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2"
             >
               <RefreshCw size={14} />
@@ -6075,7 +6089,7 @@ function SnsUploadModal({
             </button>
           ) : (
             <button
-              onClick={handleUpload}
+              onClick={() => handleUpload()}
               disabled={selected.size === 0}
               className="w-full py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 active:scale-[0.98] text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -6087,6 +6101,78 @@ function SnsUploadModal({
           <p className="text-center text-[10px] text-gray-400">이미지 캡처 → CDN 업로드 → SNS 전송 순으로 진행됩니다</p>
         </div>
       </div>
+
+      {/* 팩트체크 게이트 모달 */}
+      {showFcGate && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowFcGate(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-[420px] max-w-full overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-amber-50 to-orange-50">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center text-lg">
+                  ⚠️
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-gray-900">발행 전 확인</h2>
+                  <p className="text-[11px] text-amber-700 font-semibold">정보가 정확한지 최종 점검이 필요합니다</p>
+                </div>
+              </div>
+              <button onClick={() => setShowFcGate(false)} className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs text-gray-600 leading-relaxed bg-amber-50 border border-amber-100 rounded-xl p-3">
+                AI가 생성한 아래 정보가 정확한지 발행 전 직접 확인하세요. 특히 단지명·지역명이 실제와 맞는지 꼭 확인하세요.
+              </p>
+
+              {/* Facts Grouped List */}
+              <div className="space-y-3 max-h-[200px] overflow-y-auto border border-gray-100 rounded-xl p-3 bg-gray-50">
+                {(() => {
+                  const groupedFacts: Record<string, string[]> = {};
+                  factsList.forEach(f => {
+                    if (!groupedFacts[f.type]) {
+                      groupedFacts[f.type] = [];
+                    }
+                    groupedFacts[f.type].push(f.value);
+                  });
+                  return Object.entries(groupedFacts).map(([type, values]) => (
+                    <div key={type} className="text-xs flex gap-2 items-start py-1 border-b border-gray-100/50 last:border-0">
+                      <span className="font-bold text-amber-800 bg-amber-100/70 px-1.5 py-0.5 rounded text-[10px] uppercase shrink-0">
+                        {type}
+                      </span>
+                      <span className="font-medium text-gray-700 break-all leading-relaxed">
+                        {values.join(', ')}
+                      </span>
+                    </div>
+                  ));
+                })()}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setShowFcGate(false)}
+                  className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-all"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => {
+                    setFactCheckConfirmed(true);
+                    setShowFcGate(false);
+                    handleUpload(true);
+                  }}
+                  className="flex-1 py-3 rounded-xl bg-purple-600 hover:bg-purple-700 active:scale-[0.98] text-white text-sm font-bold transition-all shadow-sm flex items-center justify-center gap-1.5"
+                >
+                  <Check size={14} /> 확인했어요, 발행
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
