@@ -6233,3 +6233,179 @@ function CaptionModal({
     </div>
   );
 }
+
+// ─── Fact Check Helpers (FC-1, FC-2) ─────────────────────────────────────────
+
+function collectCardTexts(pages: PageData[]): string {
+  if (!pages || !Array.isArray(pages)) return '';
+  const collected: string[] = [];
+
+  const clean = (text: string | undefined | null): string => {
+    if (!text) return '';
+    return text.replace(/<[^>]*>/g, '').trim();
+  };
+
+  pages.forEach(p => {
+    if (!p) return;
+
+    if (p.title) {
+      const cleaned = clean(p.title);
+      if (cleaned) collected.push(cleaned);
+    }
+    if (p.subtitle) {
+      const cleaned = clean(p.subtitle);
+      if (cleaned) collected.push(cleaned);
+    }
+    if (p.bullets && Array.isArray(p.bullets)) {
+      p.bullets.forEach(b => {
+        const cleaned = clean(b);
+        if (cleaned) collected.push(cleaned);
+      });
+    }
+    if (p.blocks && Array.isArray(p.blocks)) {
+      p.blocks.forEach(b => {
+        if (!b) return;
+
+        if ('text' in b && b.text) {
+          const cleaned = clean(b.text);
+          if (cleaned) collected.push(cleaned);
+        }
+        if ('accentText' in b && b.accentText) {
+          const cleaned = clean(b.accentText);
+          if (cleaned) collected.push(cleaned);
+        }
+        if ('value' in b && b.value) {
+          const cleaned = clean(b.value);
+          if (cleaned) collected.push(cleaned);
+        }
+        if ('caption' in b && b.caption) {
+          const cleaned = clean(b.caption);
+          if (cleaned) collected.push(cleaned);
+        }
+        if ('items' in b && Array.isArray(b.items)) {
+          b.items.forEach((item: any) => {
+            if (typeof item === 'string') {
+              const cleaned = clean(item);
+              if (cleaned) collected.push(cleaned);
+            } else if (item && typeof item === 'object') {
+              if (item.value) {
+                const cleaned = clean(item.value);
+                if (cleaned) collected.push(cleaned);
+              }
+              if (item.label) {
+                const cleaned = clean(item.label);
+                if (cleaned) collected.push(cleaned);
+              }
+              if (item.title) {
+                const cleaned = clean(item.title);
+                if (cleaned) collected.push(cleaned);
+              }
+              if (item.desc) {
+                const cleaned = clean(item.desc);
+                if (cleaned) collected.push(cleaned);
+              }
+              if (item.date) {
+                const cleaned = clean(item.date);
+                if (cleaned) collected.push(cleaned);
+              }
+            }
+          });
+        }
+        if ('rows' in b && Array.isArray(b.rows)) {
+          b.rows.forEach((row: any) => {
+            if (row && typeof row === 'object') {
+              if (row.label) {
+                const cleaned = clean(row.label);
+                if (cleaned) collected.push(cleaned);
+              }
+              if (row.value) {
+                const cleaned = clean(row.value);
+                if (cleaned) collected.push(cleaned);
+              }
+            }
+          });
+        }
+        if ('badges' in b && Array.isArray(b.badges)) {
+          b.badges.forEach((badge: any) => {
+            if (badge && typeof badge === 'object' && badge.text) {
+              const cleaned = clean(badge.text);
+              if (cleaned) collected.push(cleaned);
+            }
+          });
+        }
+      });
+    }
+    if (p.elements && Array.isArray(p.elements)) {
+      p.elements.forEach(el => {
+        if (el && el.type === 'text' && el.text) {
+          const cleaned = clean(el.text);
+          if (cleaned) collected.push(cleaned);
+        }
+      });
+    }
+  });
+
+  return collected.join('\n');
+}
+
+function extractFactCheckItems(text: string): { type: string; value: string }[] {
+  if (!text) return [];
+
+  const items: { type: string; value: string }[] = [];
+
+  const patterns = [
+    {
+      type: '날짜',
+      regexes: [
+        /\d{4}년\s?\d{1,2}월(\s?\d{1,2}일)?/g,
+        /\d{1,2}월\s?\d{1,2}일/g
+      ]
+    },
+    {
+      type: '금액/비율',
+      regexes: [
+        /\d+억(\s?\d+천?만?)?원?/g,
+        /\d{1,3}(,\d{3})*만\s?원/g,
+        /\d+(\.\d+)?%/g
+      ]
+    },
+    {
+      type: '경쟁률',
+      regexes: [
+        /\d+(\.\d+)?\s?:\s?\d+/g,
+        /\d+(\.\d+)?대\s?\d+/g
+      ]
+    },
+    {
+      type: '수치',
+      regexes: [
+        /\d{1,3}(,\d{3})+/g
+      ]
+    }
+  ];
+
+  patterns.forEach(p => {
+    p.regexes.forEach(regex => {
+      regex.lastIndex = 0;
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        if (match[0]) {
+          items.push({ type: p.type, value: match[0].trim() });
+        }
+      }
+    });
+  });
+
+  // 중복 제거 (type, value) 기준
+  const uniqueItems: { type: string; value: string }[] = [];
+  const seen = new Set<string>();
+  items.forEach(item => {
+    const key = `${item.type}|||${item.value}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      uniqueItems.push(item);
+    }
+  });
+
+  return uniqueItems;
+}
