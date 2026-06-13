@@ -5878,6 +5878,28 @@ function SnsUploadModal({
       const SCALE = 1080 / 420;
       const imageUrls: string[] = [];
 
+      // 폰트 로드 완료 대기
+      try {
+        if (typeof document !== 'undefined' && document.fonts) {
+          await document.fonts.ready;
+        }
+      } catch (err) {
+        console.error('document.fonts.ready wait failed:', err);
+      }
+
+      // 구글폰트 link 태그 일시 제거
+      let gfLink: HTMLElement | null = null;
+      try {
+        if (typeof document !== 'undefined') {
+          gfLink = document.getElementById('gf-cardnews');
+          if (gfLink) {
+            gfLink.remove();
+          }
+        }
+      } catch (err) {
+        console.error('Failed to temporarily remove google fonts link:', err);
+      }
+
       const preloadProxy = async (el: HTMLDivElement) => {
         const imgs = Array.from(el.querySelectorAll('img'));
         const origSrcs = new Map<HTMLImageElement, string>();
@@ -5904,23 +5926,34 @@ function SnsUploadModal({
         return origSrcs;
       };
 
-      for (let i = 0; i < pagesData.length; i++) {
-        const pg = pagesData[i];
-        const el = captureRefs.current?.[pg.id];
-        if (!el) continue;
-        setProgress(`캡처 중 ${i + 1}/${pagesData.length}...`);
-        const origSrcs = await preloadProxy(el);
-        const canvas = await toCanvas(el, { pixelRatio: SCALE, cacheBust: false });
-        origSrcs.forEach((src, img) => { img.src = src; });
-        const blob = await canvasToJpegBlob(canvas);
+      try {
+        for (let i = 0; i < pagesData.length; i++) {
+          const pg = pagesData[i];
+          const el = captureRefs.current?.[pg.id];
+          if (!el) continue;
+          setProgress(`캡처 중 ${i + 1}/${pagesData.length}...`);
+          const origSrcs = await preloadProxy(el);
+          const canvas = await toCanvas(el, { pixelRatio: SCALE, cacheBust: false });
+          origSrcs.forEach((src, img) => { img.src = src; });
+          const blob = await canvasToJpegBlob(canvas);
 
-        setProgress(`CDN 업로드 중 ${i + 1}/${pagesData.length}...`);
-        const form = new FormData();
-        form.append('file', blob, `slide_${i + 1}.jpg`);
-        const cdnRes = await fetch('/api/upload-to-cdn', { method: 'POST', body: form });
-        const cdnData = await cdnRes.json();
-        if (!cdnData.url) throw new Error(`CDN 업로드 실패 (${i + 1}번째): ${cdnData.error}`);
-        imageUrls.push(cdnData.url);
+          setProgress(`CDN 업로드 중 ${i + 1}/${pagesData.length}...`);
+          const form = new FormData();
+          form.append('file', blob, `slide_${i + 1}.jpg`);
+          const cdnRes = await fetch('/api/upload-to-cdn', { method: 'POST', body: form });
+          const cdnData = await cdnRes.json();
+          if (!cdnData.url) throw new Error(`CDN 업로드 실패 (${i + 1}번째): ${cdnData.error}`);
+          imageUrls.push(cdnData.url);
+        }
+      } finally {
+        // 구글폰트 link 태그 복구
+        if (gfLink && typeof document !== 'undefined') {
+          try {
+            document.head.appendChild(gfLink);
+          } catch (err) {
+            console.error('Failed to restore google fonts link:', err);
+          }
+        }
       }
 
       setProgress('SNS 전송 중...');
