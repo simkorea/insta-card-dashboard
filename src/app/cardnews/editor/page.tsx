@@ -4553,7 +4553,10 @@ function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; lo
           filter: `brightness(${(page.bgBrightnessFilter ?? 100) / 100})`,
         }}
       />
-      <div className="absolute inset-0" style={{ background: page.overlay }} />
+      <div className="absolute inset-0" style={{ background: page.overlay, opacity: (page.overlayOpacity ?? 100) / 100 }} />
+      {(page.bgBrightness ?? 0) > 0 && (
+        <div className="absolute inset-0" style={{ background: `rgba(0,0,0,${(page.bgBrightness ?? 0) / 100})` }} />
+      )}
       {logo && (
         <div className="absolute top-[4%] right-[4%] z-10 opacity-80 pointer-events-none">
           <img src={logo} className="h-4 object-contain" crossOrigin="anonymous" />
