@@ -4542,7 +4542,17 @@ const LayersIcon = ({ size }: { size: number }) => (
 function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; logo?: string }) {
   return (
     <>
-      <img src={bgImage} alt="" className="absolute inset-0 w-full h-full object-cover" crossOrigin="anonymous" />
+      <img
+        src={bgImage}
+        alt=""
+        className="absolute inset-0 w-full h-full object-cover"
+        crossOrigin="anonymous"
+        style={{
+          transform: `scale(${page.bgScale ?? 1})`,
+          transformOrigin: `${page.bgPosition?.x ?? 50}% ${page.bgPosition?.y ?? 50}%`,
+          filter: `brightness(${(page.bgBrightnessFilter ?? 100) / 100})`,
+        }}
+      />
       <div className="absolute inset-0" style={{ background: page.overlay }} />
       {logo && (
         <div className="absolute top-[4%] right-[4%] z-10 opacity-80 pointer-events-none">
