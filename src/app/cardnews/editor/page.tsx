@@ -3611,7 +3611,7 @@ export default function EditorPage() {
       {/* 내 템플릿 저장 모달 */}
       {showSaveTemplateModal && (
         <SaveTemplateModal
-          pagesData={pagesData}
+          pagesData={pagesData.map(pg => ({ ...pg, bgImage: pageImages[pg.id] ?? pg.bgImage }))}
           onClose={() => setShowSaveTemplateModal(false)}
         />
       )}
