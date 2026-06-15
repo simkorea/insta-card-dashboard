@@ -3830,6 +3830,9 @@ export default function EditorPage() {
           <button onClick={() => setShowSaveModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 whitespace-nowrap shrink-0 active:bg-gray-100">
             <Save size={13} /> 디자인저장
           </button>
+          <button onClick={handleConvertToBlog} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 text-xs font-semibold text-blue-700 whitespace-nowrap shrink-0 active:bg-blue-100">
+            블로그로 전환
+          </button>
         </div>
       </div>
 
