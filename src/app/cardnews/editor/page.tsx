@@ -920,6 +920,24 @@ function ImagePanel({
     }
   }, [initialBlocksOffsetY]);
 
+  useEffect(() => {
+    if (initialBrightness !== undefined) {
+      setBrightness(initialBrightness);
+    }
+  }, [initialBrightness]);
+
+  useEffect(() => {
+    if (initialBrightnessFilter !== undefined) {
+      setBrightnessFilter(initialBrightnessFilter);
+    }
+  }, [initialBrightnessFilter]);
+
+  useEffect(() => {
+    if (initialOverlayOpacity !== undefined) {
+      setOverlayOpacity(initialOverlayOpacity);
+    }
+  }, [initialOverlayOpacity]);
+
   const [imgTab, setImgTab] = useState<ImageTab>('상업사용');
   const [searchQuery, setSearchQuery] = useState('');
   const [suggestedQuery, setSuggestedQuery] = useState('');
