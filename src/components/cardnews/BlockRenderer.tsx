@@ -52,6 +52,8 @@ export function BlockRenderer({
   const outerRef = useRef<HTMLDivElement>(null);
   const [fitScale, setFitScale] = useState(1);
   const fitScaleRef = useRef(1);
+  const lastObservedSizeRef = useRef<{ width: number; height: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
     fitScaleRef.current = fitScale;
@@ -125,11 +127,27 @@ export function BlockRenderer({
 
   // 3. ResizeObserver to catch any dynamic content dimensions updates (Scenario A)
   useEffect(() => {
-    const el = outerRef.current;
+    const el = containerRef.current;
     if (!el) return;
 
-    const observer = new ResizeObserver(() => {
-      triggerRecompute();
+    const observer = new ResizeObserver((entries) => {
+      if (!entries || entries.length === 0) return;
+      const entry = entries[0];
+      const { width, height } = entry.contentRect;
+
+      const lastSize = lastObservedSizeRef.current;
+      if (lastSize) {
+        const deltaW = Math.abs(width - lastSize.width);
+        const deltaH = Math.abs(height - lastSize.height);
+        // If the size changes by more than 1.5px (to ignore minor scale float adjustment but catch text updates)
+        if (deltaW > 1.5 || deltaH > 1.5) {
+          lastObservedSizeRef.current = { width, height };
+          triggerRecompute();
+        }
+      } else {
+        lastObservedSizeRef.current = { width, height };
+        triggerRecompute();
+      }
     });
     observer.observe(el);
 
@@ -183,17 +201,24 @@ export function BlockRenderer({
 
   return (
     <div
-      ref={outerRef}
+      ref={containerRef}
       style={{
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
         width: '100%',
-        transform: fitScale < 1 ? `scale(${fitScale})` : undefined,
-        transformOrigin: 'bottom center',
+        position: 'relative',
       }}
     >
+      <div
+        ref={outerRef}
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          width: '100%',
+          transform: fitScale < 1 ? `scale(${fitScale})` : undefined,
+          transformOrigin: 'bottom center',
+        }}
+      >
       {blocks.map((b, i) => {
         const blockOffsetY = b.offsetY ?? 0;
 
@@ -455,6 +480,7 @@ export function BlockRenderer({
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
