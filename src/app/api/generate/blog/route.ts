@@ -147,6 +147,16 @@ ${urlContent}`
 - 소제목 구성을 위해 마크다운 헤딩(##, ###)과 볼드(**단어**) 문법은 사용하되, 장식용 이모지(✅, 📌, 🎉, ⭐, 👉, ✨, 🔥, 📢, 📍, 🔔, 💡, 🚀, 👑 등)는 일체 사용하지 마십시오.`;
     }
 
+    const ctaInstruction = cta
+      ? `- [필수 CTA] 글 마지막 마무리 단락에 다음 행동 유도(CTA)를 반드시 포함하여 독자의 행동을 유도하세요. 문구: "${cta.text}"${cta.url ? `, 링크: ${cta.url}` : ''}`
+      : (persona 
+          ? `- 글 마무리 시 브랜드(${persona.brand_name})와 부합하는 자연스러운 소통 멘트로 포스팅을 마치십시오.` 
+          : `- 브랜드 멘트나 링크 없이 깔끔하게 일반적인 마무리 소통 문구로 포스팅을 마치십시오.`);
+
+    const instructionsInstruction = instructions
+      ? `\n[특별 추가 지시사항]\n- 다음 지시사항을 반드시 따르십시오: ${instructions}`
+      : '';
+
     const prompt = `당신은 SEO 전문가이자 블로그 작가입니다.
 ${langInstruction[language] || langInstruction.auto}
 
@@ -162,12 +172,11 @@ ${formatGuide[format] || formatGuide.naver}
 
 [작성 및 톤 지침]
 ${persona ? `- 글의 전반적인 말투와 분위기는 브랜드 페르소나의 '글의 톤/말투'(${persona.tone})를 적극 반영하여 통일성 있게 작성하세요.
-- 타겟 독자(${persona.target_audience || '일반 대중'})의 관심사와 수준에 맞는 단어와 설명 방식을 선택하세요.
-- 포스팅 목적(${persona.posting_goal || '정보 제공'})이 잘 달성되도록 유용한 내용 위주로 깊이 있게 글을 구성하세요.
-- 글 마무리 시 브랜드(${persona.brand_name})와 부합하는 멘트나 행동 유도 멘트를 자연스럽게 작성하세요.` : `- 글의 전반적인 말투와 분위기는 지정된 톤(${toneLabel[tone] || '전문적인'})에 맞게 구성하세요.
-- 브랜드 언급이나 특정 페르소나 색채 없이 깔끔하고 객관적인 일반 글(정보성 콘텐츠) 형태로 작성하세요.
-${cta ? `- 글 마지막 마무리 단락에 다음 행동 유도(CTA)를 자연스럽게 녹여내어 독자의 행동을 유도하세요: 문구: "${cta.text}"${cta.url ? `, 링크: ${cta.url}` : ''}` : '- 브랜드 멘트나 링크 없이 깔끔하게 일반적인 마무리 소통 문구로 포스팅을 마치십시오.'}`}
-${markdownAndEmojiInstruction}
+- 타겟 독자(${targetAudience || persona.target_audience || '일반 대중'})의 관심사와 수준에 맞는 단어와 설명 방식을 선택하세요.
+- 포스팅 목적(${persona.posting_goal || '정보 제공'})이 잘 달성되도록 유용한 내용 위주로 깊이 있게 글을 구성하세요.` : `- 글의 전반적인 말투와 분위기는 지정된 톤(${toneLabel[tone] || '전문적인'})에 맞게 구성하세요.
+- 브랜드 언급이나 특정 페르소나 색채 없이 깔끔하고 객관적인 일반 글(정보성 콘텐츠) 형태로 작성하세요.`}
+${ctaInstruction}
+${markdownAndEmojiInstruction}${instructionsInstruction}
 
 [목표 분량]
 - 본문 분량: ${wordCount}자 내외 (시간 초과 방지를 위해 1800자~2300자 사이로 엄수하십시오)
