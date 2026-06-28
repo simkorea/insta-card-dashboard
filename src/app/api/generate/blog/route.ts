@@ -9,6 +9,28 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+async function fetchTextFromUrl(url: string, maxChars: number): Promise<string> {
+  if (!url) return '';
+  try {
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CardNewsBot/1.0)' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return '';
+    const html = await res.text();
+    const cleaned = html
+      .replace(/<(nav|header|footer)[^>]*>[\s\S]*?<\/\1>/gi, '')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return cleaned.slice(0, maxChars);
+  } catch (err) {
+    return '';
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const {
@@ -30,33 +52,20 @@ export async function POST(request: Request) {
 
     let urlContent = '';
     if (sourceUrl) {
-      try {
-        const res = await fetch(sourceUrl, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CardNewsBot/1.0)' },
-          signal: AbortSignal.timeout(8000),
-        });
-        if (!res.ok) {
-          throw new Error('Fetch failed');
-        }
-        const html = await res.text();
-        const cleaned = html
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim();
-        
-        if (!cleaned) {
-          throw new Error('Empty content');
-        }
-        urlContent = cleaned.slice(0, 3000);
-      } catch (err) {
-        return NextResponse.json(
-          { error: '기사를 불러오지 못했습니다. URL을 확인해주세요' },
-          { status: 400 }
-        );
-      }
+      urlContent = await fetchTextFromUrl(sourceUrl, 3000);
     }
+
+    const validRefLinks = (refLinks || []).filter((l: string) => l.trim());
+    const refContents = await Promise.allSettled(
+      validRefLinks.map((url: string) => fetchTextFromUrl(url, 1200))
+    );
+    const validRefContents = refContents
+      .map(r => r.status === 'fulfilled' ? r.value : '')
+      .filter(Boolean);
+
+    const refLinksSection = validRefContents.length > 0
+      ? validRefContents.map((text, idx) => `[참고자료 ${idx + 1} 본문]\n${text}`).join('\n\n')
+      : '';
 
     const mainInput = topic || content || (sourceUrl ? `[기사 URL 참고생성: ${sourceUrl}]` : '');
     if (!mainInput) return NextResponse.json({ error: '주제 또는 내용이 필요합니다' }, { status: 400 });
@@ -124,14 +133,13 @@ export async function POST(request: Request) {
       category && `카테고리: ${category}`,
       targetAudience && `대상 독자: ${targetAudience}`,
       keywords.length > 0 && `반드시 포함할 검색 키워드: ${keywords.join(', ')}`,
-      refLinks.length > 0 && `참고 링크 (내용 참고용, 직접 인용 금지): ${refLinks.join(', ')}`,
+      validRefLinks.length > 0 && validRefContents.length === 0 && `참고 링크 (내용 참고용, 직접 인용 금지): ${validRefLinks.join(', ')}`,
       instructions && `추가 지시사항: ${instructions}`,
       cta && `마지막에 CTA 포함 - 버튼 텍스트: "${cta.text}"${cta.url ? `, 링크: ${cta.url}` : ''}`,
     ].filter(Boolean).join('\n');
 
     const urlContentSection = urlContent
-      ? `[참고 원문 기사 본문 (반드시 이 내용을 바탕으로 새로운 블로그 글을 작성하십시오)]
-${urlContent}`
+      ? `[참고 원문 기사 본문 (반드시 이 내용을 바탕으로 새로운 블로그 글을 작성하십시오)]\n${urlContent}`
       : '';
 
     let markdownAndEmojiInstruction = '';
@@ -168,6 +176,7 @@ ${urlContentSection}
 ${mainInput}
 
 ${extraSections ? `[추가 설정]\n${extraSections}\n` : ''}
+${refLinksSection ? `${refLinksSection}\n` : ''}
 ${formatGuide[format] || formatGuide.naver}
 
 [작성 및 톤 지침]
