@@ -28,47 +28,88 @@ async function uploadToThreads(
 
   try {
     let containerId: string;
+    const urls = proxiedUrls.slice(0, 10);
+    const headers = { 'Content-Type': 'application/json' };
 
-    if (proxiedUrls.length === 1) {
-      const params = new URLSearchParams({
-        media_type: 'IMAGE', image_url: proxiedUrls[0],
-        text: caption.slice(0, 500), access_token: token,
+    if (urls.length === 1) {
+      const res = await fetch(`${THREADS_API}/${userId}/threads`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          media_type: 'IMAGE',
+          image_url: urls[0],
+          text: caption.slice(0, 500),
+          access_token: token,
+        })
       });
-      const res = await fetch(`${THREADS_API}/${userId}/threads?${params}`, { method: 'POST' });
       const data = await res.json();
-      if (!res.ok) throw new Error(`단일 이미지 컨테이너 실패: ${JSON.stringify(data)}`);
+      if (!res.ok || data.error) throw new Error(`단일 이미지 컨테이너 실패: ${JSON.stringify(data)}`);
       containerId = data.id;
+      await new Promise(r => setTimeout(r, 3000));
     } else {
-      const urls = proxiedUrls.slice(0, 20);
       const itemIds = await Promise.all(urls.map(async (url) => {
-        const params = new URLSearchParams({
-          media_type: 'IMAGE', image_url: url,
-          is_carousel_item: 'true', access_token: token,
+        const res = await fetch(`${THREADS_API}/${userId}/threads`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            media_type: 'IMAGE',
+            image_url: url,
+            is_carousel_item: true,
+            access_token: token,
+          })
         });
-        const res = await fetch(`${THREADS_API}/${userId}/threads?${params}`, { method: 'POST' });
         const data = await res.json();
-        if (!res.ok) throw new Error(`캐러셀 아이템 실패: ${JSON.stringify(data)}`);
+        if (!res.ok || data.error) throw new Error(`캐러셀 아이템 실패: ${JSON.stringify(data)}`);
         return data.id as string;
       }));
 
       await new Promise(r => setTimeout(r, 5000));
 
-      const carouselParams = new URLSearchParams({
-        media_type: 'CAROUSEL', children: itemIds.join(','),
-        text: caption.slice(0, 500), access_token: token,
+      const carouselRes = await fetch(`${THREADS_API}/${userId}/threads`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          media_type: 'CAROUSEL',
+          children: itemIds.join(','),
+          text: caption.slice(0, 500),
+          access_token: token,
+        })
       });
-      const carouselRes = await fetch(`${THREADS_API}/${userId}/threads?${carouselParams}`, { method: 'POST' });
       const carousel = await carouselRes.json();
-      if (!carouselRes.ok) throw new Error(`캐러셀 컨테이너 실패: ${JSON.stringify(carousel)}`);
+      if (!carouselRes.ok || carousel.error) throw new Error(`캐러셀 컨테이너 실패: ${JSON.stringify(carousel)}`);
       containerId = carousel.id;
 
       await new Promise(r => setTimeout(r, 3000));
     }
 
-    const pubParams = new URLSearchParams({ creation_id: containerId, access_token: token });
-    const pubRes = await fetch(`${THREADS_API}/${userId}/threads_publish?${pubParams}`, { method: 'POST' });
+    let isReady = false;
+    for (let i = 0; i < 5; i++) {
+      const statusRes = await fetch(`${THREADS_API}/${containerId}?fields=status&access_token=${token}`);
+      const statusData = await statusRes.json();
+      if (statusData.status === 'FINISHED') {
+        isReady = true;
+        break;
+      }
+      if (statusData.status === 'ERROR') {
+        throw new Error(`Threads 컨테이너 상태 에러: ${JSON.stringify(statusData)}`);
+      }
+      await new Promise(r => setTimeout(r, 3000));
+    }
+
+    if (!isReady) {
+      throw new Error(`Threads 이미지 처리 지연. 잠시 후 다시 시도해주세요.`);
+    }
+
+    const pubRes = await fetch(`${THREADS_API}/${userId}/threads_publish`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        creation_id: containerId,
+        access_token: token,
+      })
+    });
     const pubData = await pubRes.json();
-    if (!pubRes.ok) throw new Error(`게시 실패: ${JSON.stringify(pubData)}`);
+    if (!pubRes.ok || pubData.error) throw new Error(`게시 실패: ${JSON.stringify(pubData)}`);
 
     const permalinkRes = await fetch(`${THREADS_API}/${pubData.id}?fields=id,permalink&access_token=${token}`);
     const permalinkData = await permalinkRes.json();
