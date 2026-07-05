@@ -50,7 +50,15 @@ export async function POST(request: Request) {
     반드시 아래 JSON 구조로 응답하세요:
     {
       "cardNews": [
-        { "page": 1, "title": "문자열", "body": "문자열", "imageKeyword": "영어 키워드" }
+        { 
+          "page": 1, 
+          "title": "문자열", 
+          "body": "문자열", 
+          "imageKeyword": "영어 키워드",
+          "blocks": [
+            { "type": "bigNumber", "value": "20%", "caption": "분양가 상승" }
+          ]
+        }
       ],
       "blogPost": "마크다운 문자열",
       "viralHooks": ["훅1", "훅2", "훅3"],
@@ -62,6 +70,7 @@ export async function POST(request: Request) {
     2. blogPost: 마크다운 형식을 지키되, 줄바꿈은 \\n으로 처리하여 JSON 형식을 깨뜨리지 말 것. 블로그 본문은 공백 포함 800자 이내로 핵심만 간결하게 작성할 것 (상세한 긴 글은 불필요, 카드뉴스 요점 위주).
     3. imageKeyword: Unsplash 검색용 영어 키워드. 템플릿 스타일 '${templateTitle}' 반영.
     4. themeKey: 생성한 콘텐츠의 주제와 톤앤매너에 가장 잘 어울리는 스타일 테마 키를 'business', 'cafe', 'lifestyle', 'travel', 'fashion', 'food', 'education' 중 정확히 1개 골라 소문자로 작성할 것. 주제가 모호하거나 적절한 매칭이 어려운 경우 기본값으로 'business'를 선택할 것.
+    5. blocks(선택): 본문에 핵심 수치(%, 억, 년, 배수, 순위 등)가 있으면, 그 수치를 blocks의 bigNumber 항목으로 분리해 강조하라. value에는 숫자+단위(예: '20%', '5년', '7억'), caption에는 짧은 설명(예: '분양가 상승'). 수치가 여러 개면 statGrid({type:'statGrid', items:[{value,label}...]})로 묶어도 좋다. 수치가 없는 카드는 blocks를 생략하고 기존처럼 body만 작성하라. (주의: blocks가 있어도 body는 비우지 말고 기존처럼 채울 것)
 
 내용: ${inputContent}`;
 
