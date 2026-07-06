@@ -22,6 +22,7 @@ async function uploadToThreads(
     return { success: false, error: 'Threads 계정이 연동되지 않았습니다. SNS 설정에서 먼저 연동하세요.' };
   }
   const { access_token: token, platform_user_id: userId } = account;
+  const authHeader = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   // Meta는 imgur 등 일부 도메인을 차단 → 프록시 URL 사용
   const proxiedUrls = imageUrls.map(toProxyUrl);
@@ -29,37 +30,41 @@ async function uploadToThreads(
   try {
     let containerId: string;
     const urls = proxiedUrls.slice(0, 10);
-    const headers = { 'Content-Type': 'application/json' };
 
     if (urls.length === 1) {
       const res = await fetch(`${THREADS_API}/${userId}/threads`, {
         method: 'POST',
-        headers,
+        headers: authHeader,
         body: JSON.stringify({
           media_type: 'IMAGE',
           image_url: urls[0],
           text: caption.slice(0, 500),
-          access_token: token,
         })
       });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(`단일 이미지 컨테이너 실패: ${JSON.stringify(data)}`);
+      const text = await res.text();
+      let data: any = {};
+      try { data = text ? JSON.parse(text) : {}; } catch (e) {}
+      if (!res.ok) throw new Error(`[Threads/단일이미지생성] 에러(${res.status}): ${text || '빈 응답'}`);
+      if (data.error) throw new Error(`[Threads/단일이미지생성] 실패: ${JSON.stringify(data.error)}`);
+      
       containerId = data.id;
       await new Promise(r => setTimeout(r, 3000));
     } else {
       const itemIds = await Promise.all(urls.map(async (url) => {
         const res = await fetch(`${THREADS_API}/${userId}/threads`, {
           method: 'POST',
-          headers,
+          headers: authHeader,
           body: JSON.stringify({
             media_type: 'IMAGE',
             image_url: url,
             is_carousel_item: true,
-            access_token: token,
           })
         });
-        const data = await res.json();
-        if (!res.ok || data.error) throw new Error(`캐러셀 아이템 실패: ${JSON.stringify(data)}`);
+        const text = await res.text();
+        let data: any = {};
+        try { data = text ? JSON.parse(text) : {}; } catch (e) {}
+        if (!res.ok) throw new Error(`[Threads/아이템생성] 에러(${res.status}): ${text || '빈 응답'}`);
+        if (data.error) throw new Error(`[Threads/아이템생성] 실패: ${JSON.stringify(data.error)}`);
         return data.id as string;
       }));
 
@@ -67,16 +72,18 @@ async function uploadToThreads(
 
       const carouselRes = await fetch(`${THREADS_API}/${userId}/threads`, {
         method: 'POST',
-        headers,
+        headers: authHeader,
         body: JSON.stringify({
           media_type: 'CAROUSEL',
           children: itemIds.join(','),
           text: caption.slice(0, 500),
-          access_token: token,
         })
       });
-      const carousel = await carouselRes.json();
-      if (!carouselRes.ok || carousel.error) throw new Error(`캐러셀 컨테이너 실패: ${JSON.stringify(carousel)}`);
+      const text = await carouselRes.text();
+      let carousel: any = {};
+      try { carousel = text ? JSON.parse(text) : {}; } catch (e) {}
+      if (!carouselRes.ok) throw new Error(`[Threads/캐러셀생성] 에러(${carouselRes.status}): ${text || '빈 응답'}`);
+      if (carousel.error) throw new Error(`[Threads/캐러셀생성] 실패: ${JSON.stringify(carousel.error)}`);
       containerId = carousel.id;
 
       await new Promise(r => setTimeout(r, 3000));
@@ -84,14 +91,19 @@ async function uploadToThreads(
 
     let isReady = false;
     for (let i = 0; i < 5; i++) {
-      const statusRes = await fetch(`${THREADS_API}/${containerId}?fields=status&access_token=${token}`);
-      const statusData = await statusRes.json();
+      const statusRes = await fetch(`${THREADS_API}/${containerId}?fields=status`, { headers: authHeader });
+      const text = await statusRes.text();
+      let statusData: any = {};
+      try { statusData = text ? JSON.parse(text) : {}; } catch (e) {}
+      if (!statusRes.ok) throw new Error(`[Threads/폴링] 에러(${statusRes.status}): ${text || '빈 응답'}`);
+      if (statusData.error) throw new Error(`[Threads/폴링] 실패: ${JSON.stringify(statusData.error)}`);
+      
       if (statusData.status === 'FINISHED') {
         isReady = true;
         break;
       }
       if (statusData.status === 'ERROR') {
-        throw new Error(`Threads 컨테이너 상태 에러: ${JSON.stringify(statusData)}`);
+        throw new Error(`[Threads/폴링] 컨테이너 상태 에러: ${JSON.stringify(statusData)}`);
       }
       await new Promise(r => setTimeout(r, 3000));
     }
@@ -102,17 +114,23 @@ async function uploadToThreads(
 
     const pubRes = await fetch(`${THREADS_API}/${userId}/threads_publish`, {
       method: 'POST',
-      headers,
+      headers: authHeader,
       body: JSON.stringify({
         creation_id: containerId,
-        access_token: token,
       })
     });
-    const pubData = await pubRes.json();
-    if (!pubRes.ok || pubData.error) throw new Error(`게시 실패: ${JSON.stringify(pubData)}`);
+    const pubText = await pubRes.text();
+    let pubData: any = {};
+    try { pubData = pubText ? JSON.parse(pubText) : {}; } catch (e) {}
+    if (!pubRes.ok) throw new Error(`[Threads/발행] 에러(${pubRes.status}): ${pubText || '빈 응답'}`);
+    if (pubData.error) throw new Error(`[Threads/발행] 실패: ${JSON.stringify(pubData.error)}`);
 
-    const permalinkRes = await fetch(`${THREADS_API}/${pubData.id}?fields=id,permalink&access_token=${token}`);
-    const permalinkData = await permalinkRes.json();
+    const permalinkRes = await fetch(`${THREADS_API}/${pubData.id}?fields=id,permalink`, { headers: authHeader });
+    const permalinkText = await permalinkRes.text();
+    let permalinkData: any = {};
+    try { permalinkData = permalinkText ? JSON.parse(permalinkText) : {}; } catch (e) {}
+    if (!permalinkRes.ok) throw new Error(`[Threads/퍼머링크조회] 에러(${permalinkRes.status}): ${permalinkText || '빈 응답'}`);
+    
     return { success: true, url: permalinkData.permalink || 'https://www.threads.net/' };
   } catch (e: any) {
     return { success: false, error: e.message };
