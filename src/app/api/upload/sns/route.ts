@@ -22,7 +22,7 @@ async function uploadToThreads(
     return { success: false, error: 'Threads 계정이 연동되지 않았습니다. SNS 설정에서 먼저 연동하세요.' };
   }
   const { access_token: token, platform_user_id: userId } = account;
-  const authHeader = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': 'application/json' };
 
   // Meta는 imgur 등 일부 도메인을 차단 → 프록시 URL 사용
   const proxiedUrls = imageUrls.map(toProxyUrl);
@@ -32,39 +32,54 @@ async function uploadToThreads(
     const urls = proxiedUrls.slice(0, 10);
 
     if (urls.length === 1) {
+      const payload = {
+        media_type: 'IMAGE',
+        image_url: urls[0],
+        text: caption.slice(0, 500),
+        access_token: token,
+      };
       const res = await fetch(`${THREADS_API}/${userId}/threads`, {
         method: 'POST',
-        headers: authHeader,
-        body: JSON.stringify({
-          media_type: 'IMAGE',
-          image_url: urls[0],
-          text: caption.slice(0, 500),
-        })
+        headers,
+        body: JSON.stringify(payload)
       });
       const text = await res.text();
       let data: any = {};
       try { data = text ? JSON.parse(text) : {}; } catch (e) {}
-      if (!res.ok) throw new Error(`[Threads/단일이미지생성] 에러(${res.status}): ${text || '빈 응답'}`);
-      if (data.error) throw new Error(`[Threads/단일이미지생성] 실패: ${JSON.stringify(data.error)}`);
+      if (!res.ok) {
+        console.error(`[Threads/단일생성 오류로그] URL: ${urls[0]}, 상태: ${res.status}, 응답: ${text}`);
+        throw new Error(`[Threads/단일이미지생성] 에러(${res.status}) [이미지: ${urls[0]}]: ${text || '빈 응답'}`);
+      }
+      if (data.error) throw new Error(`[Threads/단일이미지생성] 실패 [이미지: ${urls[0]}]: ${JSON.stringify(data.error)}`);
       
       containerId = data.id;
       await new Promise(r => setTimeout(r, 3000));
     } else {
       const itemIds = await Promise.all(urls.map(async (url) => {
+        const payload = {
+          media_type: 'IMAGE',
+          image_url: url,
+          is_carousel_item: true,
+          access_token: token,
+        };
         const res = await fetch(`${THREADS_API}/${userId}/threads`, {
           method: 'POST',
-          headers: authHeader,
-          body: JSON.stringify({
-            media_type: 'IMAGE',
-            image_url: url,
-            is_carousel_item: true,
-          })
+          headers,
+          body: JSON.stringify(payload)
         });
         const text = await res.text();
         let data: any = {};
         try { data = text ? JSON.parse(text) : {}; } catch (e) {}
-        if (!res.ok) throw new Error(`[Threads/아이템생성] 에러(${res.status}): ${text || '빈 응답'}`);
-        if (data.error) throw new Error(`[Threads/아이템생성] 실패: ${JSON.stringify(data.error)}`);
+        
+        if (!res.ok) {
+          const maskedPayload = { ...payload, access_token: '***' };
+          console.error(`[Threads/아이템생성 오류로그] URL: ${url}`);
+          console.error(`요청 파라미터: ${JSON.stringify(maskedPayload)}`);
+          console.error(`응답 상태: ${res.status}, 본문: ${text}`);
+          
+          throw new Error(`[Threads/아이템생성] 에러(${res.status}) [이미지: ${url}]: ${text || '빈 응답'}`);
+        }
+        if (data.error) throw new Error(`[Threads/아이템생성] 실패 [이미지: ${url}]: ${JSON.stringify(data.error)}`);
         return data.id as string;
       }));
 
@@ -72,11 +87,12 @@ async function uploadToThreads(
 
       const carouselRes = await fetch(`${THREADS_API}/${userId}/threads`, {
         method: 'POST',
-        headers: authHeader,
+        headers,
         body: JSON.stringify({
           media_type: 'CAROUSEL',
           children: itemIds.join(','),
           text: caption.slice(0, 500),
+          access_token: token,
         })
       });
       const text = await carouselRes.text();
@@ -91,7 +107,7 @@ async function uploadToThreads(
 
     let isReady = false;
     for (let i = 0; i < 5; i++) {
-      const statusRes = await fetch(`${THREADS_API}/${containerId}?fields=status`, { headers: authHeader });
+      const statusRes = await fetch(`${THREADS_API}/${containerId}?fields=status&access_token=${token}`, { headers });
       const text = await statusRes.text();
       let statusData: any = {};
       try { statusData = text ? JSON.parse(text) : {}; } catch (e) {}
@@ -114,9 +130,10 @@ async function uploadToThreads(
 
     const pubRes = await fetch(`${THREADS_API}/${userId}/threads_publish`, {
       method: 'POST',
-      headers: authHeader,
+      headers,
       body: JSON.stringify({
         creation_id: containerId,
+        access_token: token,
       })
     });
     const pubText = await pubRes.text();
@@ -125,7 +142,7 @@ async function uploadToThreads(
     if (!pubRes.ok) throw new Error(`[Threads/발행] 에러(${pubRes.status}): ${pubText || '빈 응답'}`);
     if (pubData.error) throw new Error(`[Threads/발행] 실패: ${JSON.stringify(pubData.error)}`);
 
-    const permalinkRes = await fetch(`${THREADS_API}/${pubData.id}?fields=id,permalink`, { headers: authHeader });
+    const permalinkRes = await fetch(`${THREADS_API}/${pubData.id}?fields=id,permalink&access_token=${token}`, { headers });
     const permalinkText = await permalinkRes.text();
     let permalinkData: any = {};
     try { permalinkData = permalinkText ? JSON.parse(permalinkText) : {}; } catch (e) {}
