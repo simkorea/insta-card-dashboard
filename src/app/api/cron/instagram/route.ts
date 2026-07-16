@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const IG_API = 'https://graph.facebook.com/v21.0';
+const IG_API = 'https://graph.instagram.com/v21.0';
 
 async function createChildContainer(ig_user_id: string, access_token: string, imageUrl: string) {
   const res = await fetch(`${IG_API}/${ig_user_id}/media`, {
