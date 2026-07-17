@@ -5878,7 +5878,19 @@ function SnsUploadModal({
   const [showFcGate, setShowFcGate] = React.useState(false);
   const [factsList, setFactsList] = React.useState<{ type: string; value: string }[]>([]);
 
+  const [publishMode, setPublishMode] = React.useState<'now' | 'schedule'>('now');
+  const [scheduledAt, setScheduledAt] = React.useState('');
+
+  React.useEffect(() => {
+    if (publishMode === 'schedule') {
+      setSelected(new Set(['instagram']));
+    } else {
+      setSelected(new Set(['instagram', 'threads']));
+    }
+  }, [publishMode]);
+
   const toggle = (id: string) => {
+    if (publishMode === 'schedule' && id !== 'instagram') return;
     setSelected(prev => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -5990,17 +6002,60 @@ function SnsUploadModal({
         }
       }
 
-      setProgress('SNS 전송 중...');
-      const snsRes = await fetch('/api/upload/sns', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageUrls, caption, platforms: Array.from(selected) }),
-      });
-      const snsData = await snsRes.json();
-      if (snsData.error) throw new Error(snsData.error);
-      setResults(snsData.results || {});
-      setStatus('done');
-      setProgress('');
+      if (publishMode === 'now') {
+        setProgress('SNS 전송 중...');
+        const snsRes = await fetch('/api/upload/sns', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrls, caption, platforms: Array.from(selected) }),
+        });
+        const snsData = await snsRes.json();
+        if (snsData.error) throw new Error(snsData.error);
+        setResults(snsData.results || {});
+        setStatus('done');
+        setProgress('');
+      } else {
+        if (!scheduledAt) {
+          alert('예약 시간을 선택하세요');
+          setStatus('idle');
+          setProgress('');
+          return;
+        }
+        setProgress('예약 저장 중...');
+        const hashtagRegex = /#([a-zA-Z0-9ㄱ-ㅎㅏ-ㅣ가-힣_]+)/g;
+        const matched = caption.match(hashtagRegex);
+        const hashtagsStr = matched ? matched.join(', ') : '';
+
+        let designId: string | undefined = undefined;
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          designId = params.get('id') || undefined;
+        }
+        const designName = pagesData[0]?.title?.replace(/\n/g, ' ') || '카드뉴스';
+
+        const schedRes = await fetch('/api/scheduled-posts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            design_id: designId,
+            design_name: designName,
+            thumbnail_url: imageUrls[0],
+            slide_image_urls: imageUrls,
+            caption,
+            hashtags: hashtagsStr,
+            scheduled_at: new Date(scheduledAt).toISOString(),
+          }),
+        });
+
+        const schedData = await schedRes.json();
+        if (!schedRes.ok || schedData.error) {
+          throw new Error(schedData.error || '예약 저장 실패');
+        }
+
+        setResults({});
+        setStatus('done');
+        setProgress('');
+      }
     } catch (e: any) {
       setProgress('');
       setStatus('error');
@@ -6045,13 +6100,56 @@ function SnsUploadModal({
         </div>
 
         <div className="p-6 space-y-5">
+          {/* 발행 방식 선택 */}
+          <div>
+            <p className="text-xs font-bold text-gray-600 mb-2">발행 방식</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setPublishMode('now')}
+                className={`py-2.5 px-3 rounded-xl border-2 text-xs font-bold transition-all ${
+                  publishMode === 'now'
+                    ? 'border-purple-500 bg-purple-50 text-purple-600'
+                    : 'border-gray-200 text-gray-400 hover:border-gray-300'
+                }`}
+              >
+                즉시 발행
+              </button>
+              <button
+                type="button"
+                onClick={() => setPublishMode('schedule')}
+                className={`py-2.5 px-3 rounded-xl border-2 text-xs font-bold transition-all ${
+                  publishMode === 'schedule'
+                    ? 'border-purple-500 bg-purple-50 text-purple-600'
+                    : 'border-gray-200 text-gray-400 hover:border-gray-300'
+                }`}
+              >
+                예약 발행
+              </button>
+            </div>
+          </div>
+
+          {/* 예약 시간 입력 */}
+          {publishMode === 'schedule' && (
+            <div className="space-y-2">
+              <p className="text-xs font-bold text-gray-600">예약 시간</p>
+              <input
+                type="datetime-local"
+                value={scheduledAt}
+                onChange={e => setScheduledAt(e.target.value)}
+                className="w-full text-sm text-gray-700 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-purple-300"
+              />
+              <p className="text-[10px] text-purple-500">예약 발행은 Instagram만 지원됩니다.</p>
+            </div>
+          )}
+
           {/* 플랫폼 선택 */}
           <div>
             <p className="text-xs font-bold text-gray-600 mb-3">업로드할 플랫폼</p>
             <div className="grid grid-cols-5 gap-2">
               {PLATFORMS.map(p => {
                 const isOn = selected.has(p.id);
-                const disabled = !!p.note;
+                const disabled = !!p.note || (publishMode === 'schedule' && p.id !== 'instagram');
                 return (
                   <button
                     key={p.id}
@@ -6097,12 +6195,16 @@ function SnsUploadModal({
               <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center shrink-0">
                 <Check size={13} className="text-white" />
               </div>
-              <p className="text-sm font-bold text-green-700">업로드 완료! 각 플랫폼에서 확인하세요.</p>
+              <p className="text-sm font-bold text-green-700">
+                {publishMode === 'schedule'
+                  ? `예약 완료! ${new Date(scheduledAt).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}에 발행됩니다.`
+                  : '업로드 완료! 각 플랫폼에서 확인하세요.'}
+              </p>
             </div>
           )}
 
           {/* 결과 표시 */}
-          {(status === 'done' || status === 'error') && Object.keys(results).length > 0 && (
+          {publishMode === 'now' && (status === 'done' || status === 'error') && Object.keys(results).length > 0 && (
             <div className="space-y-2">
               {Object.entries(results).map(([platform, result]) => {
                 if (platform === '_error') return null;
@@ -6133,6 +6235,14 @@ function SnsUploadModal({
             </div>
           )}
 
+          {/* 예약 모드 에러 표시 (results._error가 있을 때만 노출) */}
+          {publishMode === 'schedule' && status === 'error' && results._error && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <p className="text-xs font-bold text-red-700">오류</p>
+              <p className="text-[11px] text-red-500">{results._error.error}</p>
+            </div>
+          )}
+
           {/* 업로드 버튼 */}
           {status === 'uploading' ? (
             <div className="w-full py-3 bg-purple-50 border border-purple-100 rounded-xl flex items-center justify-center gap-2">
@@ -6144,7 +6254,7 @@ function SnsUploadModal({
               onClick={() => { setStatus('idle'); setResults({}); setProgress(''); setFactCheckConfirmed(false); }}
               className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-bold rounded-xl transition-all"
             >
-              다시 업로드
+              {publishMode === 'schedule' ? '추가 예약하기' : '다시 업로드'}
             </button>
           ) : status === 'error' ? (
             <button
@@ -6161,7 +6271,7 @@ function SnsUploadModal({
               className="w-full py-3 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 active:scale-[0.98] text-white text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg>
-              {selected.size > 0 ? `${selected.size}개 플랫폼에 업로드` : '플랫폼 선택하세요'}
+              {publishMode === 'schedule' ? '예약 발행 등록' : selected.size > 0 ? `${selected.size}개 플랫폼에 업로드` : '플랫폼 선택하세요'}
             </button>
           )}
 
