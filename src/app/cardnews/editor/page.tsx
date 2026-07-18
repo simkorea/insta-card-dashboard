@@ -6022,16 +6022,28 @@ function SnsUploadModal({
           return;
         }
         setProgress('예약 저장 중...');
-        const hashtagRegex = /#([a-zA-Z0-9ㄱ-ㅎㅏ-ㅣ가-힣_]+)/g;
-        const matched = caption.match(hashtagRegex);
-        const hashtagsStr = matched ? matched.join(', ') : '';
-
         let designId: string | undefined = undefined;
         if (typeof window !== 'undefined') {
           const params = new URLSearchParams(window.location.search);
           designId = params.get('id') || undefined;
         }
         const designName = pagesData[0]?.title?.replace(/\n/g, ' ') || '카드뉴스';
+
+        // 예약 발행 시 캡션이 비어있는 경우 자동 채우기 로직 적용
+        let resolvedCaption = caption;
+        if (!resolvedCaption || resolvedCaption.trim() === '') {
+          resolvedCaption = collectCardTexts(pagesData);
+        }
+        if (!resolvedCaption || resolvedCaption.trim() === '') {
+          resolvedCaption = designName;
+        }
+        if (!resolvedCaption || resolvedCaption.trim() === '') {
+          resolvedCaption = ' ';
+        }
+
+        const hashtagRegex = /#([a-zA-Z0-9ㄱ-ㅎㅏ-ㅣ가-힣_]+)/g;
+        const matched = resolvedCaption.match(hashtagRegex);
+        const hashtagsStr = matched ? matched.join(', ') : '';
 
         const schedRes = await fetch('/api/scheduled-posts', {
           method: 'POST',
@@ -6041,7 +6053,7 @@ function SnsUploadModal({
             design_name: designName,
             thumbnail_url: imageUrls[0],
             slide_image_urls: imageUrls,
-            caption,
+            caption: resolvedCaption,
             hashtags: hashtagsStr,
             scheduled_at: new Date(scheduledAt).toISOString(),
           }),
