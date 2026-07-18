@@ -103,7 +103,11 @@ export async function POST(request: Request) {
     - 각 카드의 blocks 배열은 절대로 비워두지 말고(빈 배열 금지) 반드시 1개 이상의 유효한 블록들로 풍부하게 작성하세요.
     - blocks의 필수 구조: 맨 앞 eyebrow 1개 + headline 1개 + 내용 블록 1개 이상 (compareTable, timeline, statGrid, checklist, badgeRow, sub 중 맥락에 맞게 선택).
     - eyebrow는 blocks 배열 맨 앞에 정확히 1개만 배치할 것.
-    - 표지 headline은 짧고 강하게(최대 20자), 수치는 구체적 숫자/단위로 작성할 것.
+    - 모든 슬라이드의 headline은 공백 포함 18자 이내로 작성할 것 (표지 포함). 18자를 넘으면 핵심만 남기고 줄여서 다시 쓸 것. 서술형 문장이 아니라 짧은 구/명사형으로 끝낼 것 (나쁜 예: "투자자들이 주목하는 이유는 무엇일까요" / 좋은 예: "투자자가 주목하는 이유").
+    - accentText는 headline 안에서 강조할 3~6자 정도의 짧은 조각만 지정할 것.
+    - sub(부제) 텍스트는 공백 포함 40자 이내로 작성할 것.
+    - checklist 각 항목은 공백 포함 22자 이내의 짧은 구로 작성할 것 (긴 문장을 한 항목에 넣지 말고, 필요하면 항목을 나눌 것).
+    - 수치는 구체적 숫자/단위로 작성할 것.
     - 주제가 비즈니스/부동산/세금/금융이면 brandTone "gold", 라이프/여행/패션/건강이면 "sage".
     - 모든 카드의 showFrame은 true.
     - layout은 'center', 'bottom-left', 'bottom-left-list' 중 설정.
