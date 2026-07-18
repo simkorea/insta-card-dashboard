@@ -52,11 +52,17 @@ export async function POST(request: Request) {
       "cardNews": [
         { 
           "page": 1, 
-          "title": "문자열", 
-          "body": "문자열", 
+          "title": "대표제목 (폴백용)", 
+          "subtitle": "보조설명 (폴백용)",
+          "body": "본문 요약 텍스트 (폴백용)", 
           "imageKeyword": "영어 키워드",
+          "brandTone": "gold",
+          "showFrame": true,
+          "layout": "bottom-left-list",
           "blocks": [
-            { "type": "bigNumber", "value": "20%", "caption": "분양가 상승" }
+            { "type": "eyebrow", "text": "HOT ISSUE" },
+            { "type": "headline", "text": "핵심 제목", "accentText": "강조어" },
+            { "type": "badgeRow", "badges": [{ "text": "핵심 정보", "tone": "gold" }] }
           ]
         }
       ],
@@ -68,9 +74,40 @@ export async function POST(request: Request) {
     [지침]
     1. cardNews: ${slideInstruction}.
     2. blogPost: 마크다운 형식을 지키되, 줄바꿈은 \\n으로 처리하여 JSON 형식을 깨뜨리지 말 것. 블로그 본문은 공백 포함 800자 이내로 핵심만 간결하게 작성할 것 (상세한 긴 글은 불필요, 카드뉴스 요점 위주).
-    3. imageKeyword: Unsplash 검색용 영어 키워드. 템플릿 스타일 '${templateTitle}' 반영.
+    3. imageKeyword: Unsplash/Pexels 검색용 영어 키워드. 템플릿 스타일 '${templateTitle}' 반영.
     4. themeKey: 생성한 콘텐츠의 주제와 톤앤매너에 가장 잘 어울리는 스타일 테마 키를 'business', 'cafe', 'lifestyle', 'travel', 'fashion', 'food', 'education' 중 정확히 1개 골라 소문자로 작성할 것. 주제가 모호하거나 적절한 매칭이 어려운 경우 기본값으로 'business'를 선택할 것.
-    5. blocks(선택): 본문에 핵심 수치(%, 억, 년, 배수, 순위 등)가 있으면, 그 수치를 blocks의 bigNumber 항목으로 분리해 강조하라. value에는 숫자+단위(예: '20%', '5년', '7억'), caption에는 짧은 설명(예: '분양가 상승'). 수치가 여러 개면 statGrid({type:'statGrid', items:[{value,label}...]})로 묶어도 좋다. 수치가 없는 카드는 blocks를 생략하고 기존처럼 body만 작성하라. (주의: blocks가 있어도 body는 비우지 말고 기존처럼 채울 것)
+
+    [블록 타입 정의]
+    SlideBlock 종류:
+    - { "type":"eyebrow", "text": "섹션 라벨 (영문 대문자 권장: PRICE, LOCATION, SCHEDULE 등)" }
+    - { "type":"headline", "text":"메인 제목", "accentText":"강조할 일부(선택)" }
+    - { "type":"sub", "text":"보조 설명" }
+    - { "type":"bigNumber", "value":"7억대", "caption":"설명(선택)" }
+    - { "type":"statGrid", "cols":3, "items":[{"value":"39%","label":"민간 대비 저렴"}] }
+    - { "type":"compareTable", "rows":[{"label":"84㎡","value":"7억 3,245만원","highlight":true}] }
+    - { "type":"timeline", "items":[{"date":"2026.6.12","title":"당첨자 발표","desc":"설명(선택)","state":"active"}] }  // state: done|active|todo
+    - { "type":"checklist", "items":["항목1","항목2"] }
+    - { "type":"badgeRow", "badges":[{"text":"핵심 정보","tone":"gold"}] }  // tone: gold|green|neutral
+    - { "type":"sourceNote", "text":"출처: ..." }
+
+    [슬라이드 유형별 권장 블록 구성]
+    - 표지(1번): eyebrow + headline(accentText 활용) + badgeRow
+    - 가격/비용/수치: eyebrow("PRICE") + headline + compareTable (가장 중요한 행은 highlight:true)
+    - 입지/위치/개요: eyebrow("LOCATION") + headline + badgeRow + (필요시 checklist)
+    - 일정/절차: eyebrow("SCHEDULE") + headline + timeline (지난 단계 done, 임박 단계 active, 이후 todo)
+    - 시세/통계/숫자: eyebrow + headline + statGrid(cols 2~4)
+    - 정책/주의사항/체크리스트: eyebrow + headline + checklist
+    - 마무리/CTA(마지막): eyebrow + headline + sub + sourceNote
+
+    [blocks 생성 필수 규칙]
+    - 각 카드의 blocks 배열은 절대로 비워두지 말고(빈 배열 금지) 반드시 1개 이상의 유효한 블록들로 풍부하게 작성하세요.
+    - blocks의 필수 구조: 맨 앞 eyebrow 1개 + headline 1개 + 내용 블록 1개 이상 (compareTable, timeline, statGrid, checklist, badgeRow, sub 중 맥락에 맞게 선택).
+    - eyebrow는 blocks 배열 맨 앞에 정확히 1개만 배치할 것.
+    - 표지 headline은 짧고 강하게(최대 20자), 수치는 구체적 숫자/단위로 작성할 것.
+    - 주제가 비즈니스/부동산/세금/금융이면 brandTone "gold", 라이프/여행/패션/건강이면 "sage".
+    - 모든 카드의 showFrame은 true.
+    - layout은 'center', 'bottom-left', 'bottom-left-list' 중 설정.
+    - blocks가 있어도 body 및 subtitle 필드는 비우지 말고 기존처럼 요약 텍스트를 반드시 채울 것 (폴백 보존용).
 
 내용: ${inputContent}`;
 
@@ -78,7 +115,7 @@ export async function POST(request: Request) {
     let text = await callAI({
       prompt,
       model: 'anthropic/claude-haiku-4.5',
-      maxTokens: 4000,
+      maxTokens: 8000,
     });
 
     try {

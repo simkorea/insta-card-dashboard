@@ -1035,23 +1035,36 @@ export default function CardNewsPage() {
           setUseAiStyle(false);
         }
 
+        // 브랜드 핸들 결정
+        const activePersona = personas.find(p => p.id === selectedPersonaId) || personas[0];
+        const activeBrandName = activePersona?.brand_name || '@aptshowhome';
+
         // 배경 이미지 자동 매칭 (Unsplash API 호출)
-        const updatedCardNews = await Promise.all(data.cardNews.map(async (card: any) => {
+        const updatedCardNews = await Promise.all(data.cardNews.map(async (card: any, idx: number) => {
+          let bgUrl = '';
           try {
             const imgRes = await fetch(`/api/images/search?query=${encodeURIComponent(card.imageKeyword)}`);
             const imgData = await imgRes.json();
-            return { 
-              ...card, 
-              backgroundImage: imgData.imageUrl || '',
-              accent: brandKit.useAutoAccent ? brandKit.color : undefined
-            };
+            bgUrl = imgData.imageUrl || '';
           } catch (e) {
-            return { 
-              ...card, 
-              backgroundImage: '',
-              accent: brandKit.useAutoAccent ? brandKit.color : undefined
-            };
+            bgUrl = '';
           }
+
+          const finalBlocks = Array.isArray(card.blocks) && card.blocks.length > 0
+            ? card.blocks
+            : [{ type: 'headline', text: card.title || '제목' }];
+
+          return { 
+            ...card, 
+            backgroundImage: bgUrl,
+            accent: brandKit.useAutoAccent ? brandKit.color : undefined,
+            blocks: finalBlocks,
+            brandTone: card.brandTone === 'sage' ? 'sage' : 'gold',
+            showFrame: card.showFrame !== undefined ? card.showFrame : true,
+            handle: card.handle || activeBrandName,
+            overlay: card.overlay || 'linear-gradient(to top, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.40) 100%)',
+            blocksOffsetY: card.blocksOffsetY !== undefined ? card.blocksOffsetY : (idx === 0 ? 78 : 90),
+          };
         }));
 
         // 카드뉴스 텍스트 포맷팅 (기획안 확인용 텍스트)
