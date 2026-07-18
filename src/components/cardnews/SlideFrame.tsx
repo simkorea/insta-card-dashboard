@@ -6,6 +6,7 @@ export function SlideFrame({
   page,
   total,
   brandTone = 'gold',
+  accentOverride,
   eyebrow,
   children,
 }: {
@@ -13,10 +14,19 @@ export function SlideFrame({
   page?: number;
   total?: number;
   brandTone?: BrandTone;
+  accentOverride?: string;
   eyebrow?: string;
   children?: React.ReactNode;
 }) {
-  const c = tone(brandTone);
+  const base = tone(brandTone);
+  const isHex6 = typeof accentOverride === 'string' && /^#[0-9A-Fa-f]{6}$/.test(accentOverride);
+  const c = accentOverride
+    ? {
+        ...base,
+        accent: accentOverride,
+        accentSoft: isHex6 ? `${accentOverride}29` : base.accentSoft,
+      }
+    : base;
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
       {/* 상단: 핸들 pill + 페이지번호 */}

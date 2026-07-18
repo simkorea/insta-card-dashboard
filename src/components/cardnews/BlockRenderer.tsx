@@ -24,6 +24,7 @@ export interface TextStyle {
 export function BlockRenderer({
   blocks,
   brandTone = 'gold',
+  accentOverride,
   editable = false,
   onBlockOffsetChange,
   availableHeight,
@@ -34,6 +35,7 @@ export function BlockRenderer({
 }: {
   blocks: SlideBlock[];
   brandTone?: BrandTone;
+  accentOverride?: string;
   editable?: boolean;
   onBlockOffsetChange?: (index: number, offsetY: number) => void;
   availableHeight?: number;
@@ -42,7 +44,15 @@ export function BlockRenderer({
   subtitleStyle?: TextStyle;
   bulletStyle?: TextStyle;
 }) {
-  const c = tone(brandTone);
+  const base = tone(brandTone);
+  const isHex6 = typeof accentOverride === 'string' && /^#[0-9A-Fa-f]{6}$/.test(accentOverride);
+  const c = accentOverride
+    ? {
+        ...base,
+        accent: accentOverride,
+        accentSoft: isHex6 ? `${accentOverride}29` : base.accentSoft,
+      }
+    : base;
   const [isDragging, setIsDragging] = useState(false);
   const [activeDragIndex, setActiveDragIndex] = useState<number | null>(null);
   const dragStartRef = useRef<{ index: number; startY: number; startOffset: number } | null>(null);

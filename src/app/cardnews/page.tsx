@@ -4,6 +4,7 @@ import { ImagePlus, ChevronLeft, Search, RefreshCw, MessageSquare, Settings, Che
 import { useRouter } from 'next/navigation';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { friendlyError } from '@/lib/errors';
+import { STEP9_PRESETS } from '@/lib/cardnews/step9-presets';
 
 // ─── 슬라이드 렌더러 (카로셀 캡처용) ────────────────────────────────────────
 const CAPTURE_FONTS_URL =
@@ -255,6 +256,7 @@ export default function CardNewsPage() {
   const [step9Recency, setStep9Recency] = useState<'today' | 'week' | 'month' | 'evergreen'>('evergreen');
   const [step9Topics, setStep9Topics] = useState<string[]>([]);
   const [step9SelectedTopic, setStep9SelectedTopic] = useState('');
+  const [step9StylePreset, setStep9StylePreset] = useState<string>('trust');
   const [isSuggestingTopics, setIsSuggestingTopics] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
   const [useAiStyle, setUseAiStyle] = useState(false);
@@ -1038,6 +1040,7 @@ export default function CardNewsPage() {
         // 브랜드 핸들 결정
         const activePersona = personas.find(p => p.id === selectedPersonaId) || personas[0];
         const activeBrandName = activePersona?.brand_name || '@aptshowhome';
+        const preset = STEP9_PRESETS[step9StylePreset] || STEP9_PRESETS.trust;
 
         // 배경 이미지 자동 매칭 (Unsplash API 호출)
         const updatedCardNews = await Promise.all(data.cardNews.map(async (card: any, idx: number) => {
@@ -1054,16 +1057,53 @@ export default function CardNewsPage() {
             ? card.blocks
             : [{ type: 'headline', text: card.title || '제목' }];
 
+          const cardAccent = type === 'step9' ? preset.accent : (brandKit.useAutoAccent ? brandKit.color : undefined);
+          const cardAccentOverride = type === 'step9' ? preset.accentOverride : undefined;
+          const cardBrandTone = type === 'step9' ? preset.brandTone : (card.brandTone === 'sage' ? 'sage' : 'gold');
+
+          const cardTitleStyle = type === 'step9'
+            ? {
+                fontFamily: preset.titleFont,
+                fontWeight: preset.titleWeight,
+                fontSize: preset.titleFontSize,
+                letterSpacing: preset.titleLetterSpacing,
+                color: '#FFFFFF',
+              }
+            : card.titleStyle;
+
+          const cardSubtitleStyle = type === 'step9'
+            ? {
+                fontFamily: preset.bodyFont,
+                fontWeight: '400',
+                fontSize: preset.subtitleFontSize,
+                color: '#E5E7EB',
+              }
+            : card.subtitleStyle;
+
+          const cardBulletStyle = type === 'step9'
+            ? {
+                fontFamily: preset.bodyFont,
+                fontWeight: '400',
+                fontSize: preset.bulletFontSize,
+                lineHeight: preset.bulletLineHeight,
+                color: '#FFFFFF',
+              }
+            : card.bulletStyle;
+
           return { 
             ...card, 
             backgroundImage: bgUrl,
-            accent: brandKit.useAutoAccent ? brandKit.color : undefined,
+            accent: cardAccent,
+            accentOverride: cardAccentOverride,
             blocks: finalBlocks,
-            brandTone: card.brandTone === 'sage' ? 'sage' : 'gold',
+            brandTone: cardBrandTone,
             showFrame: card.showFrame !== undefined ? card.showFrame : true,
             handle: card.handle || activeBrandName,
             overlay: card.overlay || 'linear-gradient(to top, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.40) 100%)',
             blocksOffsetY: card.blocksOffsetY !== undefined ? card.blocksOffsetY : (idx === 0 ? 78 : 90),
+            titleStyle: cardTitleStyle,
+            subtitleStyle: cardSubtitleStyle,
+            bulletStyle: cardBulletStyle,
           };
         }));
 
@@ -2535,6 +2575,130 @@ export default function CardNewsPage() {
                             <div className="mt-4 p-4 border border-gray-200 rounded-2xl bg-gray-50/50 space-y-4 shadow-sm text-left">
                               <div className="flex items-center gap-1.5 border-b border-gray-100 pb-2 mb-2">
                                 <span className="text-sm font-bold text-gray-800">⚙️ 7단계 상세 설정</span>
+                              </div>
+
+                              {/* 🎨 6단계 · 스타일 구성 */}
+                              <div className="space-y-3 border-b border-gray-200/80 pb-4 mb-3">
+                                <span className="text-xs font-semibold text-gray-700 block">🎨 6단계 · 스타일 구성</span>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                  {Object.values(STEP9_PRESETS).map(p => {
+                                    const isSelected = step9StylePreset === p.id;
+                                    return (
+                                      <button
+                                        key={p.id}
+                                        type="button"
+                                        onClick={() => setStep9StylePreset(p.id)}
+                                        className={`p-3 rounded-xl border text-left transition-all relative ${
+                                          isSelected
+                                            ? 'bg-white border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm'
+                                            : 'bg-white border-gray-200 hover:border-emerald-300'
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between mb-1">
+                                          <span className={`text-xs font-bold ${isSelected ? 'text-emerald-700' : 'text-gray-800'}`}>
+                                            {p.label}
+                                          </span>
+                                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: p.accent }} />
+                                        </div>
+                                        <p className="text-[10px] text-gray-400 line-clamp-1">{p.desc}</p>
+                                        <p className="text-[9px] text-gray-400 mt-1 font-mono">{p.titleFont}</p>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+
+                                {/* 실시간 스타일 미리보기 카드 (순수 정적 JSX) */}
+                                {(() => {
+                                  const activePreset = STEP9_PRESETS[step9StylePreset] || STEP9_PRESETS.trust;
+                                  return (
+                                    <div className="mt-3 p-4 rounded-2xl bg-gradient-to-b from-gray-950 via-gray-900 to-black text-white border border-gray-800 relative overflow-hidden shadow-md">
+                                      <div className="flex items-center justify-between text-[10px] text-gray-400 mb-3 border-b border-gray-800/80 pb-2">
+                                        <span className="font-bold text-gray-300 flex items-center gap-1">
+                                          👁️ 선택한 스타일 실시간 미리보기: <span style={{ color: activePreset.accent }}>{activePreset.label}</span>
+                                        </span>
+                                        <span className="text-[9px] text-gray-500">폰트: {activePreset.titleFont}</span>
+                                      </div>
+
+                                      {/* 샘플 카드 캔버스 뷰 */}
+                                      <div className="space-y-3 py-1">
+                                        {/* Eyebrow */}
+                                        <div
+                                          style={{
+                                            fontSize: '11px',
+                                            fontWeight: 700,
+                                            letterSpacing: '4px',
+                                            color: activePreset.accent,
+                                            textTransform: 'uppercase',
+                                          }}
+                                        >
+                                          LOCATION / SAMPLE
+                                        </div>
+
+                                        {/* Title / Headline */}
+                                        <h3
+                                          style={{
+                                            fontFamily: activePreset.titleFont,
+                                            fontWeight: activePreset.titleWeight,
+                                            fontSize: '20px',
+                                            letterSpacing: `${activePreset.titleLetterSpacing}px`,
+                                            color: '#FFFFFF',
+                                            lineHeight: 1.25,
+                                            textShadow: '0 2px 8px rgba(0,0,0,0.6)',
+                                          }}
+                                        >
+                                          3기 신도시 <span style={{ color: activePreset.accent }}>핵심 입지</span> 분석
+                                        </h3>
+
+                                        {/* Sample Checklist Items (GLASS Panel Style) */}
+                                        <div className="space-y-2 pt-1">
+                                          <div
+                                            className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                                            style={{
+                                              background: 'rgba(255,255,255,0.07)',
+                                              border: '1px solid rgba(255,255,255,0.14)',
+                                              backdropFilter: 'blur(10px)',
+                                            }}
+                                          >
+                                            <span style={{ color: '#5BD08A', fontSize: '13px', fontWeight: 900 }}>✓</span>
+                                            <span
+                                              style={{
+                                                fontFamily: activePreset.bodyFont,
+                                                fontSize: '12px',
+                                                fontWeight: 400,
+                                                color: '#FFFFFF',
+                                                lineHeight: activePreset.bulletLineHeight,
+                                              }}
+                                            >
+                                              분양가 상한제 적용 주요 단지 정리
+                                            </span>
+                                          </div>
+
+                                          <div
+                                            className="flex items-center gap-2 px-3 py-2 rounded-xl"
+                                            style={{
+                                              background: 'rgba(255,255,255,0.07)',
+                                              border: '1px solid rgba(255,255,255,0.14)',
+                                              backdropFilter: 'blur(10px)',
+                                            }}
+                                          >
+                                            <span style={{ color: '#5BD08A', fontSize: '13px', fontWeight: 900 }}>✓</span>
+                                            <span
+                                              style={{
+                                                fontFamily: activePreset.bodyFont,
+                                                fontSize: '12px',
+                                                fontWeight: 400,
+                                                color: '#FFFFFF',
+                                                lineHeight: activePreset.bulletLineHeight,
+                                              }}
+                                            >
+                                              GTX 역세권 도보 5분 입지 비교
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
                               </div>
 
                               {/* 1. 슬라이드 장수 */}

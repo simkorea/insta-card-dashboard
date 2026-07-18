@@ -95,6 +95,7 @@ interface PageData {
   showFrame?: boolean;
   blocksOffsetY?: number;
   handle?: string;
+  accentOverride?: string;
 }
 
 const normalizePages = (pages: any[]): PageData[] => {
@@ -555,7 +556,7 @@ function getLayersForPage(page: PageData): CanvasLayerWithSrc[] {
 }
 
 // AI 생성 데이터({ page, title, body, backgroundImage, accent, imageKeyword }[]) → PageData[] 변환
-function cardNewsToPages(raw: { page: number; title: string; body: string; backgroundImage?: string; accent?: string; imageKeyword?: string; blocks?: SlideBlock[]; brandTone?: BrandTone; showFrame?: boolean; blocksOffsetY?: number; }[], theme: any[] = PAGES_DATA): any[] {
+function cardNewsToPages(raw: { page: number; title: string; body: string; backgroundImage?: string; accent?: string; accentOverride?: string; imageKeyword?: string; blocks?: SlideBlock[]; brandTone?: BrandTone; showFrame?: boolean; blocksOffsetY?: number; titleStyle?: TextStyle; subtitleStyle?: TextStyle; bulletStyle?: TextStyle; }[], theme: any[] = PAGES_DATA): any[] {
   const lastIdx = raw.length - 1;
   return raw.map((card, i) => {
     // 테마 슬롯 매핑: 첫 장은 표지, 마지막 장은 마무리, 나머지는 중간 레이아웃 반복
@@ -569,14 +570,18 @@ function cardNewsToPages(raw: { page: number; title: string; body: string; backg
     }
     const bgImage = card.backgroundImage || base.bgImage;
     const accent = card.accent || base.accent;
+    const accentOverride = card.accentOverride;
     const imageKeyword = card.imageKeyword;
     const blocks = card.blocks || base.blocks;
     const brandTone = card.brandTone || base.brandTone;
     const showFrame = card.showFrame !== undefined ? card.showFrame : base.showFrame;
     const blocksOffsetY = card.blocksOffsetY !== undefined ? card.blocksOffsetY : base.blocksOffsetY;
+    const titleStyle = card.titleStyle || base.titleStyle;
+    const subtitleStyle = card.subtitleStyle || base.subtitleStyle;
+    const bulletStyle = card.bulletStyle || base.bulletStyle;
 
     if (i === 0) {
-      return { ...base, id: String(card.page), title: card.title, subtitle: card.body, bullets: undefined, bgImage, accent, imageKeyword, blocks, brandTone, showFrame, blocksOffsetY };
+      return { ...base, id: String(card.page), title: card.title, subtitle: card.body, bullets: undefined, bgImage, accent, accentOverride, imageKeyword, blocks, brandTone, showFrame, blocksOffsetY, titleStyle, subtitleStyle, bulletStyle };
     }
     const bodyLines = card.body.split('\n').map((l: string) => l.trim()).filter(Boolean);
     return {
@@ -587,11 +592,15 @@ function cardNewsToPages(raw: { page: number; title: string; body: string; backg
       bullets: bodyLines.length > 1 ? bodyLines : [card.body],
       bgImage,
       accent,
+      accentOverride,
       imageKeyword,
       blocks,
       brandTone,
       showFrame,
       blocksOffsetY,
+      titleStyle,
+      subtitleStyle,
+      bulletStyle,
     };
   });
 }
@@ -3984,6 +3993,7 @@ export default function EditorPage() {
                                 titleStyle={pageData.titleStyle}
                                 subtitleStyle={pageData.subtitleStyle}
                                 bulletStyle={pageData.bulletStyle}
+                                accentOverride={pageData.accentOverride}
                               />
                             </div>
                           </div>
@@ -4298,6 +4308,7 @@ export default function EditorPage() {
                       page={currentPage}
                       total={pagesData.length}
                       brandTone={pageData.brandTone}
+                      accentOverride={pageData.accentOverride}
                       eyebrow={undefined}
                       handle={pageData.handle ?? '@aptshowhome'}
                     >
@@ -5182,6 +5193,7 @@ function FullscreenEditor({
                       page={fsPage}
                       total={pagesData.length}
                       brandTone={pageData.brandTone}
+                      accentOverride={pageData.accentOverride}
                       eyebrow={undefined}
                       handle={pageData.handle ?? '@aptshowhome'}
                     >
