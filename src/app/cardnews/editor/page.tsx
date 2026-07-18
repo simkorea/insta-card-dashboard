@@ -4040,100 +4040,147 @@ export default function EditorPage() {
                             }}
                           >
                             <div style={{ pointerEvents: 'none', display: 'flex', flexDirection: 'column', width: '100%', marginTop: 'auto' }}>
-                              {pageData.layout === 'center' && (
-                                <div className="flex flex-col items-center w-full px-10 text-center">
-                                  <div
-                                    onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }}
-                                    className={`pointer-events-auto cursor-pointer mb-4 rounded px-2 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}
-                                  >
-                                    <h1
-                                      className="drop-shadow-lg whitespace-pre-line"
-                                      style={{
-                                        fontSize: `${((pageData.titleStyle?.fontSize ?? 38) * canvasW) / 420}px`,
-                                        fontWeight: pageData.titleStyle?.fontWeight ?? '900',
-                                        fontFamily: pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                                        color: pageData.titleStyle?.color ?? '#FFFFFF',
-                                        letterSpacing: pageData.titleStyle?.letterSpacing ? `${pageData.titleStyle.letterSpacing}px` : undefined,
-                                        lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
-                                        textAlign: pageData.titleStyle?.align ?? 'center',
-                                      }}
-                                    >
-                                      {pageData.title}
-                                    </h1>
-                                  </div>
-                                  <div className="w-16 h-0.5 bg-white/50 mb-4" />
-                                  {pageData.subtitle && (
-                                    <div
-                                      onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2]); }}
-                                      className={`pointer-events-auto cursor-pointer rounded px-2 py-1 transition-all ${selectedLayer?.id === 2 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}
-                                    >
-                                      <p
-                                        className="whitespace-pre-line drop-shadow"
-                                        style={{
-                                          fontSize: `${((pageData.subtitleStyle?.fontSize ?? 14) * canvasW) / 420}px`,
-                                          fontWeight: pageData.subtitleStyle?.fontWeight ?? '400',
-                                          fontFamily: pageData.subtitleStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                                          color: pageData.subtitleStyle?.color ?? '#E5E7EB',
-                                          lineHeight: pageData.subtitleStyle?.lineHeight ?? 1.6,
-                                          textAlign: pageData.subtitleStyle?.align ?? 'center',
-                                        }}
-                                      >
-                                        {pageData.subtitle}
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-
-                              {(pageData.layout === 'bottom-left' || pageData.layout === 'bottom-left-list') && (
-                                <div className="flex flex-col w-full px-8 pb-10 gap-5">
-                                  <div
-                                    onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }}
-                                    className={`pointer-events-auto cursor-pointer flex items-start gap-3 rounded px-1 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}
-                                  >
-                                    <span className="mt-0.5 shrink-0" style={{ color: pageData.accent || '#ffd700', fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px` }}>●</span>
-                                    <h2
-                                      className="leading-tight drop-shadow"
-                                      style={{
-                                        fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px`,
-                                        fontWeight: pageData.titleStyle?.fontWeight ?? '900',
-                                        fontFamily: pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                                        color: pageData.titleStyle?.color ?? (pageData.accent || '#ffd700'),
-                                        lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
-                                        textDecoration: 'underline',
-                                        textDecorationColor: 'rgba(255,215,0,0.5)',
-                                      }}
-                                    >
-                                      {pageData.title}
-                                    </h2>
-                                  </div>
-
-                                  {pageData.bullets && (
-                                    <div className="space-y-2.5 pl-2">
-                                      {pageData.bullets.map((bullet, i) => (
-                                        <div
-                                          key={i}
-                                          onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2 + i]); }}
-                                          className={`pointer-events-auto cursor-pointer flex items-start gap-2 rounded px-1 py-0.5 transition-all ${selectedLayer?.id === 2 + i ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}
-                                        >
-                                          <span className="text-white/60 shrink-0 mt-0.5" style={{ fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px` }}>•</span>
-                                          <p
-                                            className="drop-shadow"
+                              {(() => {
+                                const tradEyebrowText = (pageData as any).eyebrow?.trim() || pageData.subtitle?.trim() || (pageData as any).category?.trim();
+                                return (
+                                  <>
+                                    {pageData.layout === 'center' && (
+                                      <div className="flex flex-col items-center w-full px-10 text-center">
+                                        {tradEyebrowText && (
+                                          <div
                                             style={{
-                                              fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px`,
-                                              fontWeight: pageData.bulletStyle?.fontWeight ?? '400',
-                                              fontFamily: pageData.bulletStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
-                                              color: pageData.bulletStyle?.color ?? '#FFFFFF',
-                                              lineHeight: pageData.bulletStyle?.lineHeight ?? 1.6,
+                                              fontSize: `${(11 * canvasW) / 420}px`,
+                                              fontWeight: 700,
+                                              letterSpacing: `${(4 * canvasW) / 420}px`,
+                                              color: pageData.accent || '#E9B949',
+                                              textAlign: 'center',
+                                              textTransform: 'uppercase',
+                                              marginBottom: `${(6 * canvasW) / 420}px`,
                                             }}
-                                            dangerouslySetInnerHTML={{ __html: bullet.replace(/<b>(.*?)<\/b>/g, `<b style="color:${pageData.accent || '#ffd700'}">$1</b>`) }}
-                                          />
+                                          >
+                                            {tradEyebrowText.toUpperCase()}
+                                          </div>
+                                        )}
+                                        <div
+                                          onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }}
+                                          className={`pointer-events-auto cursor-pointer mb-4 rounded px-2 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}
+                                        >
+                                          <h1
+                                            className="drop-shadow-lg whitespace-pre-line"
+                                            style={{
+                                              fontSize: `${((pageData.titleStyle?.fontSize ?? 38) * canvasW) / 420}px`,
+                                              fontWeight: pageData.titleStyle?.fontWeight ?? '900',
+                                              fontFamily: pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                              color: pageData.titleStyle?.color ?? '#FFFFFF',
+                                              letterSpacing: pageData.titleStyle?.letterSpacing ? `${pageData.titleStyle.letterSpacing}px` : undefined,
+                                              lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
+                                              textAlign: pageData.titleStyle?.align ?? 'center',
+                                              textShadow: '0 2px 8px rgba(0,0,0,0.6)',
+                                            }}
+                                          >
+                                            {pageData.title}
+                                          </h1>
                                         </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
+                                        <div className="w-16 h-0.5 bg-white/50 mb-4" />
+                                        {pageData.subtitle && (
+                                          <div
+                                            onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2]); }}
+                                            className={`pointer-events-auto cursor-pointer rounded px-2 py-1 transition-all ${selectedLayer?.id === 2 ? 'ring-1 ring-white/60 bg-white/10' : 'hover:bg-white/10'}`}
+                                          >
+                                            <p
+                                              className="whitespace-pre-line drop-shadow"
+                                              style={{
+                                                fontSize: `${((pageData.subtitleStyle?.fontSize ?? 14) * canvasW) / 420}px`,
+                                                fontWeight: pageData.subtitleStyle?.fontWeight ?? '400',
+                                                fontFamily: pageData.subtitleStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                                color: pageData.subtitleStyle?.color ?? '#E5E7EB',
+                                                lineHeight: pageData.subtitleStyle?.lineHeight ?? 1.6,
+                                                textAlign: pageData.subtitleStyle?.align ?? 'center',
+                                              }}
+                                            >
+                                              {pageData.subtitle}
+                                            </p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {(pageData.layout === 'bottom-left' || pageData.layout === 'bottom-left-list') && (
+                                      <div className="flex flex-col w-full px-8 pb-10 gap-4">
+                                        {tradEyebrowText && (
+                                          <div
+                                            style={{
+                                              fontSize: `${(11 * canvasW) / 420}px`,
+                                              fontWeight: 700,
+                                              letterSpacing: `${(4 * canvasW) / 420}px`,
+                                              color: pageData.accent || '#E9B949',
+                                              textAlign: 'left',
+                                              textTransform: 'uppercase',
+                                              marginBottom: `${(-4 * canvasW) / 420}px`,
+                                            }}
+                                          >
+                                            {tradEyebrowText.toUpperCase()}
+                                          </div>
+                                        )}
+                                        <div
+                                          onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[1]); }}
+                                          className={`pointer-events-auto cursor-pointer flex items-start gap-3 rounded px-1 py-1 transition-all ${selectedLayer?.id === 1 ? 'ring-1 ring-white/50 bg-white/10' : 'hover:bg-white/10'}`}
+                                        >
+                                          <span className="mt-0.5 shrink-0" style={{ color: pageData.accent || '#ffd700', fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px` }}>●</span>
+                                          <h2
+                                            className="leading-tight drop-shadow"
+                                            style={{
+                                              fontSize: `${((pageData.titleStyle?.fontSize ?? 24) * canvasW) / 420}px`,
+                                              fontWeight: pageData.titleStyle?.fontWeight ?? '900',
+                                              fontFamily: pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                              color: pageData.titleStyle?.color ?? (pageData.accent || '#ffd700'),
+                                              lineHeight: pageData.titleStyle?.lineHeight ?? 1.2,
+                                              textDecoration: 'underline',
+                                              textDecorationColor: 'rgba(255,215,0,0.5)',
+                                              textShadow: '0 2px 8px rgba(0,0,0,0.6)',
+                                            }}
+                                          >
+                                            {pageData.title}
+                                          </h2>
+                                        </div>
+
+                                        {pageData.bullets && (
+                                          <div className="flex flex-col gap-2.5 w-full">
+                                            {pageData.bullets.map((bullet, i) => (
+                                              <div
+                                                key={i}
+                                                onClick={e => { e.stopPropagation(); handleSelectLayer(pageLayers[2 + i]); }}
+                                                className={`pointer-events-auto cursor-pointer flex items-start gap-3 transition-all ${selectedLayer?.id === 2 + i ? 'ring-1 ring-white/60 bg-white/15 shadow-lg' : 'hover:bg-white/10'}`}
+                                                style={{
+                                                  background: 'rgba(255,255,255,0.07)',
+                                                  border: '1px solid rgba(255,255,255,0.14)',
+                                                  backdropFilter: 'blur(10px)',
+                                                  WebkitBackdropFilter: 'blur(10px)',
+                                                  borderRadius: `${(14 * canvasW) / 420}px`,
+                                                  padding: `${(10 * canvasW) / 420}px ${(14 * canvasW) / 420}px`,
+                                                }}
+                                              >
+                                                <span className="shrink-0 font-black mt-0.5" style={{ color: '#5BD08A', fontSize: `${((16 * canvasW) / 420)}px` }}>✓</span>
+                                                <p
+                                                  className="drop-shadow"
+                                                  style={{
+                                                    fontSize: `${((pageData.bulletStyle?.fontSize ?? 14) * canvasW) / 420}px`,
+                                                    fontWeight: pageData.bulletStyle?.fontWeight ?? '400',
+                                                    fontFamily: pageData.bulletStyle?.fontFamily ?? pageData.titleStyle?.fontFamily ?? 'Noto Sans KR',
+                                                    color: pageData.bulletStyle?.color ?? '#FFFFFF',
+                                                    lineHeight: pageData.bulletStyle?.lineHeight ?? 1.5,
+                                                  }}
+                                                  dangerouslySetInnerHTML={{ __html: bullet.replace(/<b>(.*?)<\/b>/g, `<b style="color:${pageData.accent || '#ffd700'}">$1</b>`) }}
+                                                />
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </>
+                                );
+                              })()}
                             </div>
                           </div>
                           {/* Y-axis drag line */}
