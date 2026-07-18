@@ -1,5 +1,7 @@
+export type PresetId = 'trust' | 'impact' | 'info' | 'soft';
+
 export interface Step9Preset {
-  id: string;
+  id: PresetId;
   label: string;
   desc: string;
   titleFont: string;
@@ -81,3 +83,12 @@ export const STEP9_PRESETS: Record<string, Step9Preset> = {
     bulletLineHeight: 1.6,
   },
 };
+
+export function recommendPreset(category: string): PresetId {
+  const cat = (category || '').trim();
+  if (cat === '부동산' || cat === '경제') return 'trust';
+  if (cat === '마케팅') return 'impact';
+  if (cat === '기술') return 'info';
+  if (cat === '자기계발' || cat === '라이프스타일') return 'soft';
+  return 'trust';
+}

@@ -16,6 +16,7 @@ import { friendlyError } from '@/lib/errors';
 import type { SlideBlock, BrandTone } from '@/lib/cardnews/blocks';
 import { BlockRenderer } from '@/components/cardnews/BlockRenderer';
 import { SlideFrame } from '@/components/cardnews/SlideFrame';
+import { FONTS, GOOGLE_FONTS_URL } from '@/lib/cardnews/fonts';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TextStyle {
@@ -2161,28 +2162,6 @@ function ElementPanel({
 
 const WEIGHT_MAP: Record<string, string> = { L: '300', N: '400', M: '500', SB: '600', B: '900' };
 const WEIGHT_LABEL: Record<string, string> = { '300': 'L', '400': 'N', '500': 'M', '600': 'SB', '900': 'B' };
-
-const FONTS = [
-  { label: 'Noto Sans KR', value: 'Noto Sans KR' },
-  { label: '나눔고딕', value: 'Nanum Gothic' },
-  { label: '검은고딕', value: 'Black Han Sans' },
-  { label: 'Gothic A1', value: 'Gothic A1' },
-  { label: '나눔명조', value: 'Nanum Myeongjo' },
-  { label: 'Do Hyeon', value: 'Do Hyeon' },
-  { label: 'Jua', value: 'Jua' },
-  { label: '고운돋움', value: 'Gowun Dodum' },
-] as const;
-
-const GOOGLE_FONTS_URL =
-  'https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700;900' +
-  '&family=Nanum+Gothic:wght@400;700;800' +
-  '&family=Black+Han+Sans' +
-  '&family=Gothic+A1:wght@300;400;500;600;700;900' +
-  '&family=Nanum+Myeongjo:wght@400;700;800' +
-  '&family=Do+Hyeon' +
-  '&family=Jua' +
-  '&family=Gowun+Dodum' +
-  '&display=swap';
 
 // ─── Text Panel ───────────────────────────────────────────────────────────────
 function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onUpdatePageData }: {

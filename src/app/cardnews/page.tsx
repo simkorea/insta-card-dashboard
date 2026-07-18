@@ -4,7 +4,8 @@ import { ImagePlus, ChevronLeft, Search, RefreshCw, MessageSquare, Settings, Che
 import { useRouter } from 'next/navigation';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { friendlyError } from '@/lib/errors';
-import { STEP9_PRESETS } from '@/lib/cardnews/step9-presets';
+import { STEP9_PRESETS, recommendPreset } from '@/lib/cardnews/step9-presets';
+import { FONTS, GOOGLE_FONTS_URL } from '@/lib/cardnews/fonts';
 
 // ─── 슬라이드 렌더러 (카로셀 캡처용) ────────────────────────────────────────
 const CAPTURE_FONTS_URL =
@@ -223,6 +224,16 @@ export default function CardNewsPage() {
       .catch(err => console.error('페르소나 목록 로드 실패:', err));
   }, []);
 
+  // Google Fonts 로드 (9단계 스타일 미리보기 및 카드 렌더링용)
+  useEffect(() => {
+    if (document.getElementById('gf-cardnews')) return;
+    const link = document.createElement('link');
+    link.id = 'gf-cardnews';
+    link.rel = 'stylesheet';
+    link.href = GOOGLE_FONTS_URL;
+    document.head.appendChild(link);
+  }, []);
+
   // Settings states
   const [selectedRatio, setSelectedRatio] = useState('4:5');
   const [genStyle, setGenStyle] = useState<'free' | 'origin'>('origin');
@@ -257,6 +268,11 @@ export default function CardNewsPage() {
   const [step9Topics, setStep9Topics] = useState<string[]>([]);
   const [step9SelectedTopic, setStep9SelectedTopic] = useState('');
   const [step9StylePreset, setStep9StylePreset] = useState<string>('trust');
+  const [step9PresetTouched, setStep9PresetTouched] = useState(false);
+  const [showFineTuning, setShowFineTuning] = useState(false);
+  const [customTitleFont, setCustomTitleFont] = useState<string | null>(null);
+  const [customBodyFont, setCustomBodyFont] = useState<string | null>(null);
+  const [customTitleSize, setCustomTitleSize] = useState<number | null>(null);
   const [isSuggestingTopics, setIsSuggestingTopics] = useState(false);
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
   const [useAiStyle, setUseAiStyle] = useState(false);
@@ -1061,11 +1077,15 @@ export default function CardNewsPage() {
           const cardAccentOverride = type === 'step9' ? preset.accentOverride : undefined;
           const cardBrandTone = type === 'step9' ? preset.brandTone : (card.brandTone === 'sage' ? 'sage' : 'gold');
 
+          const effTitleFont = customTitleFont || preset.titleFont;
+          const effBodyFont = customBodyFont || preset.bodyFont;
+          const effTitleSize = customTitleSize || preset.titleFontSize;
+
           const cardTitleStyle = type === 'step9'
             ? {
-                fontFamily: preset.titleFont,
+                fontFamily: effTitleFont,
                 fontWeight: preset.titleWeight,
-                fontSize: preset.titleFontSize,
+                fontSize: effTitleSize,
                 letterSpacing: preset.titleLetterSpacing,
                 color: '#FFFFFF',
               }
@@ -1073,7 +1093,7 @@ export default function CardNewsPage() {
 
           const cardSubtitleStyle = type === 'step9'
             ? {
-                fontFamily: preset.bodyFont,
+                fontFamily: effBodyFont,
                 fontWeight: '400',
                 fontSize: preset.subtitleFontSize,
                 color: '#E5E7EB',
@@ -1082,7 +1102,7 @@ export default function CardNewsPage() {
 
           const cardBulletStyle = type === 'step9'
             ? {
-                fontFamily: preset.bodyFont,
+                fontFamily: effBodyFont,
                 fontWeight: '400',
                 fontSize: preset.bulletFontSize,
                 lineHeight: preset.bulletLineHeight,
@@ -2523,7 +2543,13 @@ export default function CardNewsPage() {
                           <button
                             key={cat}
                             type="button"
-                            onClick={() => setStep9Category(step9Category === cat ? '' : cat)}
+                            onClick={() => {
+                              const newCat = step9Category === cat ? '' : cat;
+                              setStep9Category(newCat);
+                              if (!step9PresetTouched) {
+                                setStep9StylePreset(recommendPreset(newCat));
+                              }
+                            }}
                             className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${step9Category === cat ? 'bg-emerald-50 border-emerald-400 text-emerald-700' : 'border-gray-200 text-gray-500 hover:border-emerald-300'}`}
                           >{cat}</button>
                         ))}
@@ -2579,21 +2605,49 @@ export default function CardNewsPage() {
 
                               {/* 🎨 6단계 · 스타일 구성 */}
                               <div className="space-y-3 border-b border-gray-200/80 pb-4 mb-3">
-                                <span className="text-xs font-semibold text-gray-700 block">🎨 6단계 · 스타일 구성</span>
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-semibold text-gray-700">🎨 6단계 · 스타일 구성</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setStep9PresetTouched(false);
+                                      setStep9StylePreset(recommendPreset(step9Category));
+                                      setCustomTitleFont(null);
+                                      setCustomBodyFont(null);
+                                      setCustomTitleSize(null);
+                                    }}
+                                    className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1"
+                                  >
+                                    ✨ AI가 골라주기
+                                  </button>
+                                </div>
+
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                                   {Object.values(STEP9_PRESETS).map(p => {
                                     const isSelected = step9StylePreset === p.id;
+                                    const isRecommended = recommendPreset(step9Category) === p.id;
                                     return (
                                       <button
                                         key={p.id}
                                         type="button"
-                                        onClick={() => setStep9StylePreset(p.id)}
+                                        onClick={() => {
+                                          setStep9StylePreset(p.id);
+                                          setStep9PresetTouched(true);
+                                          setCustomTitleFont(null);
+                                          setCustomBodyFont(null);
+                                          setCustomTitleSize(null);
+                                        }}
                                         className={`p-3 rounded-xl border text-left transition-all relative ${
                                           isSelected
                                             ? 'bg-white border-emerald-500 ring-2 ring-emerald-500/20 shadow-sm'
                                             : 'bg-white border-gray-200 hover:border-emerald-300'
                                         }`}
                                       >
+                                        {isRecommended && (
+                                          <span className="absolute -top-2 right-2 bg-amber-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-xs">
+                                            ✨ 추천
+                                          </span>
+                                        )}
                                         <div className="flex items-center justify-between mb-1">
                                           <span className={`text-xs font-bold ${isSelected ? 'text-emerald-700' : 'text-gray-800'}`}>
                                             {p.label}
@@ -2607,16 +2661,117 @@ export default function CardNewsPage() {
                                   })}
                                 </div>
 
+                                {/* 🔧 세부 조정 (접었다 펴기 토글) */}
+                                <div className="pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowFineTuning(!showFineTuning)}
+                                    className="text-xs font-semibold text-gray-600 hover:text-gray-900 flex items-center gap-1.5 py-1 px-2 rounded-lg bg-gray-100/70 hover:bg-gray-200/60 transition-all"
+                                  >
+                                    <span>🔧 세부 조정</span>
+                                    <span className="text-[10px] text-gray-400">{showFineTuning ? '▲ 접기' : '▼ 펼치기'}</span>
+                                  </button>
+
+                                  {showFineTuning && (
+                                    <div className="mt-2.5 p-3 rounded-xl border border-gray-200 bg-white space-y-3 shadow-xs">
+                                      {/* 1. 제목 폰트 */}
+                                      <div>
+                                        <label className="text-[11px] font-semibold text-gray-600 mb-1 block">제목 폰트</label>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
+                                          {FONTS.map(f => {
+                                            const activeP = STEP9_PRESETS[step9StylePreset] || STEP9_PRESETS.trust;
+                                            const currentFont = customTitleFont || activeP.titleFont;
+                                            const isFSelected = currentFont === f.value;
+                                            return (
+                                              <button
+                                                key={f.value}
+                                                type="button"
+                                                onClick={() => setCustomTitleFont(f.value)}
+                                                style={{ fontFamily: f.value }}
+                                                className={`py-1.5 px-2 rounded-lg text-xs transition-all truncate text-left ${
+                                                  isFSelected ? 'bg-emerald-600 text-white font-bold' : 'bg-gray-50 border border-gray-200 text-gray-700 hover:border-emerald-300'
+                                                }`}
+                                              >
+                                                {f.label}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+
+                                      {/* 2. 본문 폰트 */}
+                                      <div>
+                                        <label className="text-[11px] font-semibold text-gray-600 mb-1 block">본문 폰트</label>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1">
+                                          {FONTS.map(f => {
+                                            const activeP = STEP9_PRESETS[step9StylePreset] || STEP9_PRESETS.trust;
+                                            const currentBody = customBodyFont || activeP.bodyFont;
+                                            const isBSelected = currentBody === f.value;
+                                            return (
+                                              <button
+                                                key={f.value}
+                                                type="button"
+                                                onClick={() => setCustomBodyFont(f.value)}
+                                                style={{ fontFamily: f.value }}
+                                                className={`py-1.5 px-2 rounded-lg text-xs transition-all truncate text-left ${
+                                                  isBSelected ? 'bg-emerald-600 text-white font-bold' : 'bg-gray-50 border border-gray-200 text-gray-700 hover:border-emerald-300'
+                                                }`}
+                                              >
+                                                {f.label}
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+
+                                      {/* 3. 제목 크기 */}
+                                      <div>
+                                        <div className="flex items-center justify-between mb-1">
+                                          <label className="text-[11px] font-semibold text-gray-600">제목 크기</label>
+                                          {(() => {
+                                            const activeP = STEP9_PRESETS[step9StylePreset] || STEP9_PRESETS.trust;
+                                            const currentSize = customTitleSize || activeP.titleFontSize;
+                                            return (
+                                              <span className="text-[11px] font-bold text-emerald-700">{currentSize}px</span>
+                                            );
+                                          })()}
+                                        </div>
+                                        {(() => {
+                                          const activeP = STEP9_PRESETS[step9StylePreset] || STEP9_PRESETS.trust;
+                                          const currentSize = customTitleSize || activeP.titleFontSize;
+                                          return (
+                                            <div className="flex items-center gap-3">
+                                              <input
+                                                type="range"
+                                                min={24}
+                                                max={44}
+                                                step={1}
+                                                value={currentSize}
+                                                onChange={e => setCustomTitleSize(Number(e.target.value))}
+                                                className="w-full accent-emerald-600 cursor-pointer"
+                                              />
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
                                 {/* 실시간 스타일 미리보기 카드 (순수 정적 JSX) */}
                                 {(() => {
                                   const activePreset = STEP9_PRESETS[step9StylePreset] || STEP9_PRESETS.trust;
+                                  const effTitleFont = customTitleFont || activePreset.titleFont;
+                                  const effBodyFont = customBodyFont || activePreset.bodyFont;
+                                  const effTitleSize = customTitleSize || activePreset.titleFontSize;
+
                                   return (
                                     <div className="mt-3 p-4 rounded-2xl bg-gradient-to-b from-gray-950 via-gray-900 to-black text-white border border-gray-800 relative overflow-hidden shadow-md">
                                       <div className="flex items-center justify-between text-[10px] text-gray-400 mb-3 border-b border-gray-800/80 pb-2">
                                         <span className="font-bold text-gray-300 flex items-center gap-1">
                                           👁️ 선택한 스타일 실시간 미리보기: <span style={{ color: activePreset.accent }}>{activePreset.label}</span>
                                         </span>
-                                        <span className="text-[9px] text-gray-500">폰트: {activePreset.titleFont}</span>
+                                        <span className="text-[9px] text-gray-500">제목: {effTitleFont} | 본문: {effBodyFont} | {effTitleSize}px</span>
                                       </div>
 
                                       {/* 샘플 카드 캔버스 뷰 */}
@@ -2637,9 +2792,9 @@ export default function CardNewsPage() {
                                         {/* Title / Headline */}
                                         <h3
                                           style={{
-                                            fontFamily: activePreset.titleFont,
+                                            fontFamily: effTitleFont,
                                             fontWeight: activePreset.titleWeight,
-                                            fontSize: '20px',
+                                            fontSize: `${Math.round(effTitleSize * 0.625)}px`,
                                             letterSpacing: `${activePreset.titleLetterSpacing}px`,
                                             color: '#FFFFFF',
                                             lineHeight: 1.25,
@@ -2662,7 +2817,7 @@ export default function CardNewsPage() {
                                             <span style={{ color: '#5BD08A', fontSize: '13px', fontWeight: 900 }}>✓</span>
                                             <span
                                               style={{
-                                                fontFamily: activePreset.bodyFont,
+                                                fontFamily: effBodyFont,
                                                 fontSize: '12px',
                                                 fontWeight: 400,
                                                 color: '#FFFFFF',
@@ -2684,7 +2839,7 @@ export default function CardNewsPage() {
                                             <span style={{ color: '#5BD08A', fontSize: '13px', fontWeight: 900 }}>✓</span>
                                             <span
                                               style={{
-                                                fontFamily: activePreset.bodyFont,
+                                                fontFamily: effBodyFont,
                                                 fontSize: '12px',
                                                 fontWeight: 400,
                                                 color: '#FFFFFF',
