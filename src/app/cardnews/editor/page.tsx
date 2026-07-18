@@ -542,17 +542,21 @@ const BUILT_IN_THEMES: { id: string; label: string; emoji: string; bg: string; a
 
 // 현재 페이지의 레이어 목록 생성 (스타일 정보 포함)
 function getLayersForPage(page: PageData): CanvasLayerWithSrc[] {
+  const bulletItems: string[] = page.bullets && page.bullets.length > 0
+    ? page.bullets
+    : (page.blocks ? page.blocks.filter(b => b.type === 'checklist').flatMap(b => (b as any).items || []) : []);
+
   return [
-    { id: 0, type: 'image', label: page.bgLabel, imageSrc: page.bgImage },
-    { id: 1, type: 'text', label: page.title.replace(/\n/g, ' '), content: page.title, style: page.titleStyle },
+    { id: 0, type: 'image', label: page.bgLabel || '배경 이미지', imageSrc: page.bgImage },
+    { id: 1, type: 'text', label: (page.title || '제목').replace(/\n/g, ' '), content: page.title, style: page.titleStyle },
     ...(page.subtitle ? [{ id: 2, type: 'text' as const, label: page.subtitle.slice(0, 30), content: page.subtitle, style: page.subtitleStyle }] : []),
-    ...(page.bullets ? page.bullets.map((b, i) => ({
+    ...bulletItems.map((b, i) => ({
       id: 3 + i,
       type: 'text' as const,
-      label: b.replace(/<[^>]+>/g, '').slice(0, 30),
-      content: b.replace(/<[^>]+>/g, ''),
+      label: String(b).replace(/<[^>]+>/g, '').slice(0, 30),
+      content: String(b).replace(/<[^>]+>/g, ''),
       style: page.bulletStyle,
-    })) : []),
+    })),
   ];
 }
 
@@ -2168,7 +2172,7 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
   layer: CanvasLayer;
   onDeselect: () => void;
   onUpdate: (content: string, style: TextStyle) => void;
-  onApplyStyleAll?: (layerId: number, style: TextStyle) => void;
+  onApplyStyleAll?: (layerId: number, style: TextStyle, content?: string) => void;
   pageData?: PageData;
   onUpdatePageData?: (pageId: string, changes: Partial<PageData>) => void;
 }) {
@@ -2390,6 +2394,7 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
           </button>
           {onApplyStyleAll && (
             <button
+              type="button"
               onClick={() => onApplyStyleAll(layer.id, {
                 fontSize,
                 fontWeight: WEIGHT_MAP[fontWeight] ?? '900',
@@ -2398,11 +2403,10 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
                 letterSpacing,
                 lineHeight,
                 align,
-              })}
-              className="w-full py-2.5 bg-amber-50 border border-amber-300 text-amber-700 rounded-xl text-sm font-bold hover:bg-amber-100 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+              }, textContent)}
+              className="w-full py-2.5 bg-amber-50 border border-amber-300 text-amber-700 rounded-xl text-sm font-bold hover:bg-amber-100 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow-xs"
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-              모든 슬라이드에 스타일 적용
+              📋 모든 슬라이드에 적용
             </button>
           )}
         </div>
@@ -2671,6 +2675,14 @@ export default function EditorPage() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [brandKit, setBrandKit] = useState<{ logo: string; color: string; name: string } | null>(null);
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage(prev => (prev === msg ? null : prev));
+    }, 2500);
+  }, []);
 
   useEffect(() => {
     // 로컬스토리지 우선, 없으면 API에서 로드
@@ -3008,9 +3020,28 @@ export default function EditorPage() {
         if (layerId === 1) return { ...p, title: content, ...(style ? { titleStyle: style } : {}) };
         if (layerId === 2) return { ...p, subtitle: content, ...(style ? { subtitleStyle: style } : {}) };
         if (layerId >= 3) {
-          const bullets = [...(p.bullets || [])];
-          bullets[layerId - 3] = content;
-          return { ...p, bullets, ...(style ? { bulletStyle: style } : {}) };
+          let updated = { ...p, ...(style ? { bulletStyle: style } : {}) };
+          if (updated.bullets && updated.bullets.length > 0) {
+            const bullets = [...updated.bullets];
+            bullets[layerId - 3] = content;
+            updated.bullets = bullets;
+          } else if (updated.blocks) {
+            let itemIdx = 0;
+            updated.blocks = updated.blocks.map(b => {
+              if (b.type === 'checklist' && Array.isArray((b as any).items)) {
+                const items = [...(b as any).items];
+                for (let k = 0; k < items.length; k++) {
+                  if (3 + itemIdx === layerId) {
+                    items[k] = content;
+                  }
+                  itemIdx++;
+                }
+                return { ...b, items };
+              }
+              return b;
+            });
+          }
+          return updated;
         }
         return p;
       });
@@ -3069,19 +3100,54 @@ export default function EditorPage() {
   }, [currentPage, pushHistory]);
 
   // ── 일괄 편집 ───────────────────────────────────────────────────────────────
-  // 텍스트 스타일을 모든 페이지의 동일 레이어에 적용 (내용은 유지)
-  const applyStyleToAllPages = useCallback((layerId: number, style: TextStyle) => {
+  // 텍스트 스타일을 모든 페이지의 동일 레이어에 적용 (내용은 유지, 현재 페이지의 텍스트 수정 내역도 함께 보존)
+  const applyStyleToAllPages = useCallback((layerId: number, style: TextStyle, currentContent?: string) => {
+    const count = pagesData.length;
     setPagesData(prev => {
+      const currentPageId = prev[currentPage - 1]?.id;
       const next = prev.map(p => {
-        if (layerId === 1) return { ...p, titleStyle: { ...(p.titleStyle || {}), ...style } };
-        if (layerId === 2) return { ...p, subtitleStyle: { ...(p.subtitleStyle || {}), ...style } };
-        if (layerId >= 3) return { ...p, bulletStyle: { ...(p.bulletStyle || {}), ...style } };
-        return p;
+        let updated = { ...p };
+        // 현재 페이지의 텍스트 내용도 업데이트 (전달되었을 경우)
+        if (currentPageId && String(p.id) === String(currentPageId) && currentContent !== undefined) {
+          if (layerId === 1) {
+            updated.title = currentContent;
+          } else if (layerId === 2) {
+            updated.subtitle = currentContent;
+          } else if (layerId >= 3) {
+            if (updated.bullets && updated.bullets.length > 0) {
+              const bullets = [...updated.bullets];
+              bullets[layerId - 3] = currentContent;
+              updated.bullets = bullets;
+            } else if (updated.blocks) {
+              let itemIdx = 0;
+              updated.blocks = updated.blocks.map(b => {
+                if (b.type === 'checklist' && Array.isArray((b as any).items)) {
+                  const items = [...(b as any).items];
+                  for (let k = 0; k < items.length; k++) {
+                    if (3 + itemIdx === layerId) {
+                      items[k] = currentContent;
+                    }
+                    itemIdx++;
+                  }
+                  return { ...b, items };
+                }
+                return b;
+              });
+            }
+          }
+        }
+        // 모든 페이지의 동일 레이어 스타일 일괄 업데이트 (bullets/blocks 배열 유무와 상관없이 무조건 갱신)
+        if (layerId === 1) updated.titleStyle = { ...(updated.titleStyle || {}), ...style };
+        else if (layerId === 2) updated.subtitleStyle = { ...(updated.subtitleStyle || {}), ...style };
+        else if (layerId >= 3) updated.bulletStyle = { ...(updated.bulletStyle || {}), ...style };
+        return updated;
       });
       pushHistory(next);
       return next;
     });
-  }, [pushHistory]);
+    const layerName = layerId === 1 ? '제목' : layerId === 2 ? '부제' : '본문';
+    showToast(`${count}개 슬라이드에 ${layerName} 스타일을 적용했습니다`);
+  }, [pagesData.length, pushHistory, currentPage, showToast]);
 
   // 이미지 설정(밝기·오버레이)을 모든 페이지에 적용
   const applyImageSettingsToAllPages = useCallback((settings: { bgBrightness: number; bgBrightnessFilter: number; overlayOpacity: number }) => {
@@ -4570,6 +4636,13 @@ export default function EditorPage() {
           </div>
         </div>
       </div>
+      {/* 토스트 알림 */}
+      {toastMessage && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-gray-900/90 text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-2xl backdrop-blur-md border border-gray-700/50 flex items-center gap-2 animate-fade-in pointer-events-none">
+          <span>📋</span>
+          <span>{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
 }
