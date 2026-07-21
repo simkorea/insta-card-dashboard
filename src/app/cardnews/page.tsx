@@ -278,6 +278,108 @@ export default function CardNewsPage() {
   const [useAiStyle, setUseAiStyle] = useState(false);
   const [aiRecommendedStyle, setAiRecommendedStyle] = useState<string | null>(null);
 
+  // AI 이미지 프롬프트 생성 State
+  const [promptCountType, setPromptCountType] = useState<'cover' | 'all' | 'custom'>('cover');
+  const [promptCustomCount, setPromptCustomCount] = useState(1);
+  const [isGeneratingPrompts, setIsGeneratingPrompts] = useState(false);
+  const [promptResult, setPromptResult] = useState<{ prompts: { index: number; label: string; prompt: string }[]; negativePrompt: string } | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [imagePromptPreset, setImagePromptPreset] = useState<string>('trust');
+
+  useEffect(() => {
+    if (inputMode === 'step9') {
+      setImagePromptPreset(step9StylePreset);
+    }
+  }, [inputMode, step9StylePreset]);
+
+  const handleGenerateImagePrompts = async () => {
+    setIsGeneratingPrompts(true);
+    try {
+      let slidesData: any[] = [];
+      const storedData = localStorage.getItem('cardNewsData');
+      if (storedData) {
+        try {
+          const parsed = JSON.parse(storedData);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            slidesData = parsed.map((d: any) => ({
+              index: d.page,
+              title: d.title,
+              body: d.body,
+            }));
+          }
+        } catch (e) {}
+      }
+
+      if (slidesData.length === 0 && prompt) {
+        const regex = /\[(\d+)장 [^\]]+\]\s*(.*?)(?=\n\s*\n\[|$)/gs;
+        const matches = [...prompt.matchAll(regex)];
+        if (matches.length > 0) {
+          slidesData = matches.map((match) => {
+            const index = parseInt(match[1]);
+            const content = match[2].trim();
+            const lines = content.split('\n');
+            return {
+              index,
+              title: lines[0] || '',
+              body: lines.slice(1).join('\n') || '',
+            };
+          });
+        }
+      }
+
+      const count =
+        promptCountType === 'cover'
+          ? 1
+          : promptCountType === 'all'
+          ? (slidesData.length || 10)
+          : promptCustomCount;
+
+      const presetId = imagePromptPreset;
+
+      const res = await fetch('/api/generate/card-image-prompts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic: prompt.slice(0, 200),
+          category: selectedTemplate?.category || '일반',
+          slides: slidesData,
+          presetId,
+          count,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.error) {
+        alert('프롬프트 생성 실패: ' + data.error);
+        return;
+      }
+      setPromptResult(data);
+    } catch (e: any) {
+      alert('프롬프트 생성 중 오류가 발생했습니다.');
+    } finally {
+      setIsGeneratingPrompts(false);
+    }
+  };
+
+  const handleCopyPromptText = (key: string, text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+    }
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const handleCopyAllPrompts = () => {
+    if (!promptResult) return;
+    const fullText = `[Negative Prompt]\n${promptResult.negativePrompt}\n\n` +
+      promptResult.prompts.map(p => `[${p.label}]\n${p.prompt}`).join('\n\n');
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(fullText);
+    }
+    setCopiedKey('all');
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
   // Tab: 브랜드 키트 (Brand Kit)
   const [brandKit, setBrandKit] = useState<{ logo: string; color: string; name: string; useAutoAccent: boolean }>({
     logo: '',
@@ -3217,6 +3319,195 @@ export default function CardNewsPage() {
                           </div>
                         )}
                       </div>
+                    </div>
+                    
+                    {/* AI 이미지 프롬프트 (Image Prompts Generator) */}
+                    <div className="bg-white border border-gray-200 rounded-2xl p-5 mb-4 shadow-sm">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[14px] font-bold text-gray-800">🎨 AI 이미지 프롬프트</span>
+                          <span className="text-[11px] text-gray-400 font-medium">(레오나르도 AI 등 생성용)</span>
+                        </div>
+                      </div>
+
+                      {/* 스타일 앵커 선택 */}
+                      <div className="flex items-center gap-2 mb-4 flex-wrap">
+                        <span className="text-xs font-semibold text-gray-600">스타일 선택:</span>
+                        <div className="flex bg-gray-100 p-0.5 rounded-lg border border-gray-200 text-xs">
+                          {[
+                            { id: 'trust', label: '신뢰·전문' },
+                            { id: 'impact', label: '강렬·후킹' },
+                            { id: 'info', label: '정보·신뢰' },
+                            { id: 'soft', label: '부드러움' },
+                          ].map(preset => (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => setImagePromptPreset(preset.id)}
+                              className={`px-3 py-1 font-semibold rounded-md transition-all ${
+                                imagePromptPreset === preset.id ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                              }`}
+                            >
+                              {preset.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 개수 선택 (버튼) */}
+                      <div className="flex items-center gap-2 mb-4 flex-wrap">
+                        <span className="text-xs font-semibold text-gray-600">생성 범위:</span>
+                        <div className="flex bg-gray-100 p-0.5 rounded-lg border border-gray-200 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setPromptCountType('cover')}
+                            className={`px-3 py-1 font-semibold rounded-md transition-all ${
+                              promptCountType === 'cover' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                            }`}
+                          >
+                            표지만 (1장)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPromptCountType('all')}
+                            className={`px-3 py-1 font-semibold rounded-md transition-all ${
+                              promptCountType === 'all' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                            }`}
+                          >
+                            전체 (N장)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPromptCountType('custom')}
+                            className={`px-3 py-1 font-semibold rounded-md transition-all ${
+                              promptCountType === 'custom' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-800'
+                            }`}
+                          >
+                            직접 지정
+                          </button>
+                        </div>
+
+                        {promptCountType === 'custom' && (
+                          <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-lg">
+                            <button
+                              type="button"
+                              onClick={() => setPromptCustomCount(c => Math.max(1, c - 1))}
+                              className="w-5 h-5 flex items-center justify-center text-xs font-bold text-gray-600 hover:bg-gray-200 rounded"
+                            >-</button>
+                            <span className="text-xs font-bold text-gray-700 w-4 text-center">{promptCustomCount}</span>
+                            <button
+                              type="button"
+                              onClick={() => setPromptCustomCount(c => Math.min(10, c + 1))}
+                              className="w-5 h-5 flex items-center justify-center text-xs font-bold text-gray-600 hover:bg-gray-200 rounded"
+                            >+</button>
+                            <span className="text-xs text-gray-500">장</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 생성 버튼 */}
+                      <button
+                        type="button"
+                        onClick={handleGenerateImagePrompts}
+                        disabled={isGeneratingPrompts}
+                        className="w-full py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 text-white rounded-xl font-bold text-xs hover:from-violet-700 hover:to-indigo-700 disabled:opacity-50 transition-all flex justify-center items-center gap-2 shadow-sm"
+                      >
+                        {isGeneratingPrompts ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin" />
+                            AI 영문 이미지 프롬프트 생성 중...
+                          </>
+                        ) : (
+                          <>
+                            <Wand2 size={14} />
+                            ✨ 프롬프트 생성하기
+                          </>
+                        )}
+                      </button>
+
+                      {/* 결과 표시 */}
+                      {promptResult && (
+                        <div className="mt-4 space-y-3 pt-3 border-t border-gray-100">
+                          {/* 네거티브 프롬프트 박스 */}
+                          <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-xs font-bold text-amber-900 flex items-center gap-1">
+                                <span>⛔ [공통] 네거티브 프롬프트</span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleCopyPromptText('neg', promptResult.negativePrompt)}
+                                className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-md text-[11px] font-bold transition-all flex items-center gap-1"
+                              >
+                                {copiedKey === 'neg' ? '✓ 복사됨!' : '📋 복사'}
+                              </button>
+                            </div>
+                            <p className="text-[11px] text-amber-800/90 leading-relaxed font-mono bg-white/80 p-2 rounded-lg border border-amber-100 select-all break-words">
+                              {promptResult.negativePrompt}
+                            </p>
+                            <p className="text-[10px] text-amber-700 mt-1.5 font-medium">
+                              💡 레오나르도(Leonardo AI) 등 이미지 생성기의 <strong>Negative Prompt</strong> 칸에 붙여넣으세요.
+                            </p>
+                          </div>
+
+                          {/* 레오나르도 권장 설정 */}
+                          <details className="bg-white border border-gray-200 rounded-xl p-3 text-xs mb-3 group">
+                            <summary className="font-bold text-gray-700 cursor-pointer list-none flex items-center justify-between select-none">
+                              <span className="flex items-center gap-1.5">
+                                <span className="text-sm">💡</span> 레오나르도 권장 설정
+                              </span>
+                              <span className="text-gray-400 group-open:rotate-180 transition-transform">▼</span>
+                            </summary>
+                            <div className="mt-2 pt-2 border-t border-gray-100 text-gray-600 space-y-1.5">
+                              <p><strong>Model:</strong> Lucid Realism</p>
+                              <p><strong>Style:</strong> None <span className="text-gray-400">(Dynamic은 AI 티가 나므로 피할 것)</span></p>
+                              <p><strong>Image Dimensions:</strong> Custom → 912 × 1144 <span className="text-gray-400">(4:5 비율)</span></p>
+                              <p><strong>Generation Mode:</strong> Fast</p>
+                              <p className="text-[10px] text-gray-500 mt-2 bg-gray-50 p-2 rounded">
+                                ※ Lucid Realism 모델에는 Negative Prompt 입력란이 없습니다. 네거티브 프롬프트를 지원하는 모델을 쓸 때만 위 내용을 붙여넣으세요.<br/>
+                                ※ 여러 장의 톤을 맞추려면 Advanced Settings의 Use Fixed Seed를 켜고 같은 시드 값을 사용하세요.
+                              </p>
+                            </div>
+                          </details>
+
+                          {/* 슬라이드별 프롬프트 카드 목록 */}
+                          <div className="space-y-2">
+                            {promptResult.prompts.map((p) => (
+                              <div key={p.index} className="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                                <div className="flex items-center justify-between mb-1.5">
+                                  <span className="text-xs font-bold text-gray-700">{p.label}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyPromptText(`p_${p.index}`, p.prompt)}
+                                    className="px-2.5 py-1 bg-gray-800 hover:bg-gray-900 text-white rounded-md text-[11px] font-bold transition-all flex items-center gap-1"
+                                  >
+                                    {copiedKey === `p_${p.index}` ? '✓ 복사됨!' : '📋 복사'}
+                                  </button>
+                                </div>
+                                <p className="text-xs text-gray-800 leading-relaxed font-mono bg-white p-2.5 rounded-lg border border-gray-200 select-all break-words">
+                                  {p.prompt}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* 하단 전체 복사 버튼 */}
+                          <div className="pt-2 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={handleCopyAllPrompts}
+                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+                            >
+                              {copiedKey === 'all' ? '✓ 전체 복사됨!' : '📋 전체 프롬프트 복사'}
+                            </button>
+                          </div>
+
+                          {/* 섹션 하단 안내 */}
+                          <p className="text-[11px] text-gray-400 text-center pt-2 border-t border-gray-100 font-medium">
+                            💡 레오나르도에서 생성한 이미지는 <strong>편집기 → 이미지 → 에셋 탭</strong>에서 업로드하세요.
+                          </p>
+                        </div>
+                      )}
                     </div>
                     
                     {/* 스타일 구성 (Style Configuration) */}

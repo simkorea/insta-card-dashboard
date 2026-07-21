@@ -880,8 +880,69 @@ function CropModal({ imageSrc, onClose }: { imageSrc: string; onClose: () => voi
 // ─── Image Panel ──────────────────────────────────────────────────────────────
 type UnsplashPhoto = { id: string; url: string; thumbUrl: string; fullUrl: string; author: string; authorUrl: string; color: string; description: string };
 
+function extractSlideContent(pd?: PageData): { title: string; body: string } {
+  if (!pd) return { title: '', body: '' };
+
+  if (Array.isArray(pd.blocks) && pd.blocks.length > 0) {
+    let headlineText = '';
+    const bodyLines: string[] = [];
+
+    for (const b of pd.blocks as any[]) {
+      if (!b || typeof b !== 'object') continue;
+
+      if (b.type === 'headline') {
+        const textPart = b.text || '';
+        const accentPart = b.accentText ? ` ${b.accentText}` : '';
+        if (!headlineText) {
+          headlineText = (textPart + accentPart).trim();
+        } else {
+          bodyLines.push((textPart + accentPart).trim());
+        }
+      } else if (b.type === 'sub' || b.type === 'eyebrow') {
+        if (b.text) bodyLines.push(String(b.text).trim());
+      } else if (b.type === 'checklist' && Array.isArray(b.items)) {
+        for (const item of b.items) {
+          if (item) bodyLines.push(String(item).trim());
+        }
+      } else if (b.type === 'badgeRow' && Array.isArray(b.badges)) {
+        for (const badge of b.badges) {
+          if (badge?.text) bodyLines.push(String(badge.text).trim());
+        }
+      } else if (b.type === 'statGrid' && Array.isArray(b.items)) {
+        for (const item of b.items) {
+          const parts = [item?.label, item?.value].filter(Boolean).map(s => String(s).trim());
+          if (parts.length > 0) bodyLines.push(parts.join(': '));
+        }
+      } else if (b.type === 'compareTable' && Array.isArray(b.rows)) {
+        for (const row of b.rows) {
+          const parts = [row?.label, row?.value].filter(Boolean).map(s => String(s).trim());
+          if (parts.length > 0) bodyLines.push(parts.join(' - '));
+        }
+      } else if (b.type === 'timeline' && Array.isArray(b.items)) {
+        for (const item of b.items) {
+          const parts = [item?.date, item?.title, item?.desc].filter(Boolean).map(s => String(s).trim());
+          if (parts.length > 0) bodyLines.push(parts.join(' '));
+        }
+      }
+      // Note: sourceNote is excluded as requested
+    }
+
+    const title = headlineText || pd.title || '';
+    const body = bodyLines.join('\n');
+    return { title, body };
+  }
+
+  // Fallback if blocks is empty
+  const title = pd.title || '';
+  const bodyParts = [pd.subtitle, ...(pd.bullets || [])].filter(Boolean);
+  return { title, body: bodyParts.join('\n') };
+}
+
 function ImagePanel({
   layer,
+  pageData,
+  firstPageData,
+  pageIndex,
   currentImageUrl,
   cardContent,
   imageKeyword,
@@ -901,6 +962,9 @@ function ImagePanel({
   onApplySettingsAll,
 }: {
   layer: CanvasLayer;
+  pageData?: PageData;
+  firstPageData?: PageData;
+  pageIndex?: number;
   currentImageUrl?: string;
   cardContent?: string;
   imageKeyword?: string;
@@ -968,6 +1032,59 @@ function ImagePanel({
   const [aiGeneratedUrls, setAiGeneratedUrls] = useState<string[]>([]);
   const [aiError, setAiError] = useState('');
   const [applyAllDone, setApplyAllDone] = useState(false);
+
+  // 슬라이드 맞춤 AI 프롬프트 생성 상태
+  const [isCreatingSlidePrompt, setIsCreatingSlidePrompt] = useState(false);
+  const [slideNegativePrompt, setSlideNegativePrompt] = useState('');
+  const [slidePromptCopiedKey, setSlidePromptCopiedKey] = useState<string | null>(null);
+
+  const handleCreateSlidePrompt = async () => {
+    if (isCreatingSlidePrompt) return;
+    setAiError('');
+
+    const currentSlide = extractSlideContent(pageData);
+    const firstSlide = extractSlideContent(firstPageData || pageData);
+
+    const topic = firstSlide.title || currentSlide.title || pageData?.title || '카드뉴스';
+    const presetId = pageData?.brandTone === 'sage' ? 'soft' : 'trust';
+    const slideIdx = pageIndex || Number(pageData?.id) || 1;
+
+    setIsCreatingSlidePrompt(true);
+    try {
+      const res = await fetch('/api/generate/card-image-prompts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic,
+          category: '',
+          slides: [
+            {
+              index: slideIdx,
+              title: currentSlide.title,
+              body: currentSlide.body,
+            },
+          ],
+          presetId,
+          count: 1,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setAiError(friendlyError(data.error));
+        return;
+      }
+      if (data.prompts && data.prompts[0]?.prompt) {
+        setAiPrompt(data.prompts[0].prompt);
+      }
+      if (data.negativePrompt) {
+        setSlideNegativePrompt(data.negativePrompt);
+      }
+    } catch (e: any) {
+      setAiError(friendlyError(e));
+    } finally {
+      setIsCreatingSlidePrompt(false);
+    }
+  };
 
   const handleAiGenerate = async () => {
     if (!aiPrompt.trim() || aiGenerating) return;
@@ -1796,11 +1913,46 @@ function ImagePanel({
                     </p>
                   </div>
 
+                  {/* 이 슬라이드에 맞는 프롬프트 생성 버튼 */}
+                  <button
+                    type="button"
+                    onClick={handleCreateSlidePrompt}
+                    disabled={isCreatingSlidePrompt || aiGenerating}
+                    className="w-full py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  >
+                    {isCreatingSlidePrompt ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        슬라이드 맞춤 프롬프트 생성 중...
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 size={14} />
+                        ✨ 이 슬라이드에 맞는 프롬프트 만들기
+                      </>
+                    )}
+                  </button>
+
                   {/* Prompt */}
                   <div>
                     <div className="flex items-center justify-between mb-1.5">
                       <label className="text-[11px] font-semibold text-gray-600">원하는 이미지를 설명하세요</label>
-                      <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded font-medium">GPT Image 2</span>
+                      <div className="flex items-center gap-1.5">
+                        {aiPrompt && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (navigator.clipboard) navigator.clipboard.writeText(aiPrompt);
+                              setSlidePromptCopiedKey('prompt');
+                              setTimeout(() => setSlidePromptCopiedKey(null), 2000);
+                            }}
+                            className="px-2 py-0.5 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded text-[10px] font-bold transition-colors flex items-center gap-1"
+                          >
+                            {slidePromptCopiedKey === 'prompt' ? '✓ 복사됨!' : '📋 복사'}
+                          </button>
+                        )}
+                        <span className="text-[10px] text-gray-400 bg-gray-100 px-2 py-0.5 rounded font-medium">GPT Image 2</span>
+                      </div>
                     </div>
                     <textarea
                       value={aiPrompt}
@@ -1810,6 +1962,52 @@ function ImagePanel({
                       rows={3}
                     />
                   </div>
+
+                  {/* Negative Prompt display */}
+                  {slideNegativePrompt && (
+                    <div className="p-2.5 bg-amber-50/80 rounded-lg border border-amber-200 text-xs">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[11px] font-bold text-amber-900">⛔ [공통] 네거티브 프롬프트</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (navigator.clipboard) navigator.clipboard.writeText(slideNegativePrompt);
+                            setSlidePromptCopiedKey('neg');
+                            setTimeout(() => setSlidePromptCopiedKey(null), 2000);
+                          }}
+                          className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold transition-colors"
+                        >
+                          {slidePromptCopiedKey === 'neg' ? '✓ 복사됨!' : '📋 복사'}
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-amber-800 font-mono bg-white/80 p-1.5 rounded border border-amber-100 select-all break-words leading-relaxed">
+                        {slideNegativePrompt}
+                      </p>
+                      <p className="text-[9px] text-amber-700 mt-1 font-medium">
+                        💡 레오나르도 AI의 <strong>Negative Prompt</strong> 칸에 붙여넣으세요.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 레오나르도 권장 설정 */}
+                  <details className="bg-white border border-gray-200 rounded-xl p-3 text-xs mb-3 group">
+                    <summary className="font-bold text-gray-700 cursor-pointer list-none flex items-center justify-between select-none">
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-sm">💡</span> 레오나르도 권장 설정
+                      </span>
+                      <span className="text-gray-400 group-open:rotate-180 transition-transform">▼</span>
+                    </summary>
+                    <div className="mt-2 pt-2 border-t border-gray-100 text-gray-600 space-y-1.5">
+                      <p><strong>Model:</strong> Lucid Realism</p>
+                      <p><strong>Style:</strong> None <span className="text-gray-400">(Dynamic은 AI 티가 나므로 피할 것)</span></p>
+                      <p><strong>Image Dimensions:</strong> Custom → 912 × 1144 <span className="text-gray-400">(4:5 비율)</span></p>
+                      <p><strong>Generation Mode:</strong> Fast</p>
+                      <p className="text-[10px] text-gray-500 mt-2 bg-gray-50 p-2 rounded">
+                        ※ Lucid Realism 모델에는 Negative Prompt 입력란이 없습니다. 네거티브 프롬프트를 지원하는 모델을 쓸 때만 위 내용을 붙여넣으세요.<br/>
+                        ※ 여러 장의 톤을 맞추려면 Advanced Settings의 Use Fixed Seed를 켜고 같은 시드 값을 사용하세요.
+                      </p>
+                    </div>
+                  </details>
 
                   {/* Ratio + Count */}
                   <div>
@@ -4492,6 +4690,9 @@ export default function EditorPage() {
                 <ImagePanel
                   key={`${pageData.id}-${selectedLayer.id}`}
                   layer={selectedLayer}
+                  pageData={pageData}
+                  firstPageData={pagesData[0]}
+                  pageIndex={currentPage}
                   currentImageUrl={currentBgImage}
                   cardContent={cardTextContent}
                   imageKeyword={pageData.imageKeyword}
@@ -4604,6 +4805,9 @@ export default function EditorPage() {
               <ImagePanel
                 key={`m-${pageData.id}-${selectedLayer.id}`}
                 layer={selectedLayer}
+                pageData={pageData}
+                firstPageData={pagesData[0]}
+                pageIndex={currentPage}
                 currentImageUrl={currentBgImage}
                 cardContent={cardTextContent}
                 imageKeyword={pageData.imageKeyword}
@@ -5323,6 +5527,9 @@ function FullscreenEditor({
                 <ImagePanel
                   key={`fs-${pageData.id}-${selectedLayer.id}`}
                   layer={selectedLayer}
+                  pageData={pageData}
+                  firstPageData={pagesData[0]}
+                  pageIndex={fsPage}
                   currentImageUrl={currentBgImage}
                   cardContent={cardTextContent}
                   imageKeyword={pageData.imageKeyword}
