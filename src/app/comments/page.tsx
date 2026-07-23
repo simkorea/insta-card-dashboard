@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { MessageSquare, Sparkles, Plus, Trash2, Copy, CheckCheck, Loader2, Search, Edit3, X, Save } from 'lucide-react';
+import { MessageSquare, Sparkles, Plus, Trash2, Copy, CheckCheck, Loader2, Search, Edit3, X, Save, Bot, ChevronDown, ChevronUp } from 'lucide-react';
 
 const CATEGORIES = [
   { id: 'all', label: '전체', emoji: '📋' },
@@ -28,6 +28,17 @@ interface Template {
   created_at: string;
 }
 
+const AI_TONE_OPTIONS = [
+  { value: 'friendly', label: '친근·다정' },
+  { value: 'professional', label: '전문·신뢰' },
+  { value: 'careful', label: '정중·신중' },
+] as const;
+
+interface AiReply {
+  text: string;
+  style: string;
+}
+
 export default function CommentsPage() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -39,6 +50,15 @@ export default function CommentsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [newTemplate, setNewTemplate] = useState({ category: 'general', title: '', content: '', tags: '' });
+
+  const [showAiPanel, setShowAiPanel] = useState(false);
+  const [aiComment, setAiComment] = useState('');
+  const [aiBrandName, setAiBrandName] = useState('');
+  const [aiTone, setAiTone] = useState<(typeof AI_TONE_OPTIONS)[number]['value']>('friendly');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
+  const [aiReplies, setAiReplies] = useState<AiReply[]>([]);
+  const [aiCopiedIdx, setAiCopiedIdx] = useState<number | null>(null);
 
   const loadTemplates = async () => {
     setIsLoading(true);
@@ -108,6 +128,33 @@ export default function CommentsPage() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleAiReply = async () => {
+    if (!aiComment.trim()) return;
+    setAiLoading(true);
+    setAiError('');
+    setAiReplies([]);
+    try {
+      const res = await fetch('/api/comments/ai-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comment: aiComment, tone: aiTone, brandName: aiBrandName || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '생성 실패');
+      setAiReplies(data.replies ?? []);
+    } catch (e: any) {
+      setAiError(e.message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const aiCopy = (idx: number, text: string) => {
+    navigator.clipboard.writeText(text);
+    setAiCopiedIdx(idx);
+    setTimeout(() => setAiCopiedIdx(null), 2000);
+  };
+
   const filtered = templates.filter(t => {
     const matchCat = activeCategory === 'all' || t.category === activeCategory;
     const matchSearch = !searchQuery || t.title.includes(searchQuery) || t.content.includes(searchQuery);
@@ -128,6 +175,13 @@ export default function CommentsPage() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setShowAiPanel(v => !v)}
+            className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-50"
+          >
+            <Bot size={14} /> AI 답변하기
+            {showAiPanel ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+          <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-50"
           >
@@ -143,6 +197,82 @@ export default function CommentsPage() {
           </button>
         </div>
       </div>
+
+      {/* AI 답변하기 패널 */}
+      {showAiPanel && (
+        <div className="bg-white border-b border-gray-200 px-4 md:px-8 py-5 shrink-0">
+          <div className="max-w-3xl">
+            <p className="text-sm font-bold text-gray-700 mb-3">실제 댓글에 맞는 답변을 AI가 3가지 버전으로 생성해드려요</p>
+            <div className="space-y-3">
+              <textarea
+                value={aiComment}
+                onChange={e => setAiComment(e.target.value)}
+                placeholder="댓글 원문을 붙여넣어 주세요. 예: 분양가가 어느 정도인가요?"
+                rows={3}
+                className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none resize-none focus:border-primary-400 focus:ring-1 focus:ring-primary-100"
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <input
+                  type="text"
+                  value={aiBrandName}
+                  onChange={e => setAiBrandName(e.target.value)}
+                  placeholder="브랜드/계정명 (선택, 예: @aptshowhome)"
+                  className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-100"
+                />
+                <div className="flex gap-2">
+                  {AI_TONE_OPTIONS.map(o => (
+                    <button
+                      key={o.value}
+                      type="button"
+                      onClick={() => setAiTone(o.value)}
+                      className={`flex-1 px-3 py-2.5 rounded-xl text-xs font-bold border transition-colors ${
+                        aiTone === o.value
+                          ? 'bg-primary-50 border-primary-400 text-primary-700'
+                          : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+                      }`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {aiError && (
+                <div className="flex items-center gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
+                  <span className="text-red-500 text-xs">{aiError}</span>
+                </div>
+              )}
+
+              <button
+                onClick={handleAiReply}
+                disabled={aiLoading || !aiComment.trim()}
+                className="flex items-center justify-center gap-2 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-200 text-white rounded-xl text-sm font-bold"
+              >
+                {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Bot size={14} />}
+                {aiLoading ? '답변 생성 중...' : 'AI 답변 생성'}
+              </button>
+            </div>
+
+            {aiReplies.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5">
+                {aiReplies.map((r, idx) => (
+                  <div key={idx} className="bg-gray-50 rounded-2xl border border-gray-100 p-4 flex flex-col gap-2.5">
+                    <span className="text-xs font-bold text-primary-600 bg-primary-50 px-2 py-1 rounded-full w-fit">{r.style}</span>
+                    <p className="text-sm text-gray-700 leading-relaxed flex-1">{r.text}</p>
+                    <button
+                      onClick={() => aiCopy(idx, r.text)}
+                      className={`flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all ${aiCopiedIdx === idx ? 'bg-green-500 text-white' : 'bg-white text-gray-600 border border-gray-200 hover:bg-primary-50 hover:text-primary-700'}`}
+                    >
+                      {aiCopiedIdx === idx ? <CheckCheck size={13} /> : <Copy size={13} />}
+                      {aiCopiedIdx === idx ? '복사됨!' : '복사하기'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-col md:flex-row flex-1 overflow-auto md:overflow-hidden">
         {/* Left: Categories */}
