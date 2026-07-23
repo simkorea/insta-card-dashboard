@@ -159,9 +159,8 @@ export default function DashboardPage() {
       {/* ── 메인 그리드 ───────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
 
-        {/* 최근 디자인 */}
-        <div className="space-y-6">
-          {/* ── 오늘의 브리핑 ────────────────────────────────────────────────── */}
+        {/* ── 오늘의 브리핑 (전체 폭) ────────────────────────────────────────────────── */}
+        <div className="lg:col-span-2">
           {isLoading ? (
             <div className="bg-white border border-gray-100 rounded-3xl p-5 md:p-6 shadow-sm h-[200px] animate-pulse flex flex-col justify-between">
               <div className="h-6 w-1/3 bg-gray-200 rounded" />
@@ -179,12 +178,14 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-gray-900">오늘의 일일 브리핑</h3>
-                    <p className="text-[10px] text-gray-400 mt-0.5">매일 오전 8시 자동 업데이트</p>
+                    <p className="text-[10px] text-gray-400 mt-0.5">
+                      브리핑 날짜: {new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(briefing.created_at))}
+                    </p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 self-start sm:self-auto">
-                  <span className="px-2.5 py-1 bg-violet-50 text-violet-700 text-[10px] font-bold rounded-lg border border-violet-100">
-                    📅 {briefing.date}
+                  <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-blue-100">
+                    광고 성과 기준일: {briefing.date}
                   </span>
                   <button 
                     onClick={triggerBriefing} 
@@ -197,12 +198,12 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {/* 부동산 뉴스 요약 */}
-                <div className="space-y-2">
-                  <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">🏢 부동산 정책 & 시장 브리핑</h4>
-                  <div className="bg-gray-50/50 rounded-2xl p-4 border border-gray-100 text-xs text-gray-600 leading-relaxed whitespace-pre-wrap max-h-[160px] overflow-y-auto">
-                    {briefing.real_estate_summary}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* 종합 브리핑 전문 */}
+                <div className="space-y-2 lg:col-span-2">
+                  <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">📝 종합 브리핑 전문</h4>
+                  <div className="bg-gray-50/50 rounded-2xl p-4 border border-gray-100 text-xs text-gray-600 leading-relaxed whitespace-pre-wrap max-h-[400px] overflow-y-auto">
+                    {briefing.full_report || briefing.real_estate_summary}
                   </div>
                 </div>
 
@@ -240,7 +241,7 @@ export default function DashboardPage() {
                   📊
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-gray-800">오늘 생성된 일일 브리핑이 아직 없습니다</h3>
+                  <h3 className="text-xs font-bold text-gray-800">오늘 브리핑이 아직 없습니다</h3>
                   <p className="text-[11px] text-gray-500 mt-0.5">매일 오전 8시(KST)에 자동으로 생성되거나, 지금 수동으로 생성할 수 있습니다.</p>
                 </div>
               </div>
@@ -254,7 +255,10 @@ export default function DashboardPage() {
               </button>
             </div>
           )}
+        </div>
 
+        {/* 최근 디자인 */}
+        <div className="space-y-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-base font-bold text-gray-900">최근 작업</h2>
             <div className="flex items-center gap-2">
