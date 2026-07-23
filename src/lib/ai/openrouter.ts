@@ -46,3 +46,6 @@ export async function callAI({
     throw new Error(`OpenRouter 호출 실패 (${model}): ${error.message || error}`);
   }
 }
+
+export const callOpenRouter = callAI;
+
