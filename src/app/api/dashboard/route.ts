@@ -32,6 +32,16 @@ export async function GET() {
       .select('id', { count: 'exact', head: true })
       .gte('created_at', weekAgo);
 
+    let isBriefingSaved = false;
+    if (briefingRes.data) {
+      const dbClient = supabaseService || supabase;
+      const { count } = await dbClient
+        .from('blog_posts')
+        .select('id', { count: 'exact', head: true })
+        .eq('briefing_id', briefingRes.data.id);
+      if (count && count > 0) isBriefingSaved = true;
+    }
+
     return NextResponse.json({
       stats: {
         totalDesigns: templatesRes.count ?? 0,
@@ -42,6 +52,7 @@ export async function GET() {
       recentDesigns: designsRes.data ?? [],
       upcomingPosts: pendingPosts.slice(0, 5),
       briefing: briefingRes.data || null,
+      isBriefingSaved,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

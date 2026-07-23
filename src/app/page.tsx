@@ -46,6 +46,8 @@ export default function DashboardPage() {
   const [userEmail, setUserEmail] = useState('');
   const [greeting, setGreeting] = useState('안녕하세요');
   const [isGeneratingBriefing, setIsGeneratingBriefing] = useState(false);
+  const [isBriefingSaved, setIsBriefingSaved] = useState(false);
+  const [isSavingToBlog, setIsSavingToBlog] = useState(false);
 
   useEffect(() => {
     const h = new Date().getHours();
@@ -67,6 +69,7 @@ export default function DashboardPage() {
       const res = await fetch('/api/dashboard');
       const json = await res.json();
       setData(json);
+      setIsBriefingSaved(json.isBriefingSaved || false);
     } catch { /* ignore */ } finally {
       setIsLoading(false);
     }
@@ -86,6 +89,34 @@ export default function DashboardPage() {
       alert("에러가 발생했습니다: " + err.message);
     } finally {
       setIsGeneratingBriefing(false);
+    }
+  };
+
+  const saveToBlog = async () => {
+    if (!briefing || !briefing.id) return;
+    setIsSavingToBlog(true);
+    try {
+      const res = await fetch('/api/briefing/to-blog', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ briefingId: briefing.id })
+      });
+      const json = await res.json();
+      
+      if (json.success) {
+        setIsBriefingSaved(true);
+        if (json.skipped) {
+          alert('이미 저장된 브리핑입니다');
+        } else {
+          alert('블로그에 저장되었습니다');
+        }
+      } else {
+        alert("블로그 저장 실패: " + (json.error || "알 수 없는 오류"));
+      }
+    } catch (err: any) {
+      alert("에러가 발생했습니다: " + err.message);
+    } finally {
+      setIsSavingToBlog(false);
     }
   };
 
@@ -187,6 +218,14 @@ export default function DashboardPage() {
                   <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-blue-100">
                     광고 성과 기준일: {briefing.date}
                   </span>
+                  <button 
+                    onClick={saveToBlog} 
+                    disabled={isSavingToBlog || isBriefingSaved}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 active:bg-emerald-200 disabled:opacity-50 disabled:bg-gray-50 disabled:text-gray-400 disabled:border-gray-200 text-[10px] font-semibold rounded-lg border border-emerald-200 transition-colors cursor-pointer"
+                  >
+                    {isSavingToBlog ? <RefreshCw size={10} className="animate-spin" /> : <FileText size={10} />}
+                    {isBriefingSaved ? "저장됨 ✓" : "블로그로 저장"}
+                  </button>
                   <button 
                     onClick={triggerBriefing} 
                     disabled={isGeneratingBriefing}

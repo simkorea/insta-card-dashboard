@@ -7,6 +7,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+export const maxDuration = 300; // 5분, Vercel Pro 기준
+
 function cleanText(text: string): string {
   return text
     .replace(/<!\[CDATA\[/gi, "")
