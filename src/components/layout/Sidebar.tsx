@@ -26,6 +26,7 @@ import {
   LogOut,
   Archive,
   Search,
+  Zap,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
@@ -218,6 +219,13 @@ export default function Sidebar() {
                 className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${isActive('/reference-research') ? 'bg-primary-50 text-primary-700 font-bold' : 'text-gray-600 hover:bg-gray-50 font-medium'}`}>
                 <Search size={14} className={isActive('/reference-research') ? 'text-primary-600' : 'text-gray-400'} />
                 <span>레퍼런스 리서치</span>
+                <span className="ml-auto text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-bold">NEW</span>
+              </Link>
+
+              <Link href="/dm-automation"
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${isActive('/dm-automation') ? 'bg-primary-50 text-primary-700 font-bold' : 'text-gray-600 hover:bg-gray-50 font-medium'}`}>
+                <Zap size={14} className={isActive('/dm-automation') ? 'text-primary-600' : 'text-gray-400'} />
+                <span>키워드 자동 DM</span>
                 <span className="ml-auto text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-bold">NEW</span>
               </Link>
             </div>

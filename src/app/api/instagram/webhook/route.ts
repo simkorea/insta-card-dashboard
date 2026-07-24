@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { generateReplyDrafts } from '@/lib/comments/generateReplyDrafts';
+import { runDmAutomationForComment } from '@/lib/dmAutomation/runRules';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -106,6 +107,11 @@ export async function POST(request: NextRequest) {
       .maybeSingle();
 
     if (error || !inserted) continue; // 중복 웹훅이거나 저장 실패 — 초안 생성 생략
+
+    if (row.source === 'comment') {
+      const auto = await runDmAutomationForComment(inserted.id, row.text, row.from_ig_id, row.ig_object_id);
+      if (auto.matched) continue; // 키워드 자동화 규칙이 처리함 — AI 초안 생성 생략
+    }
 
     try {
       const replies = await generateReplyDrafts({ comment: row.text, tone: 'friendly' });

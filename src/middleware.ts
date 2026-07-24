@@ -37,6 +37,7 @@ const PROTECTED_API_PREFIXES = [
   '/api/instagram/comments',
   '/api/instagram/dm',
   '/api/reference-research',
+  '/api/dm-automation-rules',
   '/api/insights',
   '/api/comment-templates',
   '/api/comments',
