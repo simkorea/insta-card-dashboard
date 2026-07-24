@@ -163,15 +163,26 @@ export async function GET() {
 뉴스 목록:
 ${newsItems.map((item, idx) => `[뉴스 ${idx + 1}] ${item.title}\n요약: ${item.description}`).join("\n\n")}`;
 
-      try {
-        newsSummary = await callAI({
-          prompt: newsPrompt,
-          model: "deepseek/deepseek-v4-flash",
-          system: "당신은 부동산 정책 및 시장 분석을 전문으로 하는 금융 애널리스트 비서입니다.",
-        });
-      } catch (aiError: any) {
-        console.error("[Briefing] AI 요약 생성 실패:", aiError.message);
-        newsSummary = "AI 브리핑 생성 과정에서 에러가 발생했습니다.";
+      const MAX_AI_RETRIES = 2;
+      let lastAiError: any = null;
+      for (let attempt = 1; attempt <= MAX_AI_RETRIES; attempt++) {
+        try {
+          newsSummary = await callAI({
+            prompt: newsPrompt,
+            model: "deepseek/deepseek-v4-flash",
+            system: "당신은 부동산 정책 및 시장 분석을 전문으로 하는 금융 애널리스트 비서입니다.",
+          });
+          lastAiError = null;
+          break;
+        } catch (aiError: any) {
+          lastAiError = aiError;
+          console.warn(`[Briefing] AI 요약 생성 실패 (시도 ${attempt}/${MAX_AI_RETRIES}):`, aiError.message);
+          if (attempt < MAX_AI_RETRIES) await new Promise(r => setTimeout(r, 3000));
+        }
+      }
+      if (lastAiError) {
+        console.error("[Briefing] AI 요약 생성 최종 실패:", lastAiError.message);
+        newsSummary = `AI 브리핑 생성 과정에서 에러가 발생했습니다. (${lastAiError.message || "알 수 없는 오류"})`;
       }
     }
 
