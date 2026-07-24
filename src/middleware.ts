@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 // 로그인 없이 접근 가능한 페이지 경로
-const PUBLIC_PAGE_PATHS = ['/login', '/signup', '/auth/callback', '/share', '/view'];
+const PUBLIC_PAGE_PATHS = ['/login', '/signup', '/auth/callback', '/share', '/view', '/privacy'];
 
 // 인증 없이 허용할 API 경로 (이미지 프록시, 공유 등)
 const PUBLIC_API_PATHS = [

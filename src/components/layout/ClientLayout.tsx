@@ -3,7 +3,7 @@ import { usePathname } from 'next/navigation';
 import { AuthProvider } from '@/components/providers/AuthProvider';
 import Sidebar from '@/components/layout/Sidebar';
 
-const AUTH_PATHS = ['/login', '/signup', '/auth/callback'];
+const AUTH_PATHS = ['/login', '/signup', '/auth/callback', '/privacy'];
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
