@@ -6,6 +6,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ['@sparticuz/chromium', 'playwright-core'],
   headers: async () => [
     {
       source: '/(.*)',
