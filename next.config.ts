@@ -7,6 +7,14 @@ if (process.env.NODE_ENV !== 'production') {
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ['@sparticuz/chromium', 'playwright-core'],
+  // Vercel 빌드 파일 트레이싱이 playwright-core/browsers.json 같은 비-JS 자산을
+  // 자동으로 못 찾아서 서버리스 번들에서 누락되는 문제 — 명시적으로 포함
+  outputFileTracingIncludes: {
+    '/api/reference-research/search': [
+      './node_modules/playwright-core/**',
+      './node_modules/@sparticuz/chromium/**',
+    ],
+  },
   headers: async () => [
     {
       source: '/(.*)',
