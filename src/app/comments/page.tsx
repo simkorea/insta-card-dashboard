@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { MessageSquare, Sparkles, Plus, Trash2, Copy, CheckCheck, Loader2, Search, Edit3, X, Save, Bot, ChevronDown, ChevronUp } from 'lucide-react';
+import Link from 'next/link';
+import { MessageSquare, Sparkles, Plus, Trash2, Copy, CheckCheck, Loader2, Search, Edit3, X, Save, Bot, ChevronDown, ChevronUp, Inbox } from 'lucide-react';
 
 const CATEGORIES = [
   { id: 'all', label: '전체', emoji: '📋' },
@@ -174,6 +175,12 @@ export default function CommentsPage() {
           <p className="text-xs md:text-sm text-gray-500 mt-0.5">자주 사용하는 댓글 답변을 저장하고 빠르게 복사하세요</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/comments/inbox"
+            className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-50"
+          >
+            <Inbox size={14} /> 받은함
+          </Link>
           <button
             onClick={() => setShowAiPanel(v => !v)}
             className="flex items-center gap-1.5 px-4 py-2 border border-gray-200 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-50"

@@ -13,6 +13,7 @@ const PUBLIC_API_PATHS = [
   '/api/upload-to-cdn',   // CDN 업로드는 공개 (이미지 서빙용)
   '/api/instagram/auth',
   '/api/instagram/callback',
+  '/api/instagram/webhook',  // Meta가 직접 호출 — 세션 쿠키 없음, 서명 검증(X-Hub-Signature-256)으로 보호
 ];
 
 // 인증이 필요한 API 경로 prefix
@@ -32,8 +33,12 @@ const PROTECTED_API_PREFIXES = [
   '/api/instagram/settings',
   '/api/instagram/publish',
   '/api/instagram/insights',
+  '/api/instagram/inbox',
+  '/api/instagram/comments',
+  '/api/instagram/dm',
   '/api/insights',
   '/api/comment-templates',
+  '/api/comments',
   '/api/generate-caption',
   '/api/generate-card',
   '/api/suggest-image-search',
