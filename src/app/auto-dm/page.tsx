@@ -1,6 +1,14 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Bot, Copy, Check, Loader2, RefreshCw, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Bot, Copy, Check, Loader2, RefreshCw, Trash2, ChevronDown, ChevronUp, LayoutTemplate } from 'lucide-react';
+
+const CATEGORIES: Record<string, { label: string; emoji: string }> = {
+  general: { label: '일반 감사', emoji: '🙏' },
+  sales: { label: '세일즈 전환', emoji: '💰' },
+  dm_invite: { label: 'DM 유도', emoji: '📩' },
+  negative: { label: '부정 댓글', emoji: '🛡️' },
+  question: { label: '질문 답변', emoji: '❓' },
+};
 
 const DM_TYPES = [
   { id: 'welcome',  label: '환영 DM',    emoji: '👋', desc: '새 팔로워에게 보내는 첫 인사' },
@@ -31,6 +39,14 @@ interface DMRecord {
   createdAt: string;
 }
 
+interface Template {
+  id: string;
+  category: string;
+  title: string;
+  content: string;
+  tags: string[];
+}
+
 export default function AutoDMPage() {
   const [selectedType, setSelectedType] = useState('welcome');
   const [recipientName, setRecipientName] = useState('');
@@ -43,12 +59,27 @@ export default function AutoDMPage() {
   const [history, setHistory] = useState<DMRecord[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templateCopiedId, setTemplateCopiedId] = useState<string | null>(null);
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem('auto_dm_history');
       if (saved) setHistory(JSON.parse(saved));
     } catch { /* ignore */ }
+
+    fetch('/api/comment-templates')
+      .then(res => res.json())
+      .then(data => setTemplates(data.templates || []))
+      .catch(() => {});
   }, []);
+
+  const handleTemplateCopy = async (id: string, text: string) => {
+    await navigator.clipboard.writeText(text);
+    setTemplateCopiedId(id);
+    setTimeout(() => setTemplateCopiedId(null), 2000);
+  };
 
   const saveHistory = (record: DMRecord) => {
     const updated = [record, ...history].slice(0, 20);
@@ -244,6 +275,41 @@ export default function AutoDMPage() {
           </button>
         </div>
       )}
+
+      {/* 저장된 템플릿에서 선택 */}
+      <div className="mb-8">
+        <button
+          onClick={() => setShowTemplates(v => !v)}
+          className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 rounded-xl text-sm font-bold text-gray-600 hover:bg-gray-100 transition-colors"
+        >
+          <span className="flex items-center gap-1.5"><LayoutTemplate size={14} /> 저장된 템플릿에서 선택 ({templates.length}개)</span>
+          {showTemplates ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+
+        {showTemplates && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3 max-h-80 overflow-y-auto">
+            {templates.length === 0 && (
+              <p className="text-xs text-gray-400 p-2 col-span-2">저장된 템플릿이 없습니다</p>
+            )}
+            {templates.map(t => {
+              const cat = CATEGORIES[t.category];
+              const copied = templateCopiedId === t.id;
+              return (
+                <div key={t.id} className="bg-white border border-gray-100 rounded-xl p-3 shadow-sm flex flex-col gap-2">
+                  <span className="text-[10px] font-bold text-gray-400">{cat ? `${cat.emoji} ${cat.label}` : t.category} · {t.title}</span>
+                  <p className="text-xs text-gray-600 leading-relaxed flex-1 line-clamp-3">{t.content}</p>
+                  <button
+                    onClick={() => handleTemplateCopy(t.id, t.content)}
+                    className={`flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all ${copied ? 'bg-green-500 text-white' : 'border border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    {copied ? <><Check size={12} /> 복사됨!</> : <><Copy size={12} /> 복사</>}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* History */}
       {history.length > 0 && (
