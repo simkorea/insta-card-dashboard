@@ -540,16 +540,63 @@ const BUILT_IN_THEMES: { id: string; label: string; emoji: string; bg: string; a
   { id: 'education', label: '교육', emoji: '📚', bg: '#08081a', accent: '#A78BFA', data: EDUCATION_THEME_DATA },
 ];
 
+// 레이어 id(1=제목, 2=부제, 3+=글머리)에 해당하는 텍스트를 blocks에 반영한다.
+// 슬라이드는 blocks가 있으면 blocks로만 렌더링되므로, 이걸 거치지 않으면
+// title/subtitle/bullets만 바뀌고 화면 글자는 그대로 남는다.
+function applyTextToBlocks(blocks: SlideBlock[] | undefined, layerId: number, content: string): SlideBlock[] | undefined {
+  if (!blocks || blocks.length === 0) return blocks;
+  let headlineDone = false;
+  let subDone = false;
+  let itemIdx = 0;
+  return blocks.map(b => {
+    if (layerId === 1 && b.type === 'headline' && !headlineDone) {
+      headlineDone = true;
+      // 강조 문구가 새 텍스트에 그대로 남아 있을 때만 강조 유지
+      return b.accentText && content.includes(b.accentText)
+        ? { ...b, text: content }
+        : { ...b, text: content, accentText: undefined };
+    }
+    if (layerId === 2 && b.type === 'sub' && !subDone) {
+      subDone = true;
+      return { ...b, text: content };
+    }
+    if (layerId >= 3 && b.type === 'checklist' && Array.isArray(b.items)) {
+      const items = [...b.items];
+      let changed = false;
+      for (let k = 0; k < items.length; k++) {
+        if (3 + itemIdx === layerId) {
+          items[k] = content;
+          changed = true;
+        }
+        itemIdx++;
+      }
+      return changed ? { ...b, items } : b;
+    }
+    return b;
+  });
+}
+
 // 현재 페이지의 레이어 목록 생성 (스타일 정보 포함)
 function getLayersForPage(page: PageData): CanvasLayerWithSrc[] {
-  const bulletItems: string[] = page.bullets && page.bullets.length > 0
-    ? page.bullets
-    : (page.blocks ? page.blocks.filter(b => b.type === 'checklist').flatMap(b => (b as any).items || []) : []);
+  // 슬라이드는 blocks가 있으면 blocks로만 그려진다(BlockRenderer).
+  // 레이어 목록도 같은 소스를 봐야 "보이는 글자 = 고치는 글자"가 된다.
+  const hasBlocks = (page.blocks?.length ?? 0) > 0;
+
+  const headlineText = hasBlocks
+    ? (page.blocks!.find(b => b.type === 'headline') as { text?: string } | undefined)?.text ?? page.title
+    : page.title;
+  // blocks에 sub 블록이 없으면 화면에 부제가 없다는 뜻 → 레이어에도 띄우지 않는다
+  const subText = hasBlocks
+    ? (page.blocks!.find(b => b.type === 'sub') as { text?: string } | undefined)?.text
+    : page.subtitle;
+  const bulletItems: string[] = hasBlocks
+    ? page.blocks!.filter(b => b.type === 'checklist').flatMap(b => (b as { items?: string[] }).items || [])
+    : (page.bullets || []);
 
   return [
     { id: 0, type: 'image', label: page.bgLabel || '배경 이미지', imageSrc: page.bgImage },
-    { id: 1, type: 'text', label: (page.title || '제목').replace(/\n/g, ' '), content: page.title, style: page.titleStyle },
-    ...(page.subtitle ? [{ id: 2, type: 'text' as const, label: page.subtitle.slice(0, 30), content: page.subtitle, style: page.subtitleStyle }] : []),
+    { id: 1, type: 'text', label: (headlineText || '제목').replace(/\n/g, ' '), content: headlineText, style: page.titleStyle },
+    ...(subText ? [{ id: 2, type: 'text' as const, label: subText.slice(0, 30), content: subText, style: page.subtitleStyle }] : []),
     ...bulletItems.map((b, i) => ({
       id: 3 + i,
       type: 'text' as const,
@@ -2391,6 +2438,7 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
     // 1. 즉시 텍스트 버퍼 교체 및 캔버스 제목 변경 (사용성 향상)
     setTextContent(hook);
     if (pageData && onUpdatePageData) {
+      // headline 블록 반영은 updatePageData가 최신 state 기준으로 처리한다
       onUpdatePageData(pageData.id, { title: hook });
     }
 
@@ -2409,7 +2457,7 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
       if (data.error) {
         alert(`본문 생성 실패: ${data.error}`);
       } else if (data.body && pageData && onUpdatePageData) {
-        // 2. 표지 본문(subtitle)도 AI 생성 결과로 함께 교체
+        // 2. 표지 본문(subtitle)도 AI 생성 결과로 함께 교체 (sub 블록 반영은 updatePageData가 담당)
         onUpdatePageData(pageData.id, { subtitle: data.body });
       }
     } catch (err) {
@@ -3215,29 +3263,21 @@ export default function EditorPage() {
     setPagesData(prev => {
       const next = prev.map(p => {
         if (String(p.id) !== String(pageId)) return p;
-        if (layerId === 1) return { ...p, title: content, ...(style ? { titleStyle: style } : {}) };
-        if (layerId === 2) return { ...p, subtitle: content, ...(style ? { subtitleStyle: style } : {}) };
+
+        // 화면은 blocks로 그려지므로 blocks를 함께 고쳐야 수정한 글자가 실제로 반영된다.
+        // (예전에는 title/subtitle/bullets만 고쳐서 스타일만 적용되고 내용은 그대로였음)
+        const hasBlocks = (p.blocks?.length ?? 0) > 0;
+        const blocks = applyTextToBlocks(p.blocks, layerId, content);
+
+        if (layerId === 1) return { ...p, title: content, blocks, ...(style ? { titleStyle: style } : {}) };
+        if (layerId === 2) return { ...p, subtitle: content, blocks, ...(style ? { subtitleStyle: style } : {}) };
         if (layerId >= 3) {
-          let updated = { ...p, ...(style ? { bulletStyle: style } : {}) };
-          if (updated.bullets && updated.bullets.length > 0) {
+          const updated: PageData = { ...p, blocks, ...(style ? { bulletStyle: style } : {}) };
+          // blocks가 없는 기본 테마 슬라이드는 bullets가 렌더링 소스
+          if (!hasBlocks && updated.bullets && updated.bullets.length > 0) {
             const bullets = [...updated.bullets];
-            bullets[layerId - 3] = content;
+            if (layerId - 3 < bullets.length) bullets[layerId - 3] = content;
             updated.bullets = bullets;
-          } else if (updated.blocks) {
-            let itemIdx = 0;
-            updated.blocks = updated.blocks.map(b => {
-              if (b.type === 'checklist' && Array.isArray((b as any).items)) {
-                const items = [...(b as any).items];
-                for (let k = 0; k < items.length; k++) {
-                  if (3 + itemIdx === layerId) {
-                    items[k] = content;
-                  }
-                  itemIdx++;
-                }
-                return { ...b, items };
-              }
-              return b;
-            });
           }
           return updated;
         }
@@ -3269,7 +3309,20 @@ export default function EditorPage() {
   // AI 디자이너: 현재 페이지 전체 변경 적용
   const updatePageData = useCallback((pageId: string, changes: Partial<PageData>) => {
     setPagesData(prev => {
-      const next = prev.map(p => String(p.id) !== String(pageId) ? p : { ...p, ...changes });
+      const next = prev.map(p => {
+        if (String(p.id) !== String(pageId)) return p;
+        // title/subtitle/bullets 변경이 들어오면 렌더링 소스인 blocks에도 반영한다.
+        // (blocks를 직접 넘긴 경우는 그 값을 그대로 존중)
+        let blocks = changes.blocks ?? p.blocks;
+        if (changes.blocks === undefined) {
+          if (typeof changes.title === 'string') blocks = applyTextToBlocks(blocks, 1, changes.title);
+          if (typeof changes.subtitle === 'string') blocks = applyTextToBlocks(blocks, 2, changes.subtitle);
+          if (Array.isArray(changes.bullets)) {
+            changes.bullets.forEach((t, i) => { blocks = applyTextToBlocks(blocks, 3 + i, String(t)); });
+          }
+        }
+        return { ...p, ...changes, blocks };
+      });
       pushHistory(next);
       return next;
     });
@@ -3307,31 +3360,17 @@ export default function EditorPage() {
         let updated = { ...p };
         // 현재 페이지의 텍스트 내용도 업데이트 (전달되었을 경우)
         if (currentPageId && String(p.id) === String(currentPageId) && currentContent !== undefined) {
+          const hasBlocks = (updated.blocks?.length ?? 0) > 0;
+          // 렌더링 소스인 blocks에도 반영 (안 하면 스타일만 바뀌고 글자는 그대로)
+          updated.blocks = applyTextToBlocks(updated.blocks, layerId, currentContent);
           if (layerId === 1) {
             updated.title = currentContent;
           } else if (layerId === 2) {
             updated.subtitle = currentContent;
-          } else if (layerId >= 3) {
-            if (updated.bullets && updated.bullets.length > 0) {
-              const bullets = [...updated.bullets];
-              bullets[layerId - 3] = currentContent;
-              updated.bullets = bullets;
-            } else if (updated.blocks) {
-              let itemIdx = 0;
-              updated.blocks = updated.blocks.map(b => {
-                if (b.type === 'checklist' && Array.isArray((b as any).items)) {
-                  const items = [...(b as any).items];
-                  for (let k = 0; k < items.length; k++) {
-                    if (3 + itemIdx === layerId) {
-                      items[k] = currentContent;
-                    }
-                    itemIdx++;
-                  }
-                  return { ...b, items };
-                }
-                return b;
-              });
-            }
+          } else if (layerId >= 3 && !hasBlocks && updated.bullets && updated.bullets.length > 0) {
+            const bullets = [...updated.bullets];
+            if (layerId - 3 < bullets.length) bullets[layerId - 3] = currentContent;
+            updated.bullets = bullets;
           }
         }
         // 모든 페이지의 동일 레이어 스타일 일괄 업데이트 (bullets/blocks 배열 유무와 상관없이 무조건 갱신)
