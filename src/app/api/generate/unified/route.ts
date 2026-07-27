@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
-    const { url, originalText, templateTitle, slideCount, ratio, genStyle } = await request.json();
+    const { url, originalText, templateTitle, slideCount, ratio, genStyle, extraInstruction, outputLanguage } = await request.json();
 
     let inputContent = originalText || '';
 
@@ -42,6 +42,16 @@ export async function POST(request: Request) {
     } else if (genStyle === 'free') {
       genStyleInstruction = `\n- 스타일 지침: 자유 변형 스타일입니다. 템플릿의 분위기를 일부 참고하되, 생성된 콘텐츠의 개별 맥락과 내용적 필요에 따라 AI가 창의적이고 자유롭게 레이아웃 및 디자인 요소를 다채롭게 구성해 꾸미도록 지시하세요.`;
     }
+
+    // 출력 언어: 'auto'거나 값이 없으면 입력 언어를 그대로 따른다
+    const languageInstruction = outputLanguage
+      ? `\n    [출력 언어]\n    - 카드뉴스 문구, 블로그, 바이럴 훅 등 모든 사용자 노출 텍스트를 ${outputLanguage}로 작성할 것. (imageKeyword는 예외 — 항상 영어)`
+      : '';
+
+    // 사용자가 직접 적어 넣은 추가 지시. 위 규칙과 충돌하면 이쪽을 우선한다.
+    const extraInstructionBlock = extraInstruction
+      ? `\n    [사용자 추가 지시사항 — 위 지침과 충돌하면 이쪽을 우선할 것]\n    ${String(extraInstruction).slice(0, 1000)}`
+      : '';
 
     const prompt = `당신은 프로페셔널한 SNS 마케터이자 전문 카피라이터입니다.
     제공된 내용을 바탕으로 카드뉴스, 블로그 포스팅, 바이럴 후킹 문구를 생성하세요.
@@ -112,7 +122,7 @@ export async function POST(request: Request) {
     - 모든 카드의 showFrame은 true.
     - layout은 'center', 'bottom-left', 'bottom-left-list' 중 설정.
     - blocks가 있어도 body 및 subtitle 필드는 비우지 말고 기존처럼 요약 텍스트를 반드시 채울 것 (폴백 보존용).
-
+${languageInstruction}${extraInstructionBlock}
 내용: ${inputContent}`;
 
     // let text = await generateWithRetry(prompt);

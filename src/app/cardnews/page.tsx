@@ -237,13 +237,15 @@ export default function CardNewsPage() {
   // Settings states
   const [selectedRatio, setSelectedRatio] = useState('4:5');
   const [genStyle, setGenStyle] = useState<'free' | 'origin'>('origin');
-  const [checkBeforeGen, setCheckBeforeGen] = useState(false);
   const [slideCountType, setSlideCountType] = useState('auto');
   const [slideCountNumber, setSlideCountNumber] = useState(5);
   const [quickSlideAuto, setQuickSlideAuto] = useState(true);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [isUploadingImages, setIsUploadingImages] = useState(false);
+  const [extraInstruction, setExtraInstruction] = useState('');
+  const [outputLanguage, setOutputLanguage] = useState('auto');
+  const [lastSourceInput, setLastSourceInput] = useState('');
   const [inputMode, setInputMode] = useState<'text' | 'url' | 'trend' | 'smart' | 'step9'>('text');
   const [urlInput, setUrlInput] = useState('');
   const [trendInput, setTrendInput] = useState('');
@@ -1159,15 +1161,24 @@ export default function CardNewsPage() {
     }
   };
 
-  const handleGenerateUnified = async (type: 'url' | 'trend' | 'text' | 'step9') => {
+  const handleGenerateUnified = async (type: 'url' | 'trend' | 'text' | 'step9', overrideText?: string) => {
     setIsGenerating(true);
     try {
       const body: any = {};
-      if (type === 'url') body.url = urlInput;
+      if (overrideText !== undefined) body.originalText = overrideText;
+      else if (type === 'url') body.url = urlInput;
       else if (type === 'trend') body.originalText = trendInput;
       else if (type === 'step9') body.originalText = step9SelectedTopic;
       else body.originalText = prompt;
+      // 2단계에서 '설정 반영해 다시 생성'을 누를 때 쓰려고 원본 입력을 기억해둔다
+      setLastSourceInput(body.originalText || urlInput || '');
       body.templateTitle = selectedTemplate?.title || '';
+      // 우측 설정 패널 값 — 예전에는 어디에도 전달되지 않아 입력해도 무시됐다
+      if (extraInstruction.trim()) body.extraInstruction = extraInstruction.trim();
+      if (outputLanguage !== 'auto') body.outputLanguage = outputLanguage;
+      // genStyle은 9단계와 '다시 생성'에서만 보낸다.
+      // 일반 생성에까지 기본값을 실어 보내면 기존 결과물 톤이 달라진다.
+      if (overrideText !== undefined) body.genStyle = genStyle;
       if (type === 'step9') {
         body.slideCount = slideCountType === 'auto' ? 'auto' : slideCountNumber;
         body.ratio = selectedRatio;
@@ -3692,6 +3703,26 @@ export default function CardNewsPage() {
                     >
                       ✨ 장별 기획 생성
                     </button>
+
+                    {/* 우측 설정(추가 지시사항·출력 언어·생성 스타일)을 반영해 처음부터 다시 만들기 */}
+                    <button
+                      onClick={() => {
+                        const source = lastSourceInput.trim();
+                        if (!source) {
+                          alert('다시 생성할 원본 주제를 찾을 수 없어요. 1단계에서 새로 만들어주세요.');
+                          return;
+                        }
+                        if (!confirm('오른쪽 설정을 반영해 카드뉴스를 새로 만듭니다.\n지금 화면의 기획안 내용은 사라집니다. 계속할까요?')) return;
+                        handleGenerateUnified('text', source);
+                      }}
+                      disabled={isGenerating}
+                      className="w-full py-3 mt-2 bg-white border border-primary-300 text-primary-700 rounded-xl font-bold text-[14px] hover:bg-primary-50 focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex justify-center items-center gap-2"
+                    >
+                      {isGenerating ? '다시 생성 중...' : '🔄 설정 반영해 다시 생성'}
+                    </button>
+                    <p className="text-[11px] text-gray-400 mt-2 text-center">
+                      오른쪽의 추가 지시사항·출력 언어·생성 스타일은 이 버튼을 눌러야 반영돼요
+                    </p>
                   </div>
 
                   {/* Right: Settings */}
@@ -3700,10 +3731,14 @@ export default function CardNewsPage() {
                     <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
                       <div className="flex justify-between items-center">
                         <span className="text-[13px] font-bold text-gray-700">출력 언어</span>
-                        <select className="text-[13px] text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-primary-400">
-                          <option>입력에서 자동 감지</option>
-                          <option>한국어</option>
-                          <option>English</option>
+                        <select
+                          value={outputLanguage}
+                          onChange={e => setOutputLanguage(e.target.value)}
+                          className="text-[13px] text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-primary-400"
+                        >
+                          <option value="auto">입력에서 자동 감지</option>
+                          <option value="한국어">한국어</option>
+                          <option value="English">English</option>
                         </select>
                       </div>
                     </div>
@@ -3736,25 +3771,13 @@ export default function CardNewsPage() {
                     {/* Additional Instructions */}
                     <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm">
                       <h3 className="text-[13px] font-bold text-gray-700 mb-2 flex items-center gap-1">💡 추가 지시사항</h3>
-                      <textarea 
+                      <textarea
+                        value={extraInstruction}
+                        onChange={e => setExtraInstruction(e.target.value)}
                         className="w-full h-20 p-3 bg-gray-50 border border-gray-100 rounded-lg text-xs resize-none focus:outline-none focus:border-primary-400 focus:bg-white placeholder:text-gray-400"
                         placeholder="AI에게 추가로 지시할 내용을 입력하세요...&#10;예: 전체적으로 밝은 톤으로 만들어주세요, 이모지를 사용하지 마세요"
                       />
-                      <p className="text-[10px] text-gray-400 mt-2">AI가 카드뉴스를 생성할 때 참고할 추가 지시사항을 입력하세요</p>
-                    </div>
-
-                    {/* Pre-check Switch */}
-                    <div className="bg-white border border-gray-100 rounded-xl p-5 shadow-sm flex items-center justify-between">
-                      <div>
-                        <h3 className="text-[13px] font-bold text-gray-700 mb-0.5">만들기 전에 구성 확인하기</h3>
-                        <p className="text-[10px] text-gray-400">켜두면 AI가 카드뉴스 구성을 먼저 보여줍니다.</p>
-                      </div>
-                      <button 
-                        className={`w-10 h-6 rounded-full p-1 transition-colors relative shrink-0 ${checkBeforeGen ? 'bg-primary-600' : 'bg-gray-200'}`}
-                        onClick={() => setCheckBeforeGen(!checkBeforeGen)}
-                      >
-                        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transition-transform ${checkBeforeGen ? 'translate-x-4' : 'translate-x-0'}`} />
-                      </button>
+                      <p className="text-[10px] text-gray-400 mt-2">아래 &lsquo;설정 반영해 다시 생성&rsquo;을 누르면 이 지시사항이 반영됩니다</p>
                     </div>
 
                     {/* Slide Count Options */}

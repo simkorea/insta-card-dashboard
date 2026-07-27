@@ -540,11 +540,75 @@ const BUILT_IN_THEMES: { id: string; label: string; emoji: string; bg: string; a
   { id: 'education', label: '교육', emoji: '📚', bg: '#08081a', accent: '#A78BFA', data: EDUCATION_THEME_DATA },
 ];
 
-// 레이어 id(1=제목, 2=부제, 3+=글머리)에 해당하는 텍스트를 blocks에 반영한다.
+// headline/sub/checklist 외의 블록(eyebrow·큰 숫자·배지·표·타임라인·통계·출처)에
+// 들어있는 텍스트에도 레이어 id를 부여한다. 이 id들은 1000번대를 쓰며,
+// 아래 순회 순서가 목록 생성과 수정에서 동일해야 id가 어긋나지 않는다.
+const EXTRA_TEXT_BASE = 1000;
+
+function walkExtraBlockTexts(
+  blocks: SlideBlock[],
+  visit?: (id: number, text: string) => string | undefined,
+): { blocks: SlideBlock[]; items: { id: number; text: string; kind: string }[] } {
+  const items: { id: number; text: string; kind: string }[] = [];
+  let n = 0;
+
+  const handle = (text: string, kind: string): string => {
+    const id = EXTRA_TEXT_BASE + n++;
+    items.push({ id, text, kind });
+    const replaced = visit?.(id, text);
+    return typeof replaced === 'string' ? replaced : text;
+  };
+
+  const newBlocks = blocks.map((b): SlideBlock => {
+    switch (b.type) {
+      case 'eyebrow':
+        return { ...b, text: handle(b.text, '라벨') };
+      case 'sourceNote':
+        return { ...b, text: handle(b.text, '출처') };
+      case 'bigNumber':
+        return {
+          ...b,
+          value: handle(b.value, '큰 숫자'),
+          caption: b.caption !== undefined ? handle(b.caption, '숫자 설명') : b.caption,
+        };
+      case 'badgeRow':
+        return { ...b, badges: b.badges.map(bd => ({ ...bd, text: handle(bd.text, '배지') })) };
+      case 'statGrid':
+        return {
+          ...b,
+          items: b.items.map(it => ({ ...it, value: handle(it.value, '통계 수치'), label: handle(it.label, '통계 라벨') })),
+        };
+      case 'compareTable':
+        return {
+          ...b,
+          rows: b.rows.map(r => ({ ...r, label: handle(r.label, '표 항목'), value: handle(r.value, '표 값') })),
+        };
+      case 'timeline':
+        return {
+          ...b,
+          items: b.items.map(it => ({
+            ...it,
+            date: handle(it.date, '일정 날짜'),
+            title: handle(it.title, '일정 제목'),
+            desc: it.desc !== undefined ? handle(it.desc, '일정 설명') : it.desc,
+          })),
+        };
+      default:
+        return b;
+    }
+  });
+
+  return { blocks: newBlocks, items };
+}
+
+// 레이어 id(1=제목, 2=부제, 3+=글머리, 1000+=기타 블록 텍스트)에 해당하는 텍스트를 blocks에 반영한다.
 // 슬라이드는 blocks가 있으면 blocks로만 렌더링되므로, 이걸 거치지 않으면
 // title/subtitle/bullets만 바뀌고 화면 글자는 그대로 남는다.
 function applyTextToBlocks(blocks: SlideBlock[] | undefined, layerId: number, content: string): SlideBlock[] | undefined {
   if (!blocks || blocks.length === 0) return blocks;
+  if (layerId >= EXTRA_TEXT_BASE) {
+    return walkExtraBlockTexts(blocks, id => (id === layerId ? content : undefined)).blocks;
+  }
   let headlineDone = false;
   let subDone = false;
   let itemIdx = 0;
@@ -613,6 +677,18 @@ function getLayersForPage(page: PageData): CanvasLayerWithSrc[] {
       content: String(b).replace(/<[^>]+>/g, ''),
       style: page.bulletStyle,
     })),
+    // 라벨·큰 숫자·배지·표·타임라인·통계·출처 등 나머지 블록 텍스트도 편집 가능하게 노출
+    ...(hasBlocks
+      ? walkExtraBlockTexts(page.blocks!).items
+          .filter(it => it.text && String(it.text).trim())
+          .map(it => ({
+            id: it.id,
+            type: 'text' as const,
+            label: `${it.kind} · ${String(it.text).slice(0, 22)}`,
+            content: String(it.text),
+            style: page.bulletStyle,
+          }))
+      : []),
   ];
 }
 
@@ -2493,6 +2569,9 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
   }, []);
 
   const isCoverTitle = layer.id === 1;
+  // 라벨·배지·표·타임라인 등은 스타일을 공유하거나 고정 크기로 그려져서
+  // 여기서 폰트/색을 바꾸면 다른 요소까지 흔들린다 → 내용만 고치는 모드로 연다.
+  const isTextOnly = layer.id >= EXTRA_TEXT_BASE;
 
   // 레이어가 바뀌면 전체 상태 초기화
   useEffect(() => {
@@ -2566,6 +2645,13 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
           </div>
         )}
 
+        {isTextOnly && (
+          <p className="text-[11px] text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-3 leading-relaxed">
+            이 요소는 카드 디자인에 맞춰 크기·색이 자동으로 정해져요. 여기서는 <b>문구만</b> 고칠 수 있습니다.
+          </p>
+        )}
+
+        {!isTextOnly && (<>
         <div>
           <label className="text-[11px] font-semibold text-gray-500 mb-1.5 block">폰트 선택</label>
           <div className="grid grid-cols-2 gap-1.5">
@@ -2640,6 +2726,7 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
             </div>
           </div>
         </div>
+        </>)}
 
         {/* 적용 버튼 영역 */}
         <div className="space-y-2">
@@ -2655,9 +2742,9 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
             })}
             className="w-full py-2.5 bg-primary-600 text-white rounded-xl text-sm font-bold hover:bg-primary-700 active:scale-[0.98] transition-all shadow-sm"
           >
-            변경 적용
+            {isTextOnly ? '문구 적용' : '변경 적용'}
           </button>
-          {onApplyStyleAll && (
+          {onApplyStyleAll && !isTextOnly && (
             <button
               type="button"
               onClick={() => onApplyStyleAll(layer.id, {
@@ -3288,6 +3375,10 @@ export default function EditorPage() {
         const hasBlocks = (p.blocks?.length ?? 0) > 0;
         const blocks = applyTextToBlocks(p.blocks, layerId, content);
 
+        // 1000번대 = 라벨/배지/표/타임라인 등 기타 블록 텍스트.
+        // 이 블록들은 bulletStyle을 서로 공유하거나 아예 무시하므로(예: eyebrow는 크기 고정),
+        // 여기서 스타일까지 저장하면 다른 요소가 같이 변한다 → 내용만 반영한다.
+        if (layerId >= EXTRA_TEXT_BASE) return { ...p, blocks };
         if (layerId === 1) return { ...p, title: content, blocks, ...(style ? { titleStyle: style } : {}) };
         if (layerId === 2) return { ...p, subtitle: content, blocks, ...(style ? { subtitleStyle: style } : {}) };
         if (layerId >= 3) {
