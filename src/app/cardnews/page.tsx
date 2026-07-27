@@ -243,6 +243,7 @@ export default function CardNewsPage() {
   const [quickSlideAuto, setQuickSlideAuto] = useState(true);
   const [isImageUploadOpen, setIsImageUploadOpen] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
   const [inputMode, setInputMode] = useState<'text' | 'url' | 'trend' | 'smart' | 'step9'>('text');
   const [urlInput, setUrlInput] = useState('');
   const [trendInput, setTrendInput] = useState('');
@@ -1080,6 +1081,42 @@ export default function CardNewsPage() {
     }
   };
 
+  // 내 이미지 업로드 → Supabase Storage 공개 URL로 변환
+  // (blob: URL은 이 탭에서만 유효해서 카드뉴스 배경으로 못 씀 → 반드시 서버에 올려야 함)
+  const uploadMyImages = async (files: FileList) => {
+    const remain = 10 - uploadedImages.length;
+    if (remain <= 0) {
+      alert('이미지는 최대 10장까지 올릴 수 있어요.');
+      return;
+    }
+    const targets = Array.from(files).slice(0, remain);
+    setIsUploadingImages(true);
+    try {
+      const urls: string[] = [];
+      for (const file of targets) {
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await fetch('/api/upload-image', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (data.url) urls.push(data.url);
+        else throw new Error(data.error || '업로드 실패');
+      }
+      if (urls.length > 0) setUploadedImages(prev => [...prev, ...urls]);
+    } catch (e: any) {
+      alert('이미지 업로드 실패: ' + friendlyError(e));
+    } finally {
+      setIsUploadingImages(false);
+    }
+  };
+
+  // 생성된 카드 배열에 내 이미지를 순서대로 덮어씌운다 (모자라면 AI 검색 이미지 유지)
+  const applyMyImages = <T extends Record<string, any>>(cards: T[], field: 'backgroundImage' | 'bgImage'): T[] => {
+    if (uploadedImages.length === 0) return cards;
+    return cards.map((card, i) =>
+      uploadedImages[i] ? { ...card, [field]: uploadedImages[i] } : card
+    );
+  };
+
   const handleSmartGenerate = async () => {
     if (!smartKeyword.trim()) return;
     setSmartGenerating(true);
@@ -1111,7 +1148,8 @@ export default function CardNewsPage() {
       localStorage.removeItem('editingDesign');
       localStorage.removeItem('cardnews_autosave');
       localStorage.removeItem('cardNewsData');
-      localStorage.setItem('cardnews_import_templates', JSON.stringify(data.pages));
+      const smartPages = applyMyImages(data.pages || [], 'bgImage');
+      localStorage.setItem('cardnews_import_templates', JSON.stringify(smartPages));
       window.location.href = '/cardnews/editor';
     } catch (e: any) {
       alert('생성 실패: ' + friendlyError(e));
@@ -1160,15 +1198,18 @@ export default function CardNewsPage() {
         const activeBrandName = activePersona?.brand_name || '@aptshowhome';
         const preset = STEP9_PRESETS[step9StylePreset] || STEP9_PRESETS.trust;
 
-        // 배경 이미지 자동 매칭 (Unsplash API 호출)
+        // 배경 이미지 매칭: 내가 올린 이미지가 있으면 그걸 우선 사용하고,
+        // 모자라는 장수만 AI 이미지 검색(Unsplash)으로 채운다
         const updatedCardNews = await Promise.all(data.cardNews.map(async (card: any, idx: number) => {
-          let bgUrl = '';
-          try {
-            const imgRes = await fetch(`/api/images/search?query=${encodeURIComponent(card.imageKeyword)}`);
-            const imgData = await imgRes.json();
-            bgUrl = imgData.imageUrl || '';
-          } catch (e) {
-            bgUrl = '';
+          let bgUrl = uploadedImages[idx] || '';
+          if (!bgUrl) {
+            try {
+              const imgRes = await fetch(`/api/images/search?query=${encodeURIComponent(card.imageKeyword)}`);
+              const imgData = await imgRes.json();
+              bgUrl = imgData.imageUrl || '';
+            } catch (e) {
+              bgUrl = '';
+            }
           }
 
           const finalBlocks = Array.isArray(card.blocks) && card.blocks.length > 0
@@ -2352,9 +2393,37 @@ export default function CardNewsPage() {
                       />
                       <div className="border-t border-gray-100 pt-4 mt-4 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                      <button className="text-sm text-gray-500 font-medium flex items-center gap-1 hover:text-gray-800 transition-colors">
-                        <ImagePlus size={16} /> 내 이미지 사용
-                      </button>
+                      <label className="text-sm text-gray-500 font-medium flex items-center gap-1 hover:text-gray-800 transition-colors cursor-pointer">
+                        {isUploadingImages
+                          ? <Loader2 size={16} className="animate-spin text-primary-500" />
+                          : <ImagePlus size={16} />}
+                        {isUploadingImages ? '업로드 중...' : '내 이미지 사용'}
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/*"
+                          className="hidden"
+                          disabled={isUploadingImages}
+                          onChange={(e) => {
+                            if (e.target.files) uploadMyImages(e.target.files);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
+                      {uploadedImages.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <div className="flex -space-x-2">
+                            {uploadedImages.slice(0, 4).map((img, i) => (
+                              <img key={i} src={img} alt="" className="w-6 h-6 rounded-md object-cover border-2 border-white shadow-sm" />
+                            ))}
+                          </div>
+                          <span className="text-xs text-primary-600 font-bold">{uploadedImages.length}장 사용</span>
+                          <button
+                            onClick={() => setUploadedImages([])}
+                            className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+                          >초기화</button>
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center gap-4 text-sm">
                       <span className="text-gray-400">0/5,000</span>
@@ -3283,18 +3352,24 @@ export default function CardNewsPage() {
                                 multiple 
                                 accept="image/*"
                                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                disabled={isUploadingImages}
                                 onChange={(e) => {
-                                  if (e.target.files) {
-                                    const newImages = Array.from(e.target.files).map(file => URL.createObjectURL(file));
-                                    setUploadedImages([...uploadedImages, ...newImages]);
-                                  }
+                                  if (e.target.files) uploadMyImages(e.target.files);
+                                  e.target.value = '';
                                 }}
                               />
                               <div className="bg-gray-50 p-3 rounded-full mb-2">
-                                <UploadCloud size={20} className="text-gray-400" />
+                                {isUploadingImages
+                                  ? <Loader2 size={20} className="text-primary-500 animate-spin" />
+                                  : <UploadCloud size={20} className="text-gray-400" />}
                               </div>
-                              <span className="text-sm font-bold text-gray-700">여기를 클릭하거나 이미지를 드래그하세요</span>
+                              <span className="text-sm font-bold text-gray-700">
+                                {isUploadingImages ? '업로드 중...' : '여기를 클릭하거나 이미지를 드래그하세요'}
+                              </span>
                               <span className="text-xs text-gray-400 mt-1">최대 10장 • PNG, JPG, WEBP 지원</span>
+                              <span className="text-[11px] text-primary-600 mt-1 font-medium">
+                                올린 순서대로 1장·2장… 배경으로 들어가고, 모자라는 장은 AI가 채워요
+                              </span>
                             </div>
                             
                             {/* Uploaded Images Preview */}
@@ -3578,9 +3653,9 @@ export default function CardNewsPage() {
                             let data = JSON.parse(rawData);
                             const regex = /\[(\d+)장 [^\]]+\]\s*(.*?)(?=\n\s*\n\[|$)/gs;
                             const matches = [...prompt.matchAll(regex)];
-                            
+
                             if (matches.length > 0) {
-                              const updatedData = matches.map((match, i) => {
+                              data = matches.map((match, i) => {
                                 const pageNum = parseInt(match[1]);
                                 const content = match[2].trim();
                                 const lines = content.split('\n');
@@ -3589,8 +3664,9 @@ export default function CardNewsPage() {
                                 const existing = data.find((d: any) => d.page === pageNum) || data[i] || {};
                                 return { ...existing, page: pageNum, title, body };
                               });
-                              localStorage.setItem('cardNewsData', JSON.stringify(updatedData));
                             }
+                            // 생성 후에 올린 내 이미지도 배경에 반영 (모자라면 기존 AI 이미지 유지)
+                            localStorage.setItem('cardNewsData', JSON.stringify(applyMyImages(data, 'backgroundImage')));
                           }
                         } catch (e) {}
 
