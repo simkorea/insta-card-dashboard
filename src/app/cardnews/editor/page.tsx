@@ -2421,6 +2421,14 @@ function ElementPanel({
 const WEIGHT_MAP: Record<string, string> = { L: '300', N: '400', M: '500', SB: '600', B: '900' };
 const WEIGHT_LABEL: Record<string, string> = { '300': 'L', '400': 'N', '500': 'M', '600': 'SB', '900': 'B' };
 
+// 스타일이 지정되지 않은 레이어의 기본값. BlockRenderer가 실제로 쓰는 fallback과
+// 같은 값이어야 한다. 안 맞으면 '변경 적용'만 눌러도 글자 크기가 튀어버린다.
+function defaultStyleForLayer(layerId: number) {
+  if (layerId === 1) return { fontSize: 32, fontWeight: '900', lineHeight: 1.12, letterSpacing: -0.5, color: '#FFFFFF' };
+  if (layerId === 2) return { fontSize: 15, fontWeight: '400', lineHeight: 1.4, letterSpacing: 0, color: '#FFFFFF' };
+  return { fontSize: 15, fontWeight: '600', lineHeight: 1.35, letterSpacing: 0, color: '#FFFFFF' };
+}
+
 // ─── Text Panel ───────────────────────────────────────────────────────────────
 function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onUpdatePageData }: {
   layer: CanvasLayer;
@@ -2430,12 +2438,13 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
   pageData?: PageData;
   onUpdatePageData?: (pageId: string, changes: Partial<PageData>) => void;
 }) {
-  const [fontSize, setFontSize] = useState(layer.style?.fontSize ?? 38);
-  const [fontWeight, setFontWeight] = useState(WEIGHT_LABEL[layer.style?.fontWeight ?? '900'] ?? 'B');
+  const layerDefaults = defaultStyleForLayer(layer.id);
+  const [fontSize, setFontSize] = useState(layer.style?.fontSize ?? layerDefaults.fontSize);
+  const [fontWeight, setFontWeight] = useState(WEIGHT_LABEL[layer.style?.fontWeight ?? layerDefaults.fontWeight] ?? 'B');
   const [fontFamily, setFontFamily] = useState(layer.style?.fontFamily ?? 'Noto Sans KR');
-  const [letterSpacing, setLetterSpacing] = useState(layer.style?.letterSpacing ?? 0);
-  const [lineHeight, setLineHeight] = useState(layer.style?.lineHeight ?? 1.2);
-  const [selectedColor, setSelectedColor] = useState(layer.style?.color ?? '#FFFFFF');
+  const [letterSpacing, setLetterSpacing] = useState(layer.style?.letterSpacing ?? layerDefaults.letterSpacing);
+  const [lineHeight, setLineHeight] = useState(layer.style?.lineHeight ?? layerDefaults.lineHeight);
+  const [selectedColor, setSelectedColor] = useState(layer.style?.color ?? layerDefaults.color);
   const [align, setAlign] = useState<'left' | 'center' | 'right'>(layer.style?.align ?? 'left');
   const [textContent, setTextContent] = useState(layer.content || '');
   const [viralHooks, setViralHooks] = useState<string[]>([]);
@@ -2487,13 +2496,14 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
 
   // 레이어가 바뀌면 전체 상태 초기화
   useEffect(() => {
+    const d = defaultStyleForLayer(layer.id);
     setTextContent(layer.content || '');
-    setFontSize(layer.style?.fontSize ?? 38);
-    setFontWeight(WEIGHT_LABEL[layer.style?.fontWeight ?? '900'] ?? 'B');
+    setFontSize(layer.style?.fontSize ?? d.fontSize);
+    setFontWeight(WEIGHT_LABEL[layer.style?.fontWeight ?? d.fontWeight] ?? 'B');
     setFontFamily(layer.style?.fontFamily ?? 'Noto Sans KR');
-    setLetterSpacing(layer.style?.letterSpacing ?? 0);
-    setLineHeight(layer.style?.lineHeight ?? 1.2);
-    setSelectedColor(layer.style?.color ?? '#FFFFFF');
+    setLetterSpacing(layer.style?.letterSpacing ?? d.letterSpacing);
+    setLineHeight(layer.style?.lineHeight ?? d.lineHeight);
+    setSelectedColor(layer.style?.color ?? d.color);
     setAlign(layer.style?.align ?? 'left');
   }, [layer.id, layer.content, layer.style]);
 
