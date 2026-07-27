@@ -551,10 +551,15 @@ function applyTextToBlocks(blocks: SlideBlock[] | undefined, layerId: number, co
   return blocks.map(b => {
     if (layerId === 1 && b.type === 'headline' && !headlineDone) {
       headlineDone = true;
-      // 강조 문구가 새 텍스트에 그대로 남아 있을 때만 강조 유지
-      return b.accentText && content.includes(b.accentText)
-        ? { ...b, text: content }
-        : { ...b, text: content, accentText: undefined };
+      // accentText는 강조색으로 text 뒤에 덧붙여 렌더링된다(BlockRenderer).
+      // 레이어에는 "text + accentText"가 합쳐진 문구가 보이므로 다시 쪼개준다.
+      const accent = b.accentText;
+      if (accent && content === accent) return { ...b, text: '', accentText: accent };
+      if (accent && content.endsWith(` ${accent}`)) {
+        return { ...b, text: content.slice(0, content.length - accent.length - 1), accentText: accent };
+      }
+      // 뒷부분까지 통째로 새로 쓴 경우 → 강조 구분 없이 한 줄로
+      return { ...b, text: content, accentText: undefined };
     }
     if (layerId === 2 && b.type === 'sub' && !subDone) {
       subDone = true;
@@ -582,8 +587,12 @@ function getLayersForPage(page: PageData): CanvasLayerWithSrc[] {
   // 레이어 목록도 같은 소스를 봐야 "보이는 글자 = 고치는 글자"가 된다.
   const hasBlocks = (page.blocks?.length ?? 0) > 0;
 
-  const headlineText = hasBlocks
-    ? (page.blocks!.find(b => b.type === 'headline') as { text?: string } | undefined)?.text ?? page.title
+  // headline은 text + accentText가 이어져 그려지므로 레이어에도 합쳐서 보여준다
+  const headlineBlock = hasBlocks
+    ? (page.blocks!.find(b => b.type === 'headline') as { text?: string; accentText?: string } | undefined)
+    : undefined;
+  const headlineText = headlineBlock
+    ? [headlineBlock.text, headlineBlock.accentText].filter(Boolean).join(' ')
     : page.title;
   // blocks에 sub 블록이 없으면 화면에 부제가 없다는 뜻 → 레이어에도 띄우지 않는다
   const subText = hasBlocks
