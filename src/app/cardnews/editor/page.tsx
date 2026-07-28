@@ -545,52 +545,72 @@ const BUILT_IN_THEMES: { id: string; label: string; emoji: string; bg: string; a
 // 아래 순회 순서가 목록 생성과 수정에서 동일해야 id가 어긋나지 않는다.
 const EXTRA_TEXT_BASE = 1000;
 
+// 이 텍스트를 지우면 무엇이 사라지는지 — 블록 통째(whole)인지, 배열 안 항목 하나(item)인지
+type ExtraTextRef = {
+  id: number;
+  text: string;
+  kind: string;
+  blockIndex: number;
+  unit: 'whole' | 'item';
+  itemIndex: number;
+};
+
 function walkExtraBlockTexts(
   blocks: SlideBlock[],
   visit?: (id: number, text: string) => string | undefined,
-): { blocks: SlideBlock[]; items: { id: number; text: string; kind: string }[] } {
-  const items: { id: number; text: string; kind: string }[] = [];
+): { blocks: SlideBlock[]; items: ExtraTextRef[] } {
+  const items: ExtraTextRef[] = [];
   let n = 0;
+  let blockIndex = 0;
 
-  const handle = (text: string, kind: string): string => {
+  const handle = (text: string, kind: string, unit: 'whole' | 'item', itemIndex: number): string => {
     const id = EXTRA_TEXT_BASE + n++;
-    items.push({ id, text, kind });
+    items.push({ id, text, kind, blockIndex, unit, itemIndex });
     const replaced = visit?.(id, text);
     return typeof replaced === 'string' ? replaced : text;
   };
 
-  const newBlocks = blocks.map((b): SlideBlock => {
+  const newBlocks = blocks.map((b, bi): SlideBlock => {
+    blockIndex = bi;
     switch (b.type) {
       case 'eyebrow':
-        return { ...b, text: handle(b.text, '라벨') };
+        return { ...b, text: handle(b.text, '라벨', 'whole', 0) };
       case 'sourceNote':
-        return { ...b, text: handle(b.text, '출처') };
+        return { ...b, text: handle(b.text, '출처', 'whole', 0) };
       case 'bigNumber':
         return {
           ...b,
-          value: handle(b.value, '큰 숫자'),
-          caption: b.caption !== undefined ? handle(b.caption, '숫자 설명') : b.caption,
+          value: handle(b.value, '큰 숫자', 'whole', 0),
+          caption: b.caption !== undefined ? handle(b.caption, '숫자 설명', 'whole', 0) : b.caption,
         };
       case 'badgeRow':
-        return { ...b, badges: b.badges.map(bd => ({ ...bd, text: handle(bd.text, '배지') })) };
+        return { ...b, badges: b.badges.map((bd, i) => ({ ...bd, text: handle(bd.text, '배지', 'item', i) })) };
       case 'statGrid':
         return {
           ...b,
-          items: b.items.map(it => ({ ...it, value: handle(it.value, '통계 수치'), label: handle(it.label, '통계 라벨') })),
+          items: b.items.map((it, i) => ({
+            ...it,
+            value: handle(it.value, '통계 수치', 'item', i),
+            label: handle(it.label, '통계 라벨', 'item', i),
+          })),
         };
       case 'compareTable':
         return {
           ...b,
-          rows: b.rows.map(r => ({ ...r, label: handle(r.label, '표 항목'), value: handle(r.value, '표 값') })),
+          rows: b.rows.map((r, i) => ({
+            ...r,
+            label: handle(r.label, '표 항목', 'item', i),
+            value: handle(r.value, '표 값', 'item', i),
+          })),
         };
       case 'timeline':
         return {
           ...b,
-          items: b.items.map(it => ({
+          items: b.items.map((it, i) => ({
             ...it,
-            date: handle(it.date, '일정 날짜'),
-            title: handle(it.title, '일정 제목'),
-            desc: it.desc !== undefined ? handle(it.desc, '일정 설명') : it.desc,
+            date: handle(it.date, '일정 날짜', 'item', i),
+            title: handle(it.title, '일정 제목', 'item', i),
+            desc: it.desc !== undefined ? handle(it.desc, '일정 설명', 'item', i) : it.desc,
           })),
         };
       default:
@@ -599,6 +619,84 @@ function walkExtraBlockTexts(
   });
 
   return { blocks: newBlocks, items };
+}
+
+// 레이어 id → 그 텍스트가 속한 블록/항목 위치. 삭제·복제가 이 좌표를 쓴다.
+function locateLayer(blocks: SlideBlock[], layerId: number):
+  | { blockIndex: number; unit: 'whole' | 'item'; itemIndex: number }
+  | null {
+  if (layerId === 1) {
+    const i = blocks.findIndex(b => b.type === 'headline');
+    return i === -1 ? null : { blockIndex: i, unit: 'whole', itemIndex: 0 };
+  }
+  if (layerId === 2) {
+    const i = blocks.findIndex(b => b.type === 'sub');
+    return i === -1 ? null : { blockIndex: i, unit: 'whole', itemIndex: 0 };
+  }
+  if (layerId >= EXTRA_TEXT_BASE) {
+    const ref = walkExtraBlockTexts(blocks).items.find(it => it.id === layerId);
+    return ref ? { blockIndex: ref.blockIndex, unit: ref.unit, itemIndex: ref.itemIndex } : null;
+  }
+  // 3 이상 = 체크리스트 항목 (여러 checklist 블록에 걸쳐 연속 번호)
+  let idx = 0;
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const b = blocks[bi];
+    if (b.type !== 'checklist' || !Array.isArray(b.items)) continue;
+    for (let k = 0; k < b.items.length; k++) {
+      if (3 + idx === layerId) return { blockIndex: bi, unit: 'item', itemIndex: k };
+      idx++;
+    }
+  }
+  return null;
+}
+
+// 블록 안의 항목 배열을 꺼내고 다시 끼워넣는 헬퍼 (배지/통계/표/타임라인/체크리스트 공통)
+function getBlockItems(b: SlideBlock): unknown[] | null {
+  if (b.type === 'badgeRow') return b.badges;
+  if (b.type === 'statGrid' || b.type === 'timeline' || b.type === 'checklist') return b.items;
+  if (b.type === 'compareTable') return b.rows;
+  return null;
+}
+
+function withBlockItems(b: SlideBlock, items: unknown[]): SlideBlock {
+  if (b.type === 'badgeRow') return { ...b, badges: items as typeof b.badges };
+  if (b.type === 'statGrid') return { ...b, items: items as typeof b.items };
+  if (b.type === 'timeline') return { ...b, items: items as typeof b.items };
+  if (b.type === 'checklist') return { ...b, items: items as typeof b.items };
+  if (b.type === 'compareTable') return { ...b, rows: items as typeof b.rows };
+  return b;
+}
+
+// 레이어 하나를 지우거나 바로 뒤에 복제한다.
+function modifyBlocksAtLayer(
+  blocks: SlideBlock[] | undefined,
+  layerId: number,
+  op: 'delete' | 'duplicate',
+): SlideBlock[] | undefined {
+  if (!blocks || blocks.length === 0) return blocks;
+  const loc = locateLayer(blocks, layerId);
+  if (!loc) return blocks;
+
+  if (loc.unit === 'whole') {
+    if (op === 'delete') return blocks.filter((_, i) => i !== loc.blockIndex);
+    const copy = JSON.parse(JSON.stringify(blocks[loc.blockIndex])) as SlideBlock;
+    return [...blocks.slice(0, loc.blockIndex + 1), copy, ...blocks.slice(loc.blockIndex + 1)];
+  }
+
+  const target = blocks[loc.blockIndex];
+  const items = getBlockItems(target);
+  if (!items) return blocks;
+
+  let nextItems: unknown[];
+  if (op === 'delete') {
+    nextItems = items.filter((_, i) => i !== loc.itemIndex);
+    // 마지막 항목까지 지웠으면 빈 블록이 남지 않도록 블록째 제거
+    if (nextItems.length === 0) return blocks.filter((_, i) => i !== loc.blockIndex);
+  } else {
+    const copy = JSON.parse(JSON.stringify(items[loc.itemIndex]));
+    nextItems = [...items.slice(0, loc.itemIndex + 1), copy, ...items.slice(loc.itemIndex + 1)];
+  }
+  return blocks.map((b, i) => (i === loc.blockIndex ? withBlockItems(b, nextItems) : b));
 }
 
 // 레이어 id(1=제목, 2=부제, 3+=글머리, 1000+=기타 블록 텍스트)에 해당하는 텍스트를 blocks에 반영한다.
@@ -2506,13 +2604,14 @@ function defaultStyleForLayer(layerId: number) {
 }
 
 // ─── Text Panel ───────────────────────────────────────────────────────────────
-function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onUpdatePageData }: {
+function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onUpdatePageData, onModifyLayer }: {
   layer: CanvasLayer;
   onDeselect: () => void;
   onUpdate: (content: string, style: TextStyle) => void;
   onApplyStyleAll?: (layerId: number, style: TextStyle, content?: string) => void;
   pageData?: PageData;
   onUpdatePageData?: (pageId: string, changes: Partial<PageData>) => void;
+  onModifyLayer?: (layerId: number, op: 'delete' | 'duplicate') => void;
 }) {
   const layerDefaults = defaultStyleForLayer(layer.id);
   const [fontSize, setFontSize] = useState(layer.style?.fontSize ?? layerDefaults.fontSize);
@@ -2598,9 +2697,24 @@ function TextPanel({ layer, onDeselect, onUpdate, onApplyStyleAll, pageData, onU
           <Type size={12} className="text-green-600" />
         </span>
         <span className="flex-1 text-sm font-semibold text-gray-800 truncate">{layer.label}</span>
-        <button className="p-1 hover:bg-gray-100 rounded text-gray-400"><Maximize2 size={13} /></button>
-        <button className="p-1 hover:bg-gray-100 rounded text-gray-400"><Copy size={13} /></button>
-        <button className="p-1 hover:bg-red-50 rounded text-red-400"><Trash2 size={13} /></button>
+        {onModifyLayer && (
+          <>
+            <button
+              onClick={() => onModifyLayer(layer.id, 'duplicate')}
+              title="바로 아래에 복제"
+              className="p-1 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-200 rounded text-gray-400 hover:text-gray-700 transition-colors"
+            ><Copy size={13} /></button>
+            <button
+              onClick={() => {
+                if (!confirm(`"${layer.label}" 요소를 삭제할까요?`)) return;
+                onModifyLayer(layer.id, 'delete');
+                onDeselect();
+              }}
+              title="이 요소 삭제"
+              className="p-1 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 rounded text-red-400 hover:text-red-600 transition-colors"
+            ><Trash2 size={13} /></button>
+          </>
+        )}
         <button onClick={onDeselect} className="p-1 hover:bg-gray-100 rounded text-gray-400"><ChevronDown size={14} /></button>
       </div>
 
@@ -2979,7 +3093,10 @@ export default function EditorPage() {
   const [pageImages, setPageImages] = useState<Record<string, string>>({});
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const canvasWrapRef = useRef<HTMLDivElement>(null);
-  const [canvasW, setCanvasW] = useState(420);
+  // 화면에 꽉 차게 계산된 기본 폭. 실제 캔버스 폭은 여기에 줌 배율을 곱한다.
+  const [fitCanvasW, setFitCanvasW] = useState(420);
+  const [zoomPct, setZoomPct] = useState(100);
+  const canvasW = Math.max(220, Math.round((fitCanvasW * zoomPct) / 100));
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showSaveLocalModal, setShowSaveLocalModal] = useState(false);
   const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
@@ -3365,6 +3482,30 @@ export default function EditorPage() {
   }, [isDraggingBlocks, currentPage, pushHistory, pagesData]);
 
   // layerId 1=title, 2=subtitle, 3+=bullets[layerId-3] / style은 선택 적용
+  // 레이어(제목·부제·글머리·배지·표 항목 등) 삭제 / 바로 뒤에 복제
+  const modifyLayer = useCallback((pageId: string, layerId: number, op: 'delete' | 'duplicate') => {
+    setPagesData(prev => {
+      const next = prev.map(p => {
+        if (String(p.id) !== String(pageId)) return p;
+
+        // blocks가 없는 기본 테마 슬라이드는 bullets 배열이 렌더링 소스
+        const hasBlocks = (p.blocks?.length ?? 0) > 0;
+        if (!hasBlocks && layerId >= 3 && layerId < EXTRA_TEXT_BASE && p.bullets?.length) {
+          const i = layerId - 3;
+          if (i >= p.bullets.length) return p;
+          const bullets = op === 'delete'
+            ? p.bullets.filter((_, k) => k !== i)
+            : [...p.bullets.slice(0, i + 1), p.bullets[i], ...p.bullets.slice(i + 1)];
+          return { ...p, bullets };
+        }
+
+        return { ...p, blocks: modifyBlocksAtLayer(p.blocks, layerId, op) };
+      });
+      pushHistory(next);
+      return next;
+    });
+  }, [pushHistory]);
+
   const updatePageField = useCallback((pageId: string, layerId: number, content: string, style?: TextStyle) => {
     setPagesData(prev => {
       const next = prev.map(p => {
@@ -3942,7 +4083,7 @@ export default function EditorPage() {
       const availH = el.clientHeight - thumbH - pad;
       const availW = el.clientWidth - pad;
       const w = Math.max(280, Math.min(availW, availH * (4 / 5)));
-      setCanvasW(Math.floor(w));
+      setFitCanvasW(Math.floor(w));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -4014,6 +4155,7 @@ export default function EditorPage() {
           onSelectImage={(url, pageId) => setPageImages(prev => ({ ...prev, [pageId]: url }))}
           onUpdatePage={updatePageField}
           onApplyPageChanges={updatePageData}
+          onModifyLayer={modifyLayer}
           onClose={() => setIsFullscreenEdit(false)}
           brandLogo={brandKit?.logo}
         />
@@ -4174,13 +4316,33 @@ export default function EditorPage() {
           <div className="flex items-center gap-1.5 md:gap-3">
             {/* 데스크탑 전용 */}
             <div className="hidden md:flex items-center gap-1.5 bg-gray-100 rounded-lg px-3 py-1.5">
-              <button className="text-gray-400 hover:text-gray-700"><ZoomOut size={14} /></button>
-              <div className="relative w-20 h-1.5 bg-gray-300 rounded-full mx-1">
-                <div className="absolute left-0 top-0 h-full bg-primary-500 rounded-full" style={{ width: '60%' }} />
-                <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-primary-600 rounded-full shadow-sm" style={{ left: 'calc(60% - 6px)' }} />
-              </div>
-              <button className="text-gray-400 hover:text-gray-700"><ZoomIn size={14} /></button>
-              <span className="text-xs font-semibold text-gray-600 ml-1 w-9 text-right">100%</span>
+              <button
+                onClick={() => setZoomPct(z => Math.max(50, z - 10))}
+                disabled={zoomPct <= 50}
+                title="축소"
+                className="text-gray-400 hover:text-gray-700 focus:outline-none focus:text-primary-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              ><ZoomOut size={14} /></button>
+              <input
+                type="range"
+                min={50}
+                max={200}
+                step={10}
+                value={zoomPct}
+                onChange={e => setZoomPct(Number(e.target.value))}
+                title={`확대/축소 ${zoomPct}%`}
+                className="w-20 mx-1 accent-primary-600 cursor-pointer"
+              />
+              <button
+                onClick={() => setZoomPct(z => Math.min(200, z + 10))}
+                disabled={zoomPct >= 200}
+                title="확대"
+                className="text-gray-400 hover:text-gray-700 focus:outline-none focus:text-primary-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              ><ZoomIn size={14} /></button>
+              <button
+                onClick={() => setZoomPct(100)}
+                title="화면에 맞추기 (100%)"
+                className="text-xs font-semibold text-gray-600 hover:text-primary-600 focus:outline-none focus:text-primary-600 ml-1 w-9 text-right transition-colors"
+              >{zoomPct}%</button>
             </div>
             <div className="hidden md:flex items-center gap-2">
               <button onClick={() => setIsPanelOpen(v => !v)} className="p-2 text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-primary-600 transition-colors">
@@ -4730,9 +4892,23 @@ export default function EditorPage() {
                   >
                     <Maximize2 size={14} />
                   </button>
-                  <button className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"><LayersIcon size={14} /></button>
-                  <button className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"><Copy size={14} /></button>
-                  <button className="p-1.5 hover:bg-red-50 rounded-lg text-red-500" onClick={handleDeselect}><Trash2 size={14} /></button>
+                  <button
+                    onClick={() => selectedLayer.type === 'text' && modifyLayer(pageData.id, selectedLayer.id, 'duplicate')}
+                    disabled={selectedLayer.type !== 'text'}
+                    title="바로 아래에 복제"
+                    className="p-1.5 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-200 rounded-lg text-gray-500 hover:text-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  ><Copy size={14} /></button>
+                  <button
+                    onClick={() => {
+                      if (selectedLayer.type !== 'text') return;
+                      if (!confirm(`"${selectedLayer.label}" 요소를 삭제할까요?`)) return;
+                      modifyLayer(pageData.id, selectedLayer.id, 'delete');
+                      handleDeselect();
+                    }}
+                    disabled={selectedLayer.type !== 'text'}
+                    title="이 요소 삭제"
+                    className="p-1.5 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 rounded-lg text-red-500 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  ><Trash2 size={14} /></button>
                 </div>
               )}
             </div>
@@ -4871,6 +5047,7 @@ export default function EditorPage() {
                   onApplyStyleAll={applyStyleToAllPages}
                   pageData={pageData}
                   onUpdatePageData={updatePageData}
+                  onModifyLayer={(layerId, op) => modifyLayer(pageData.id, layerId, op)}
                 />
               </div>
             )}
@@ -4984,6 +5161,7 @@ export default function EditorPage() {
                 onApplyStyleAll={applyStyleToAllPages}
                 pageData={pageData}
                 onUpdatePageData={updatePageData}
+                onModifyLayer={(layerId, op) => modifyLayer(pageData.id, layerId, op)}
               />
             )}
           </div>
@@ -5016,12 +5194,6 @@ const LayoutTemplateIcon = ({ size }: { size: number }) => (
     <rect x="3" y="3" width="18" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
   </svg>
 );
-const LayersIcon = ({ size }: { size: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" />
-  </svg>
-);
-
 // ─── CardView (시각 전용, 캡처/썸네일용 — 420px 기준) ───────────────────────
 function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; logo?: string }) {
   return (
@@ -5188,7 +5360,7 @@ function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; lo
 
 // ─── FullscreenEditor ────────────────────────────────────────────────────────
 function FullscreenEditor({
-  pagesData, initialPage, pageImages, onSelectImage, onUpdatePage, onApplyPageChanges, onClose, brandLogo,
+  pagesData, initialPage, pageImages, onSelectImage, onUpdatePage, onApplyPageChanges, onModifyLayer, onClose, brandLogo,
 }: {
   pagesData: PageData[];
   initialPage: number;
@@ -5196,6 +5368,7 @@ function FullscreenEditor({
   onSelectImage: (url: string, pageId: string) => void;
   onUpdatePage: (pageId: string, layerId: number, content: string, style?: TextStyle) => void;
   onApplyPageChanges: (pageId: string, changes: Partial<PageData>) => void;
+  onModifyLayer: (pageId: string, layerId: number, op: 'delete' | 'duplicate') => void;
   onClose: () => void;
   brandLogo?: string;
 }) {
@@ -5618,9 +5791,23 @@ function FullscreenEditor({
                       {selectedLayer.type === 'image' ? '이미지 편집 중' : '텍스트 편집 중'}
                     </span>
                   </div>
-                  <button className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"><LayersIcon size={14} /></button>
-                  <button className="p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"><Copy size={14} /></button>
-                  <button className="p-1.5 hover:bg-red-50 rounded-lg text-red-500" onClick={handleDeselect}><Trash2 size={14} /></button>
+                  <button
+                    onClick={() => pageData && selectedLayer.type === 'text' && onModifyLayer(pageData.id, selectedLayer.id, 'duplicate')}
+                    disabled={selectedLayer.type !== 'text'}
+                    title="바로 아래에 복제"
+                    className="p-1.5 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-200 rounded-lg text-gray-500 hover:text-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  ><Copy size={14} /></button>
+                  <button
+                    onClick={() => {
+                      if (!pageData || selectedLayer.type !== 'text') return;
+                      if (!confirm(`"${selectedLayer.label}" 요소를 삭제할까요?`)) return;
+                      onModifyLayer(pageData.id, selectedLayer.id, 'delete');
+                      handleDeselect();
+                    }}
+                    disabled={selectedLayer.type !== 'text'}
+                    title="이 요소 삭제"
+                    className="p-1.5 hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-200 rounded-lg text-red-500 hover:text-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  ><Trash2 size={14} /></button>
                 </div>
               )}
             </div>
@@ -5706,6 +5893,7 @@ function FullscreenEditor({
                   onUpdate={(content, style) => onUpdatePage(pageData.id, selectedLayer.id, content, style)}
                   pageData={pageData}
                   onUpdatePageData={onApplyPageChanges}
+                  onModifyLayer={(layerId, op) => onModifyLayer(pageData.id, layerId, op)}
                 />
               </div>
             )}
