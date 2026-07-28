@@ -48,6 +48,7 @@ export default function DashboardPage() {
   const [isGeneratingBriefing, setIsGeneratingBriefing] = useState(false);
   const [isBriefingSaved, setIsBriefingSaved] = useState(false);
   const [isSavingToBlog, setIsSavingToBlog] = useState(false);
+  const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
 
   useEffect(() => {
     const h = new Date().getHours();
@@ -89,6 +90,31 @@ export default function DashboardPage() {
       alert("에러가 발생했습니다: " + err.message);
     } finally {
       setIsGeneratingBriefing(false);
+    }
+  };
+
+  // 크론(매일 08:30)을 기다리지 않고 지금 바로 뉴스 카드뉴스 초안 만들기
+  const generateNewsDraft = async (force: boolean) => {
+    setIsGeneratingDraft(true);
+    try {
+      const res = await fetch('/api/news-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        alert('초안 생성 실패: ' + (json.error || '알 수 없는 오류'));
+        return;
+      }
+      if (json.skipped) {
+        alert('오늘 브리핑으로 만든 초안이 이미 있어요. 새로 만들려면 "다시 만들기"를 눌러주세요.');
+      }
+      fetchDashboard();
+    } catch (err: any) {
+      alert('에러가 발생했습니다: ' + err.message);
+    } finally {
+      setIsGeneratingDraft(false);
     }
   };
 
@@ -155,33 +181,55 @@ export default function DashboardPage() {
       </div>
 
       {/* ── 오늘의 뉴스 카드뉴스 초안 (자동 생성, 발행은 사람이) ─────────────── */}
-      {isFreshDraft && newsDraft && (
+      {!isLoading && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 md:p-5 shadow-sm">
           <div className="flex items-start gap-3">
             <span className="text-xl shrink-0 mt-0.5">📰</span>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-amber-900 mb-0.5">
-                오늘 아침 뉴스로 카드뉴스 초안을 만들어 뒀어요
-              </p>
-              <p className="text-[12px] text-amber-800/80 leading-relaxed mb-3 break-words">
-                {newsDraft.name}
-                {Array.isArray(newsDraft.pages_data) && ` · ${newsDraft.pages_data.length}장`}
-                {' · 자동 발행되지 않습니다. 내용을 확인하고 직접 발행해주세요.'}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Link
-                  href={`/cardnews/editor?id=${newsDraft.id}`}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300 active:scale-[0.98] transition-colors"
-                >
-                  확인하고 다듬기 <ArrowRight size={13} />
-                </Link>
-                <Link
-                  href="/archive"
-                  className="inline-flex items-center px-4 py-2 bg-white border border-amber-200 text-amber-800 text-xs font-bold rounded-xl hover:bg-amber-100/60 focus:outline-none focus:ring-2 focus:ring-amber-200 active:scale-[0.98] transition-colors"
-                >
-                  보관함에서 보기
-                </Link>
-              </div>
+              {isFreshDraft && newsDraft ? (
+                <>
+                  <p className="text-sm font-bold text-amber-900 mb-0.5">
+                    오늘 아침 뉴스로 카드뉴스 초안을 만들어 뒀어요
+                  </p>
+                  <p className="text-[12px] text-amber-800/80 leading-relaxed mb-3 break-words">
+                    {newsDraft.name}
+                    {Array.isArray(newsDraft.pages_data) && ` · ${newsDraft.pages_data.length}장`}
+                    {' · 자동 발행되지 않습니다. 내용을 확인하고 직접 발행해주세요.'}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Link
+                      href={`/cardnews/editor?id=${newsDraft.id}`}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300 active:scale-[0.98] transition-colors"
+                    >
+                      확인하고 다듬기 <ArrowRight size={13} />
+                    </Link>
+                    <button
+                      onClick={() => generateNewsDraft(true)}
+                      disabled={isGeneratingDraft}
+                      className="inline-flex items-center px-4 py-2 bg-white border border-amber-200 text-amber-800 text-xs font-bold rounded-xl hover:bg-amber-100/60 focus:outline-none focus:ring-2 focus:ring-amber-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {isGeneratingDraft ? '만드는 중...' : '다시 만들기'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-bold text-amber-900 mb-0.5">
+                    오늘의 뉴스 카드뉴스 초안
+                  </p>
+                  <p className="text-[12px] text-amber-800/80 leading-relaxed mb-3">
+                    매일 아침 8시 30분에 그날 부동산 뉴스로 초안을 만들어 둡니다.
+                    자동 발행되지 않고, 확인 후 직접 발행하시면 됩니다.
+                  </p>
+                  <button
+                    onClick={() => generateNewsDraft(false)}
+                    disabled={isGeneratingDraft}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {isGeneratingDraft ? '만드는 중...' : '지금 만들기'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
