@@ -1150,7 +1150,7 @@ export default function CardNewsPage() {
       localStorage.removeItem('editingDesign');
       localStorage.removeItem('cardnews_autosave');
       localStorage.removeItem('cardNewsData');
-      const smartPages = applyMyImages(data.pages || [], 'bgImage');
+      const smartPages = applyMyImages(data.pages || [], 'bgImage').map((p: any) => ({ ...p, ratio: selectedRatio }));
       localStorage.setItem('cardnews_import_templates', JSON.stringify(smartPages));
       window.location.href = '/cardnews/editor';
     } catch (e: any) {
@@ -1289,6 +1289,7 @@ export default function CardNewsPage() {
         
         // 에디터에서 바로 쓸 수 있도록 구조화된 원본 데이터 저장 (배경 이미지 포함)
         localStorage.setItem('cardNewsData', JSON.stringify(updatedCardNews));
+        localStorage.setItem('cardnews_ratio', selectedRatio); // 에디터 캔버스 비율로 사용
         localStorage.setItem('cardNewsBlog', data.blogPost || '');
         localStorage.setItem('cardNewsHooks', JSON.stringify(data.viralHooks || []));
         localStorage.setItem('cardNewsDraft', formattedText); // 에디터 초기값 호환용

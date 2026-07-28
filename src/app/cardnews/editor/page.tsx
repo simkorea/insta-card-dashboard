@@ -97,6 +97,23 @@ interface PageData {
   blocksOffsetY?: number;
   handle?: string;
   accentOverride?: string;
+  ratio?: string;   // '1:1' | '4:5' | '3:4' | '9:16' | '16:9' — 없으면 4:5
+}
+
+// 카드 비율. 편집 캔버스 자체를 이 비율로 그려야 내보낼 때 잘리거나
+// 검은 여백이 생기지 않는다.
+const RATIO_OPTIONS = [
+  { value: '1:1', label: '1:1', w: 1, h: 1, size: '1080×1080' },
+  { value: '4:5', label: '4:5', w: 4, h: 5, size: '1080×1350' },
+  { value: '3:4', label: '3:4', w: 3, h: 4, size: '1080×1440' },
+  { value: '9:16', label: '9:16', w: 9, h: 16, size: '1080×1920' },
+  { value: '16:9', label: '16:9', w: 16, h: 9, size: '1920×1080' },
+] as const;
+
+const DEFAULT_RATIO = '4:5';
+
+function ratioOf(value: string | undefined) {
+  return RATIO_OPTIONS.find(r => r.value === value) ?? RATIO_OPTIONS[1];
 }
 
 const normalizePages = (pages: any[]): PageData[] => {
@@ -3139,6 +3156,11 @@ export default function EditorPage() {
 
   // ── Mutable page data state ──
   const [pagesData, setPagesData] = useState<PageData[]>(PAGES_DATA);
+  // 현재 카드 비율 — 디자인의 일부라 첫 페이지에 함께 저장한다
+  const canvasRatio = pagesData[0]?.ratio || DEFAULT_RATIO;
+  const ratioInfo = ratioOf(canvasRatio);
+  const canvasAspect = `${ratioInfo.w}/${ratioInfo.h}`;
+  const ratioHeightFactor = ratioInfo.h / ratioInfo.w;
   const historyRef = useRef<PageData[][]>([PAGES_DATA]);
   const historyIdxRef = useRef(0);
   const [canUndo, setCanUndo] = useState(false);
@@ -3343,7 +3365,9 @@ export default function EditorPage() {
               }
             }
 
-            const converted = normalizePages(cardNewsToPages(parsed, theme));
+            // 생성 화면에서 고른 이미지 비율을 캔버스 비율로 적용
+            const chosenRatio = localStorage.getItem('cardnews_ratio') || DEFAULT_RATIO;
+            const converted = normalizePages(cardNewsToPages(parsed, theme)).map(p => ({ ...p, ratio: chosenRatio }));
             setPagesData(converted);
             historyRef.current = [converted];
             historyIdxRef.current = 0;
@@ -3482,6 +3506,16 @@ export default function EditorPage() {
   }, [isDraggingBlocks, currentPage, pushHistory, pagesData]);
 
   // layerId 1=title, 2=subtitle, 3+=bullets[layerId-3] / style은 선택 적용
+  // 카드 비율 변경. 디자인의 일부이므로 모든 페이지에 같이 기록한다.
+  const changeCanvasRatio = useCallback((ratio: string) => {
+    setPagesData(prev => {
+      const next = prev.map(p => ({ ...p, ratio }));
+      pushHistory(next);
+      return next;
+    });
+    if (typeof window !== 'undefined') localStorage.setItem('cardnews_ratio', ratio);
+  }, [pushHistory]);
+
   // 레이어(제목·부제·글머리·배지·표 항목 등) 삭제 / 바로 뒤에 복제
   const modifyLayer = useCallback((pageId: string, layerId: number, op: 'delete' | 'duplicate') => {
     setPagesData(prev => {
@@ -4077,17 +4111,19 @@ export default function EditorPage() {
   useEffect(() => {
     const el = canvasWrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
+    const fit = () => {
       const pad = 64; // p-8 both sides
       const thumbH = 112; // h-28
       const availH = el.clientHeight - thumbH - pad;
       const availW = el.clientWidth - pad;
-      const w = Math.max(280, Math.min(availW, availH * (4 / 5)));
+      const w = Math.max(280, Math.min(availW, availH / ratioHeightFactor));
       setFitCanvasW(Math.floor(w));
-    });
+    };
+    const ro = new ResizeObserver(fit);
     ro.observe(el);
+    fit(); // 비율이 바뀌면 리사이즈 없이도 다시 맞춘다
     return () => ro.disconnect();
-  }, []);
+  }, [ratioHeightFactor]);
 
   return (
     <div className="flex flex-col h-screen bg-white" onClick={handleDeselect}>
@@ -4229,7 +4265,7 @@ export default function EditorPage() {
           <div
             key={pg.id}
             ref={el => { captureRefs.current[pg.id] = el; }}
-            style={{ width: 420, height: 525, position: 'relative', overflow: 'hidden' }}
+            style={{ width: 420, height: Math.round(420 * ratioHeightFactor), position: 'relative', overflow: 'hidden' }}
           >
             <CardView page={pg} bgImage={pageImages[pg.id] ?? pg.bgImage} logo={brandKit?.logo} />
           </div>
@@ -4314,6 +4350,21 @@ export default function EditorPage() {
           </div>
           {/* Right */}
           <div className="flex items-center gap-1.5 md:gap-3">
+            {/* 카드 비율 — 편집 캔버스가 실제 발행 비율과 같아야 잘리지 않는다 */}
+            <div className="hidden md:flex items-center gap-1.5 bg-gray-100 rounded-lg px-2 py-1.5">
+              <span className="text-[11px] font-semibold text-gray-500 pl-1">비율</span>
+              <select
+                value={canvasRatio}
+                onChange={e => changeCanvasRatio(e.target.value)}
+                title="카드 비율 (편집·저장·발행에 모두 적용)"
+                className="text-xs font-semibold text-gray-700 bg-white border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200 cursor-pointer"
+              >
+                {RATIO_OPTIONS.map(r => (
+                  <option key={r.value} value={r.value}>{r.label} · {r.size}</option>
+                ))}
+              </select>
+            </div>
+
             {/* 데스크탑 전용 */}
             <div className="hidden md:flex items-center gap-1.5 bg-gray-100 rounded-lg px-3 py-1.5">
               <button
@@ -4457,7 +4508,7 @@ export default function EditorPage() {
             <div
               ref={canvasElemRef}
               className="relative bg-white shadow-2xl flex-shrink-0 overflow-hidden"
-              style={{ width: `${canvasW}px`, aspectRatio: '4/5' }}
+              style={{ width: `${canvasW}px`, aspectRatio: canvasAspect }}
               onPointerMove={handleCanvasPointerMove}
               onPointerUp={handleCanvasPointerUp}
               onPointerLeave={handleCanvasPointerUp}
@@ -4532,7 +4583,7 @@ export default function EditorPage() {
                                 blocks={pageData.blocks!}
                                 brandTone={pageData.brandTone}
                                 editable={true}
-                                availableHeight={Math.floor(canvasW * 1.25 * (pageData.blocksOffsetY ?? 70) / 100 - 40)}
+                                availableHeight={Math.floor(canvasW * ratioHeightFactor * (pageData.blocksOffsetY ?? 70) / 100 - 40)}
                                 isDraggingParent={isDraggingBlocks}
                                 onBlockOffsetChange={(index, offsetY) => {
                                   const updatedBlocks = [...(pageData.blocks || [])];
@@ -6225,7 +6276,7 @@ function SaveDesignModal({
 }
 
 // ─── DownloadModal ─────────────────────────────────────────────────────────────
-type DownloadRatio = '1:1' | '4:5' | '9:16';
+type DownloadRatio = string;
 type DownloadFormat = 'png' | 'zip' | 'pdf';
 
 function DownloadModal({
@@ -6238,7 +6289,9 @@ function DownloadModal({
   brandLogo?: string;
   onClose: () => void;
 }) {
-  const [ratio, setRatio] = useState<DownloadRatio>('4:5');
+  // 캔버스가 이미 디자인 비율로 그려지므로, 같은 비율이면 변환 없이 그대로 저장된다
+  const designRatio = pagesData[0]?.ratio || DEFAULT_RATIO;
+  const [ratio, setRatio] = useState<DownloadRatio>(designRatio);
   const [format, setFormat] = useState<DownloadFormat>('zip');
   const [transparentBg, setTransparentBg] = useState(false);
   const [progress, setProgress] = useState('');
@@ -6297,25 +6350,26 @@ function DownloadModal({
     }
   };
 
-  // 비율에 맞게 캔버스 변환
+  // 요청한 비율로 맞춘다. 캔버스가 이미 그 비율이면 손대지 않는다.
+  // 다른 비율을 고른 경우에는 내용이 잘리지 않도록 잘라내지 않고 여백을 넣는다.
   const applyRatio = (src: HTMLCanvasElement, r: DownloadRatio): HTMLCanvasElement => {
-    if (r === '4:5') return src;
-    const sw = src.width;   // ~1080
-    const sh = src.height;  // ~1350
-    const tw = sw;
-    const th = r === '1:1' ? sw : Math.round(sw * 16 / 9); // 1080 or 1920
+    if (r === designRatio) return src;
+    const target = ratioOf(r);
+    const sw = src.width;
+    const sh = src.height;
+    const scale = Math.min(sw / target.w, sh / target.h);
+    const tw = Math.round(target.w * scale);
+    const th = Math.round(target.h * scale);
     const out = document.createElement('canvas');
-    out.width = tw; out.height = th;
+    out.width = tw;
+    out.height = th;
     const ctx = out.getContext('2d')!;
-    if (r === '1:1') {
-      const cropY = (sh - tw) / 2;
-      ctx.drawImage(src, 0, cropY, tw, tw, 0, 0, tw, tw);
-    } else {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, tw, th);
-      const padY = (th - sh) / 2;
-      ctx.drawImage(src, 0, 0, sw, sh, 0, padY, sw, sh);
-    }
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, tw, th);
+    const drawScale = Math.min(tw / sw, th / sh);
+    const dw = Math.round(sw * drawScale);
+    const dh = Math.round(sh * drawScale);
+    ctx.drawImage(src, 0, 0, sw, sh, Math.round((tw - dw) / 2), Math.round((th - dh) / 2), dw, dh);
     return out;
   };
 
@@ -6393,7 +6447,7 @@ function DownloadModal({
 
   const ratioOptions: { value: DownloadRatio; label: string; size: string; w: number; h: number }[] = [
     { value: '1:1', label: '1:1', size: '1080×1080', w: 10, h: 10 },
-    { value: '4:5', label: '4:5', size: '1080×1350', w: 10, h: 12.5 },
+    { value: '4:5', label: '4:5', size: '1080×1350', w: 10, h: 12.5 },  // 시각화용 크기
     { value: '9:16', label: '9:16', size: '1080×1920', w: 10, h: 17.8 },
   ];
 
@@ -6446,8 +6500,13 @@ function DownloadModal({
                 </button>
               ))}
             </div>
-            {ratio === '1:1' && <p className="text-[11px] text-amber-600 mt-2 bg-amber-50 px-3 py-1.5 rounded-lg">슬라이드 중앙을 기준으로 정방형 크롭됩니다.</p>}
-            {ratio === '9:16' && <p className="text-[11px] text-blue-600 mt-2 bg-blue-50 px-3 py-1.5 rounded-lg">인스타그램 스토리 비율. 상하에 검은색 여백이 추가됩니다.</p>}
+            {ratio === designRatio ? (
+              <p className="text-[11px] text-green-700 mt-2 bg-green-50 px-3 py-1.5 rounded-lg">현재 편집 비율과 같아 그대로 저장됩니다.</p>
+            ) : (
+              <p className="text-[11px] text-amber-700 mt-2 bg-amber-50 px-3 py-1.5 rounded-lg">
+                편집 비율({designRatio})과 달라 여백이 생깁니다. 상단 &lsquo;비율&rsquo;을 {ratio}로 바꾸면 꽉 찬 카드로 만들 수 있어요.
+              </p>
+            )}
           </div>
 
           {/* 형식 선택 */}
