@@ -124,6 +124,11 @@ export default function DashboardPage() {
   const recentDesigns: any[] = data?.recentDesigns ?? [];
   const upcomingPosts: any[] = data?.upcomingPosts ?? [];
   const briefing = data?.briefing;
+  const newsDraft = data?.newsDraft;
+  // 오늘 아침 뉴스로 만들어진 초안인지 (KST 기준 24시간 이내)
+  const isFreshDraft = newsDraft?.created_at
+    ? Date.now() - new Date(newsDraft.created_at).getTime() < 36 * 60 * 60 * 1000
+    : false;
 
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-7 pb-20 md:pb-8">
@@ -148,6 +153,39 @@ export default function DashboardPage() {
         <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-white/5" />
         <div className="absolute -right-4 bottom-0 w-24 h-24 rounded-full bg-white/10" />
       </div>
+
+      {/* ── 오늘의 뉴스 카드뉴스 초안 (자동 생성, 발행은 사람이) ─────────────── */}
+      {isFreshDraft && newsDraft && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 md:p-5 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="text-xl shrink-0 mt-0.5">📰</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-amber-900 mb-0.5">
+                오늘 아침 뉴스로 카드뉴스 초안을 만들어 뒀어요
+              </p>
+              <p className="text-[12px] text-amber-800/80 leading-relaxed mb-3 break-words">
+                {newsDraft.name}
+                {Array.isArray(newsDraft.pages_data) && ` · ${newsDraft.pages_data.length}장`}
+                {' · 자동 발행되지 않습니다. 내용을 확인하고 직접 발행해주세요.'}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/cardnews/editor?id=${newsDraft.id}`}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300 active:scale-[0.98] transition-colors"
+                >
+                  확인하고 다듬기 <ArrowRight size={13} />
+                </Link>
+                <Link
+                  href="/archive"
+                  className="inline-flex items-center px-4 py-2 bg-white border border-amber-200 text-amber-800 text-xs font-bold rounded-xl hover:bg-amber-100/60 focus:outline-none focus:ring-2 focus:ring-amber-200 active:scale-[0.98] transition-colors"
+                >
+                  보관함에서 보기
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── 통계 ──────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

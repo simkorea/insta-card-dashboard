@@ -22,6 +22,15 @@ export async function GET() {
         : supabase.from('briefings').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
     ]);
 
+    // 아침 뉴스로 자동 생성된 카드뉴스 초안 (사람이 확인 후 발행하는 대기 항목)
+    const { data: newsDraft } = await supabase
+      .from('card_designs')
+      .select('id, name, created_at, pages_data')
+      .eq('category', '자동 뉴스')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     const pendingPosts = (postsRes.data ?? []).filter((p: any) => p.status !== 'published');
     const publishedCount = (postsRes.data ?? []).filter((p: any) => p.status === 'published').length;
 
@@ -53,6 +62,7 @@ export async function GET() {
       upcomingPosts: pendingPosts.slice(0, 5),
       briefing: briefingRes.data || null,
       isBriefingSaved,
+      newsDraft: newsDraft || null,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
