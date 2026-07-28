@@ -201,6 +201,9 @@ ${newsSummary}
         real_estate_summary: newsSummary,
         ad_performance: adPerformance,
         full_report: fullReport,
+        // 요약 전 원본 뉴스도 함께 저장 — 카드뉴스 초안이 "뉴스 1건 = 카드 1장"으로
+        // 만들려면 요약문이 아니라 개별 기사가 필요하다
+        news_items: newsItems.slice(0, 20),
       })
       .select()
       .single();

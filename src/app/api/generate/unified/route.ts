@@ -1,5 +1,6 @@
 import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { callAI } from '@/lib/ai/openrouter';
+import { extractArticle } from '@/lib/extractArticle';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -7,23 +8,20 @@ export async function POST(request: Request) {
     const { url, originalText, templateTitle, slideCount, ratio, genStyle, extraInstruction, outputLanguage } = await request.json();
 
     let inputContent = originalText || '';
+    let sourceMode: 'url' | 'text' = originalText ? 'text' : 'url';
 
     if (url && !originalText) {
       try {
-        const res = await fetch(url, {
-          headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CardNewsBot/1.0)' },
-          signal: AbortSignal.timeout(8000),
-        });
-        const html = await res.text();
-        inputContent = html
-          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-          .replace(/<[^>]+>/g, ' ')
-          .replace(/\s+/g, ' ')
-          .trim()
-          .slice(0, 3000);
-      } catch {
-        inputContent = `URL: ${url} (콘텐츠를 직접 가져올 수 없어 URL 정보만으로 생성합니다)`;
+        // 예전에는 HTML 태그만 지우고 앞 3000자를 썼는데, 그 구간이 대부분
+        // 네비게이션 메뉴·광고라서 기사와 전혀 다른 카드뉴스가 나왔다.
+        const article = await extractArticle(url);
+        inputContent = article.text;
+      } catch (e: any) {
+        // 못 읽었으면 지어내지 말고 실패시킨다 (예전엔 URL 문자열만으로 생성했다)
+        return NextResponse.json(
+          { error: e?.message || '해당 주소에서 본문을 읽지 못했습니다.' },
+          { status: 422 }
+        );
       }
     }
 
@@ -42,6 +40,17 @@ export async function POST(request: Request) {
     } else if (genStyle === 'free') {
       genStyleInstruction = `\n- 스타일 지침: 자유 변형 스타일입니다. 템플릿의 분위기를 일부 참고하되, 생성된 콘텐츠의 개별 맥락과 내용적 필요에 따라 AI가 창의적이고 자유롭게 레이아웃 및 디자인 요소를 다채롭게 구성해 꾸미도록 지시하세요.`;
     }
+
+    // URL에서 가져온 기사는 그 기사 내용만 쓰도록 못 박는다.
+    // (원문에 없는 이야기로 새로 쓰는 바람에 "전혀 다른 내용"이 나오던 문제)
+    const sourceFidelityBlock =
+      sourceMode === 'url'
+        ? `\n    [원문 충실도 — 매우 중요]
+    - 아래 "내용"은 사용자가 지정한 기사 원문입니다. 이 기사에 실제로 담긴 사실만 사용하세요.
+    - 기사에 없는 수치·지역·단지명·일정·가격을 새로 지어내지 마세요.
+    - 기사의 주제를 다른 주제로 바꾸지 마세요. 카드뉴스 전체가 이 기사 한 건을 설명해야 합니다.
+    - 기사에서 확인되지 않는 내용은 아예 쓰지 말고, 대신 기사에 있는 다른 사실로 채우세요.`
+        : '';
 
     // 출력 언어: 'auto'거나 값이 없으면 입력 언어를 그대로 따른다
     const languageInstruction = outputLanguage
@@ -122,7 +131,7 @@ export async function POST(request: Request) {
     - 모든 카드의 showFrame은 true.
     - layout은 'center', 'bottom-left', 'bottom-left-list' 중 설정.
     - blocks가 있어도 body 및 subtitle 필드는 비우지 말고 기존처럼 요약 텍스트를 반드시 채울 것 (폴백 보존용).
-${languageInstruction}${extraInstructionBlock}
+${sourceFidelityBlock}${languageInstruction}${extraInstructionBlock}
 내용: ${inputContent}`;
 
     // let text = await generateWithRetry(prompt);
