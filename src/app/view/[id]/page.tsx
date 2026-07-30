@@ -23,6 +23,7 @@ const GOOGLE_FONTS_URL =
   '&family=Do+Hyeon' +
   '&family=Jua' +
   '&family=Gowun+Dodum' +
+  '&family=Gaegu:wght@300;400;700' +
   '&display=swap';
 interface PageData {
   id: number;

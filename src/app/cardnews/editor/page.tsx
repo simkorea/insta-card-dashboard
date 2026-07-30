@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { friendlyError } from '@/lib/errors';
 import type { SlideBlock, BrandTone } from '@/lib/cardnews/blocks';
+import { NotebookRenderer } from '@/components/cardnews/NotebookRenderer';
 import { BlockRenderer } from '@/components/cardnews/BlockRenderer';
 import { SlideFrame } from '@/components/cardnews/SlideFrame';
 import { FONTS, GOOGLE_FONTS_URL } from '@/lib/cardnews/fonts';
@@ -98,6 +99,9 @@ interface PageData {
   handle?: string;
   accentOverride?: string;
   ratio?: string;   // '1:1' | '4:5' | '3:4' | '9:16' | '16:9' — 없으면 4:5
+  styleVariant?: 'default' | 'notebook';  // 'notebook' = 손글씨 노트 스타일
+  noteLabel?: string;   // 노트 스타일 우하단 배지 윗줄
+  noteNumber?: string;  // 노트 스타일 우하단 배지 아랫줄
 }
 
 // 카드 비율. 편집 캔버스 자체를 이 비율로 그려야 내보낼 때 잘리거나
@@ -3506,6 +3510,21 @@ export default function EditorPage() {
   }, [isDraggingBlocks, currentPage, pushHistory, pagesData]);
 
   // layerId 1=title, 2=subtitle, 3+=bullets[layerId-3] / style은 선택 적용
+  // 카드 스타일 변경(기본 ↔ 손글씨 노트). 모든 페이지에 같이 적용한다.
+  const changeStyleVariant = useCallback((variant: 'default' | 'notebook') => {
+    setPagesData(prev => {
+      const next = prev.map((p, i) => ({
+        ...p,
+        styleVariant: variant,
+        // 노트 스타일에서 우하단 배지에 쓸 기본값 (비어 있으면 채워준다)
+        noteLabel: p.noteLabel || (variant === 'notebook' ? '임장노트' : p.noteLabel),
+        noteNumber: p.noteNumber || (variant === 'notebook' ? `No.${String(i + 1).padStart(3, '0')}` : p.noteNumber),
+      }));
+      pushHistory(next);
+      return next;
+    });
+  }, [pushHistory]);
+
   // 카드 비율 변경. 디자인의 일부이므로 모든 페이지에 같이 기록한다.
   const changeCanvasRatio = useCallback((ratio: string) => {
     setPagesData(prev => {
@@ -4350,6 +4369,20 @@ export default function EditorPage() {
           </div>
           {/* Right */}
           <div className="flex items-center gap-1.5 md:gap-3">
+            {/* 카드 스타일 — 다크(기본) / 손글씨 노트 */}
+            <div className="hidden md:flex items-center gap-1.5 bg-gray-100 rounded-lg px-2 py-1.5">
+              <span className="text-[11px] font-semibold text-gray-500 pl-1">스타일</span>
+              <select
+                value={pagesData[0]?.styleVariant || 'default'}
+                onChange={e => changeStyleVariant(e.target.value as 'default' | 'notebook')}
+                title="카드 스타일"
+                className="text-xs font-semibold text-gray-700 bg-white border border-gray-200 rounded-md px-2 py-1 outline-none focus:border-primary-400 focus:ring-1 focus:ring-primary-200 cursor-pointer"
+              >
+                <option value="default">기본 (사진+다크)</option>
+                <option value="notebook">손글씨 노트</option>
+              </select>
+            </div>
+
             {/* 카드 비율 — 편집 캔버스가 실제 발행 비율과 같아야 잘리지 않는다 */}
             <div className="hidden md:flex items-center gap-1.5 bg-gray-100 rounded-lg px-2 py-1.5">
               <span className="text-[11px] font-semibold text-gray-500 pl-1">비율</span>
@@ -4525,8 +4558,20 @@ export default function EditorPage() {
                   ? <div key={i} className="absolute top-0 bottom-0 pointer-events-none z-50" style={{ left: `${g.x}%`, width: 1, background: 'rgba(99,102,241,0.8)' }} />
                   : <div key={i} className="absolute left-0 right-0 pointer-events-none z-50" style={{ top: `${g.y}%`, height: 1, background: 'rgba(99,102,241,0.8)' }} />
               ))}
+
+              {/* 노트 스타일은 종이 자체가 배경이라 배경사진·오버레이 레이어를 쓰지 않는다 */}
+              {pageData.styleVariant === 'notebook' && (
+                <NotebookRenderer
+                  blocks={pageData.blocks || []}
+                  scale={canvasW / 420}
+                  height={canvasW * ratioHeightFactor}
+                  noteLabel={pageData.noteLabel}
+                  noteNumber={pageData.noteNumber}
+                />
+              )}
+
               {/* Canvas layers */}
-              {(() => {
+              {pageData.styleVariant !== 'notebook' && (() => {
                 const eyebrowBlock = pageData.blocks?.find(b => b.type === 'eyebrow');
                 const eyebrowText = eyebrowBlock && 'text' in eyebrowBlock ? eyebrowBlock.text : undefined;
 
@@ -5247,6 +5292,19 @@ const LayoutTemplateIcon = ({ size }: { size: number }) => (
 );
 // ─── CardView (시각 전용, 캡처/썸네일용 — 420px 기준) ───────────────────────
 function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; logo?: string }) {
+  // 노트 스타일은 배경사진·오버레이 없이 종이 자체가 배경이다
+  if (page.styleVariant === 'notebook') {
+    const r = ratioOf(page.ratio);
+    return (
+      <NotebookRenderer
+        blocks={page.blocks || []}
+        scale={1}
+        height={Math.round(420 * (r.h / r.w))}
+        noteLabel={page.noteLabel}
+        noteNumber={page.noteNumber}
+      />
+    );
+  }
   return (
     <>
       <img
