@@ -24,6 +24,57 @@ const SLIDE_COUNT = 5;
 
 type NewsItem = { title: string; link?: string; description?: string };
 
+// @aptshowhome은 분양 정보 계정이다. 수집 순서대로 앞에서 자르면
+// "대통령 아파트 근저당", "재경위 부동산세 공방" 같은 정치·시사 기사가
+// 카드뉴스로 들어가버린다. 계정 성격에 맞는 기사를 점수로 골라낸다.
+const TOPIC_WEIGHTS: [string, number][] = [
+  ['분양', 6], ['청약', 6], ['입주', 5], ['모델하우스', 5], ['신도시', 4],
+  ['재건축', 4], ['재개발', 4], ['아파트', 3], ['오피스텔', 2], ['단지', 3],
+  ['시세', 3], ['집값', 3], ['매매', 3], ['전세', 3], ['월세', 2],
+  ['공급', 3], ['미분양', 4], ['분양가', 5], ['GTX', 4], ['역세권', 4],
+  ['금리', 2], ['대출', 2], ['규제', 2], ['학군', 3], ['평형', 3],
+];
+
+// 분양 콘텐츠로 쓰기 어려운 기사 (정치 공방·인물·사건사고·시혜성 보도)
+const DROP_PATTERNS = [
+  '대통령', '의원', '여야', '與', '野', '국회', '재경위', '국정감사', '공방',
+  '검찰', '경찰', '구속', '기소', '고발', '수사', '재판', '판결',
+  '사망', '숨져', '부상', '화재', '붕괴', '사고', '실종',
+  '무상임대', '취약계층', '기부', '후원', '봉사',
+  '북한', '트럼프', '관세', '증시', '코스피', '코스닥', '주가',
+  // 부동산 기사로 분류되지만 분양 콘텐츠와는 무관한 것들
+  '산단', '산업단지', '공항', '활주로', '건설근로자', '공제회',
+  '아카데미', '폭염', '건설현장', '중대재해', '안전점검', '해외',
+];
+
+function scoreNews(n: NewsItem): number {
+  const text = `${n.title} ${n.description || ''}`;
+  if (DROP_PATTERNS.some(p => n.title.includes(p))) return -1;
+  let score = 0;
+  for (const [kw, w] of TOPIC_WEIGHTS) {
+    if (n.title.includes(kw)) score += w;
+    else if (text.includes(kw)) score += Math.ceil(w / 2);
+  }
+  return score;
+}
+
+function pickRelevantNews(items: NewsItem[], limit: number): NewsItem[] {
+  const scored = items
+    .filter(n => n && typeof n.title === 'string' && n.title.trim())
+    .map(n => ({ n, s: scoreNews(n) }))
+    .filter(x => x.s > 0)
+    .sort((a, b) => b.s - a.s);
+
+  const out: NewsItem[] = [];
+  for (const { n } of scored) {
+    if (out.length >= limit) break;
+    // 제목 앞부분이 겹치는 유사 기사는 한 건만
+    if (out.some(o => o.title.slice(0, 12) === n.title.slice(0, 12))) continue;
+    out.push(n);
+  }
+  return out;
+}
+
 function serviceClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -68,9 +119,7 @@ export async function generateNewsCardnewsDraft(opts?: { force?: boolean }): Pro
   // 요약문만 주면 AI가 여러 기사를 섞어 새로운 이야기를 지어내서
   // 원문에 없는 내용이 나왔다.
   const rawItems = Array.isArray(briefing?.news_items) ? (briefing!.news_items as NewsItem[]) : [];
-  const picked = rawItems
-    .filter(n => n && typeof n.title === 'string' && n.title.trim())
-    .slice(0, SLIDE_COUNT);
+  const picked = pickRelevantNews(rawItems, SLIDE_COUNT);
   const hasItems = picked.length >= 3;
 
   // 같은 브리핑으로 이미 만든 초안이 있으면 중복 생성하지 않는다
@@ -132,12 +181,22 @@ ${mappingRule}
 - { "type":"badgeRow", "badges":[{"text":"태그","tone":"gold"}] }
 - { "type":"sourceNote", "text":"출처: ..." }
 
-[작성 규칙]
-- 각 장은 eyebrow 1개 + headline 1개 + 내용 블록 1개 이상으로 구성. blocks를 비우지 말 것.
-- eyebrow는 그 장이 다루는 뉴스의 분야를 나타내는 영문 대문자 라벨 (예: RATES, SUPPLY, POLICY, MARKET).
-- headline은 그 장의 뉴스 핵심을 공백 포함 18자 이내 명사형으로. sub는 40자 이내. checklist 항목은 22자 이내.
-- 수치가 있으면 bigNumber나 statGrid로, 여러 항목이면 checklist나 compareTable로 표현할 것.
+[각 장의 서식 — 모든 장을 같은 틀로 채울 것]
+1) eyebrow: "① 분야" 형태. 번호는 장 순서(①②③④⑤), 분야는 2~4자 한글
+   (예: "① 청약", "② 분양가", "③ 공급", "④ 시세", "⑤ 규제")
+2) headline: 그 뉴스의 핵심. 공백 포함 18자 이내, 짧은 명사형
+3) sub: 무슨 일인지 한 문장. 40자 이내
+4) checklist: 그 뉴스에서 뽑은 핵심 포인트 3~4개. 각 22자 이내
+   — 이게 카드의 본문이다. 절대 생략하지 말 것
+5) 수치가 있으면 checklist 앞에 bigNumber(대표 수치 1개) 또는
+   statGrid(수치 2~3개)를 추가. 없으면 넣지 않는다
+6) sourceNote: "출처: 언론사명" 한 줄
+
+[내용 규칙]
+- 한 장은 배정된 뉴스 1건만 다룬다. 다른 뉴스 내용을 섞지 말 것.
+- 뉴스에 없는 수치·지역·단지명·일정·가격을 지어내지 말 것.
 - 확인되지 않은 분양가·입주일·청약 자격은 단정하지 말 것.
+- 실거주자·수요자에게 무엇을 의미하는지가 드러나게 쓸 것.
 - body와 title 필드도 비우지 말 것. title은 그 장이 다루는 뉴스 제목을 짧게 줄인 것.
 
 ${sourceBlock}`;
