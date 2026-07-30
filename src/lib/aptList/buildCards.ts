@@ -1,6 +1,8 @@
 import { callAI } from '@/lib/ai/openrouter';
+import { createClient } from '@supabase/supabase-js';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import type { AptRecord } from './parseTransactions';
+import { generateNotebookImage } from '@/lib/notebookImage/generate';
 
 // 단지 목록 → 손글씨 노트 스타일 카드뉴스 페이지.
 //
@@ -13,8 +15,11 @@ const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', 
 export type AptCardPage = {
   id: string;
   blocks: SlideBlock[];
-  styleVariant: 'notebook';
+  // 'image' = AI가 그린 노트 카드 이미지 그대로, 'notebook' = CSS 렌더러(폴백)
+  styleVariant: 'notebook' | 'image';
   ratio: string;
+  needsReview?: boolean;   // 숫자 검증을 못 넘긴 장 — 사람이 확인해야 함
+  reviewNote?: string;
   noteLabel?: string;
   noteNumber?: string;
   // 노트 스타일은 배경사진을 쓰지 않지만 기존 PageData 호환용으로 채워둔다
@@ -102,11 +107,29 @@ function factAdvantages(r: AptRecord): string[] {
   return out;
 }
 
+/** 생성된 이미지를 Supabase Storage에 올리고 공개 URL을 돌려준다 */
+async function uploadCardImage(base64: string, name: string): Promise<string> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return '';
+  const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  const filename = `notebook/${Date.now()}_${name.replace(/[^\w가-힣]/g, '').slice(0, 20)}_${Math.random().toString(36).slice(2, 7)}.png`;
+  const { error } = await supabase.storage
+    .from('card-images')
+    .upload(filename, Buffer.from(base64, 'base64'), { contentType: 'image/png', upsert: false });
+  if (error) {
+    console.warn('[AptList] 카드 이미지 업로드 실패:', error.message);
+    return '';
+  }
+  return supabase.storage.from('card-images').getPublicUrl(filename).data.publicUrl;
+}
+
 export async function buildAptListCards(opts: {
   records: AptRecord[];
   title: string;        // 예: "경기도 5억대 아파트"
   ratio?: string;
   noteNumber?: string;  // 예: "No.006"
+  useAiImage?: boolean; // 손글씨 노트를 AI 이미지로 그릴지 (기본 true)
 }): Promise<AptCardPage[]> {
   const records = opts.records.slice(0, 10);
   const ratio = opts.ratio || '4:5';
@@ -118,7 +141,7 @@ export async function buildAptListCards(opts: {
   const base = (id: string, blocks: SlideBlock[], title: string): AptCardPage => ({
     id,
     blocks,
-    styleVariant: 'notebook',
+    styleVariant: 'notebook' as 'notebook' | 'image',
     ratio,
     noteLabel,
     noteNumber,
@@ -146,28 +169,66 @@ export async function buildAptListCards(opts: {
     ], opts.title)
   );
 
-  // 단지별 1장
-  records.forEach((r, i) => {
-    const copy = copies[i];
-    const advantages = copy.advantages.length > 0 ? copy.advantages : factAdvantages(r);
-    const rows: { label: string; value: string; highlight?: boolean }[] = [];
-    if (r.region) rows.push({ label: '위치', value: r.region });
-    if (r.pyeong) rows.push({ label: '평형', value: `전용 ${r.pyeong}평 (${r.areaM2}㎡)` });
-    if (r.priceText) rows.push({ label: '실거래가', value: r.priceText, highlight: true });
-    if (r.builtYear) rows.push({ label: '연식', value: `${r.builtYear}년식` });
-    if (r.floor) rows.push({ label: '거래층', value: `${r.floor}층` });
+  // 단지별 1장 — 손글씨 노트는 AI 이미지로 그린다 (CSS로는 그 질감이 안 나옴)
+  const useAi = opts.useAiImage !== false;
+  const itemPages = await Promise.all(
+    records.map(async (r, i) => {
+      const copy = copies[i];
+      const advantages = copy.advantages.length > 0 ? copy.advantages : factAdvantages(r);
+      const pyeongText = r.pyeong ? `전용 ${r.pyeong}평` : undefined;
+      const builtText = r.builtYear ? `${r.builtYear}년식` : undefined;
 
-    const blocks: SlideBlock[] = [
-      { type: 'eyebrow', text: `${CIRCLED[i] || `${i + 1}.`} ${shortDong(r.region) || '단지'}` },
-      { type: 'headline', text: r.name },
-    ];
-    if (rows.length) blocks.push({ type: 'compareTable', rows });
-    if (advantages.length) blocks.push({ type: 'checklist', items: advantages });
-    if (copy.memo) blocks.push({ type: 'sub', text: copy.memo });
-    blocks.push({ type: 'sourceNote', text: '출처: 국토교통부 실거래가' });
+      const rows: { label: string; value: string; highlight?: boolean }[] = [];
+      if (r.region) rows.push({ label: '위치', value: r.region });
+      if (pyeongText) rows.push({ label: '평형', value: `${pyeongText} (${r.areaM2}㎡)` });
+      if (r.priceText) rows.push({ label: '실거래가', value: r.priceText, highlight: true });
+      if (builtText) rows.push({ label: '연식', value: builtText });
+      if (r.floor) rows.push({ label: '거래층', value: `${r.floor}층` });
 
-    pages.push(base(String(i + 2), blocks, r.name));
-  });
+      // blocks는 항상 만들어 둔다 — 이미지 생성이 실패하면 이걸로 그리고,
+      // 성공해도 나중에 CSS 스타일로 바꾸거나 문구를 고칠 때 쓴다
+      const blocks: SlideBlock[] = [
+        { type: 'eyebrow', text: `${CIRCLED[i] || `${i + 1}.`} ${shortDong(r.region) || '단지'}` },
+        { type: 'headline', text: r.name },
+      ];
+      if (rows.length) blocks.push({ type: 'compareTable', rows });
+      if (advantages.length) blocks.push({ type: 'checklist', items: advantages });
+      if (copy.memo) blocks.push({ type: 'sub', text: copy.memo });
+      blocks.push({ type: 'sourceNote', text: '출처: 국토교통부 실거래가' });
+
+      const page = base(String(i + 2), blocks, r.name);
+
+      if (useAi) {
+        const img = await generateNotebookImage({
+          index: i + 1,
+          dong: shortDong(r.region) || r.region,
+          name: r.name,
+          region: r.region,
+          pyeong: pyeongText,
+          price: r.priceText,
+          built: builtText,
+          advantages,
+          memo: copy.memo,
+          noteLabel: '임장 메모',
+          noteNumber,
+          ratio,
+        });
+        if (img) {
+          const url = await uploadCardImage(img.base64, r.name);
+          if (url) {
+            page.bgImage = url;
+            page.styleVariant = 'image';
+            if (!img.verified) {
+              page.needsReview = true;
+              page.reviewNote = img.note;
+            }
+          }
+        }
+      }
+      return page;
+    })
+  );
+  pages.push(...itemPages);
 
   // 마무리
   pages.push(

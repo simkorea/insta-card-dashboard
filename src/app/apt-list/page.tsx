@@ -12,9 +12,10 @@ export default function AptListPage() {
   const [limit, setLimit] = useState(8);
   const [noteNumber, setNoteNumber] = useState('No.001');
   const [ratio, setRatio] = useState('4:5');
+  const [useAiImage, setUseAiImage] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<{ designId: string; slides: number; complexes: number; parsedTotal: number; preview: Preview[] } | null>(null);
+  const [result, setResult] = useState<{ designId: string; slides: number; complexes: number; parsedTotal: number; preview: Preview[]; aiImages?: number; needsReview?: { title: string; note?: string }[] } | null>(null);
 
   const submit = async () => {
     setLoading(true);
@@ -24,7 +25,7 @@ export default function AptListPage() {
       const res = await fetch('/api/apt-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw, title, limit, noteNumber, ratio }),
+        body: JSON.stringify({ raw, title, limit, noteNumber, ratio, useAiImage }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -128,6 +129,26 @@ export default function AptListPage() {
           </p>
         </div>
 
+        {/* 카드 스타일 */}
+        <div className="rounded-xl border border-gray-200 p-3">
+          <label className="flex items-start gap-2.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={useAiImage}
+              onChange={e => setUseAiImage(e.target.checked)}
+              className="mt-0.5 w-4 h-4 accent-primary-600 cursor-pointer"
+            />
+            <span>
+              <span className="text-[13px] font-bold text-gray-800 block">손글씨 노트 스타일로 그리기 (AI 이미지)</span>
+              <span className="text-[11px] text-gray-500 leading-relaxed block mt-0.5">
+                실제 노트에 펜으로 쓴 느낌으로 만듭니다. 한 장에 20~40초 걸리고, 만든 뒤
+                카드에 적힌 숫자·단지명이 원본과 같은지 자동으로 대조합니다.
+                끄면 기본 스타일로 빠르게 만듭니다.
+              </span>
+            </span>
+          </label>
+        </div>
+
         <button
           onClick={submit}
           disabled={loading || raw.trim().length < 20}
@@ -147,7 +168,21 @@ export default function AptListPage() {
             </p>
             <p className="text-[12px] text-green-800/80 mb-3">
               표에서 {result.parsedTotal}개 단지를 읽어 상위 {result.complexes}개를 사용했습니다.
+              {result.aiImages ? ` · 손글씨 노트로 그린 장 ${result.aiImages}개` : ''}
             </p>
+
+            {result.needsReview && result.needsReview.length > 0 && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 mb-3">
+                <p className="text-[12px] font-bold text-amber-900 mb-1">
+                  ⚠️ 아래 {result.needsReview.length}장은 숫자 대조를 통과하지 못했습니다 — 발행 전에 직접 확인해주세요
+                </p>
+                <ul className="text-[11px] text-amber-800/90 list-disc pl-4 space-y-0.5">
+                  {result.needsReview.map((r, i) => (
+                    <li key={i}>{r.title}{r.note ? ` — ${r.note}` : ''}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="bg-white rounded-xl border border-green-100 divide-y divide-green-50 mb-3 overflow-hidden">
               {result.preview.map((p, i) => (

@@ -99,7 +99,9 @@ interface PageData {
   handle?: string;
   accentOverride?: string;
   ratio?: string;   // '1:1' | '4:5' | '3:4' | '9:16' | '16:9' — 없으면 4:5
-  styleVariant?: 'default' | 'notebook';  // 'notebook' = 손글씨 노트 스타일
+  styleVariant?: 'default' | 'notebook' | 'image';  // notebook=CSS 노트, image=AI가 그린 카드 이미지
+  needsReview?: boolean;   // 숫자 검증을 못 넘긴 장
+  reviewNote?: string;
   noteLabel?: string;   // 노트 스타일 우하단 배지 윗줄
   noteNumber?: string;  // 노트 스타일 우하단 배지 아랫줄
 }
@@ -4559,6 +4561,16 @@ export default function EditorPage() {
                   : <div key={i} className="absolute left-0 right-0 pointer-events-none z-50" style={{ top: `${g.y}%`, height: 1, background: 'rgba(99,102,241,0.8)' }} />
               ))}
 
+              {/* AI가 그린 카드 이미지 — 그대로 한 장으로 표시 */}
+              {pageData.styleVariant === 'image' && (
+                <img
+                  src={pageImages[pageData.id] ?? pageData.bgImage}
+                  alt=""
+                  crossOrigin="anonymous"
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )}
+
               {/* 노트 스타일은 종이 자체가 배경이라 배경사진·오버레이 레이어를 쓰지 않는다 */}
               {pageData.styleVariant === 'notebook' && (
                 <NotebookRenderer
@@ -4571,7 +4583,7 @@ export default function EditorPage() {
               )}
 
               {/* Canvas layers */}
-              {pageData.styleVariant !== 'notebook' && (() => {
+              {pageData.styleVariant !== 'notebook' && pageData.styleVariant !== 'image' && (() => {
                 const eyebrowBlock = pageData.blocks?.find(b => b.type === 'eyebrow');
                 const eyebrowText = eyebrowBlock && 'text' in eyebrowBlock ? eyebrowBlock.text : undefined;
 
@@ -5292,6 +5304,17 @@ const LayoutTemplateIcon = ({ size }: { size: number }) => (
 );
 // ─── CardView (시각 전용, 캡처/썸네일용 — 420px 기준) ───────────────────────
 function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; logo?: string }) {
+  // AI가 그린 카드 이미지는 그 자체가 완성된 카드다 — 오버레이·텍스트를 덧그리지 않는다
+  if (page.styleVariant === 'image') {
+    return (
+      <img
+        src={bgImage || page.bgImage}
+        alt=""
+        crossOrigin="anonymous"
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+      />
+    );
+  }
   // 노트 스타일은 배경사진·오버레이 없이 종이 자체가 배경이다
   if (page.styleVariant === 'notebook') {
     const r = ratioOf(page.ratio);
