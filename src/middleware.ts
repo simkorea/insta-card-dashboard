@@ -49,6 +49,7 @@ const PROTECTED_API_PREFIXES = [
   '/api/images',
   '/api/ai-designer',
   '/api/news-draft',
+  '/api/apt-list',
 ];
 
 export async function middleware(request: NextRequest) {
