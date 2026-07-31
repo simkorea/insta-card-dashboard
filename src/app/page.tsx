@@ -337,6 +337,19 @@ export default function DashboardPage() {
                 {/* 광고 성과 리포트 */}
                 <div className="space-y-2">
                   <h4 className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">📢 소셜 광고 성과 (Meta Ads)</h4>
+                  {/* 연동 전에는 숫자를 보여주지 않는다. 예전에는 고정 더미값을 띄워서
+                      실제로는 지출이 0원인데 매일 광고비를 쓴 것처럼 보였다. */}
+                  {briefing.ad_performance && briefing.ad_performance.connected === false ? (
+                    <div className="bg-amber-50/60 border border-amber-200 rounded-xl p-3.5">
+                      <p className="text-[11px] font-bold text-amber-900 mb-1">광고 계정이 아직 연동되지 않았습니다</p>
+                      <p className="text-[10px] text-amber-800/80 leading-relaxed">
+                        {briefing.ad_performance.reason || '연동 정보를 확인해주세요.'}
+                        <br />
+                        연동 전까지는 광고 수치를 표시하지 않습니다.
+                      </p>
+                    </div>
+                  ) : (
+                  <>
                   <div className="grid grid-cols-2 gap-2">
                     <div className="bg-blue-50/40 border border-blue-100/50 rounded-xl p-3">
                       <p className="text-[10px] font-semibold text-blue-500 leading-none mb-1">지출액</p>
@@ -357,7 +370,11 @@ export default function DashboardPage() {
                       <p className="text-[9px] text-gray-400 mt-0.5">CTR: {((briefing.ad_performance?.ctr ?? 0) * 100).toFixed(2)}%</p>
                     </div>
                   </div>
-                  <p className="text-[9px] text-gray-400 italic text-right mt-1">※ Meta Ads API 연동 상태: Stub 모드 활성화됨</p>
+                  <p className="text-[9px] text-gray-400 italic text-right mt-1">
+                    ※ {briefing.ad_performance?.date ? `${briefing.ad_performance.date} 실집행 기준` : '집계 기준일 미상'}
+                  </p>
+                  </>
+                  )}
                 </div>
               </div>
             </div>

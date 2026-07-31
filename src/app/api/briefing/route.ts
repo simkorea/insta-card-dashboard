@@ -1,4 +1,5 @@
 import { callAI } from "@/lib/ai/openrouter";
+import { fetchAdPerformance, adSectionMarkdown } from "@/lib/metaAds/fetchInsights";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 
@@ -164,23 +165,14 @@ ${newsItems.map((item, idx) => `[뉴스 ${idx + 1}] ${item.title}\n요약: ${ite
       );
     }
 
-    // 3. Meta 광고 성과 수집 (TODO Stub 데이터 대체)
-    // 광고 지표만 '어제' 기준이다 — Meta 인사이트는 당일 수치가 확정되지 않는다.
-    // 브리핑 자체의 날짜(briefingDate)는 뉴스를 수집한 '오늘'이어야 한다.
-    // 예전에는 둘 다 어제로 저장해서, 7/31 아침에 만든 브리핑이 7/30자로
-    // 표시되고 본문 제목도 (2026-07-30)으로 나갔다.
-    // TODO: Meta Ads API 연동 구현 필요 (계정 ID: 538343246814531)
-    const adPerformance = {
-      accountId: "538343246814531",
-      date: adDateStr,
-      impressions: 12480, // 노출수
-      clicks: 412,        // 클릭수
-      spend: 68500,       // 지출액 (원)
-      leads: 14,          // 리드수
-      ctr: 0.033,         // 클릭률 (CTR)
-      cpc: 166,           // 클릭당 비용 (CPC)
-      cpl: 4892,          // 리드당 비용 (CPL)
-    };
+    // 3. Meta 광고 성과 — 실제 Graph API 조회.
+    // 광고 지표만 '어제' 기준이다 (Meta 인사이트는 당일 수치가 확정되지 않는다).
+    // 브리핑 자체의 날짜(briefingDate)는 뉴스를 수집한 '오늘'이다.
+    //
+    // 연동 전에는 고정 더미값(노출 12,480 / 지출 68,500원)을 매일 저장하고
+    // 있었다. 실제 계정은 캠페인이 전부 중단돼 지출이 0원인데도 화면에는
+    // 매일 광고비를 쓴 것처럼 보였다 — 지어낸 숫자는 넣지 않는다.
+    const adPerformance = await fetchAdPerformance(adDateStr);
 
     // 4. Supabase briefings 테이블에 저장
     const fullReport = `# 일일 종합 브리핑 요약 (${briefingDate})
@@ -188,15 +180,7 @@ ${newsItems.map((item, idx) => `[뉴스 ${idx + 1}] ${item.title}\n요약: ${ite
 ## 1. 부동산 뉴스 분석 브리핑
 ${newsSummary}
 
-## 2. 소셜 광고 성과 리포트 (Meta Ads) — ${adDateStr} 기준
-* 광고 지표는 당일 수치가 확정되지 않아 하루 전 기준으로 집계합니다.
-* **광고 계정 ID:** ${adPerformance.accountId}
-* **노출수:** ${adPerformance.impressions.toLocaleString()} 회
-* **클릭수:** ${adPerformance.clicks.toLocaleString()} 회
-* **지출액:** ${adPerformance.spend.toLocaleString()} 원
-* **획득 리드:** ${adPerformance.leads.toLocaleString()} 건
-* **CTR (클릭률):** ${(adPerformance.ctr * 100).toFixed(2)}%
-* **CPL (리드단가):** ${adPerformance.cpl.toLocaleString()} 원`;
+${adSectionMarkdown(adPerformance)}`;
 
     const { data: dbData, error: dbError } = await supabase
       .from("briefings")
