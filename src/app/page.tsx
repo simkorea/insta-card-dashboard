@@ -302,7 +302,9 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex items-center gap-2 self-start sm:self-auto">
                   <span className="px-2.5 py-1 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg border border-blue-100">
-                    광고 성과 기준일: {briefing.date}
+                    {/* briefing.date는 뉴스를 모은 '오늘'이다. 광고 지표는 수치가 확정된
+                        '어제' 기준이라 ad_performance.date를 봐야 한다 */}
+                    광고 성과 기준일: {briefing.ad_performance?.date || briefing.date}
                   </span>
                   <button 
                     onClick={saveToBlog} 
