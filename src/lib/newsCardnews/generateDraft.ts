@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { generateNewsNotebookImage } from '@/lib/notebookImage/generate';
 import { uploadNotebookImage } from '@/lib/notebookImage/upload';
+import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
 
 // 아침 브리핑 본문 → 카드뉴스 5장 "초안"을 만들어 내 보관함(card_designs)에 저장한다.
 // 발행은 하지 않는다. 크론(/api/cron/news-cardnews)과 수동 생성 버튼이 같이 쓴다.
@@ -204,7 +205,11 @@ ${mappingRule}
 
 [블록 타입]
 - { "type":"eyebrow", "text":"섹션 라벨 (영문 대문자)" }
-- { "type":"headline", "text":"메인 제목", "accentText":"강조할 3~6자(선택)" }
+- { "type":"headline", "text":"메인 제목", "accentText":"제목 뒤에 이어 붙일 강조 문구(선택)" }
+  ※ accentText는 제목 **안의 단어를 색칠하는 게 아니라 text 뒤에 이어 붙습니다.**
+     text에 이미 있는 말을 accentText에 또 쓰면 "…전세 눈치게임 눈치게임"처럼 두 번 찍힙니다.
+     text와 accentText를 이어 읽었을 때 자연스러운 한 문장이 되어야 하고,
+     겹치는 말이 생길 것 같으면 accentText를 아예 빼세요.
 - { "type":"sub", "text":"보조 설명" }
 - { "type":"bigNumber", "value":"4.36%", "caption":"설명(선택)" }
 - { "type":"statGrid", "cols":3, "items":[{"value":"43%","label":"청약자 증가"}] }
@@ -259,7 +264,9 @@ ${sourceBlock}`;
 
   const cards = (parsed.cards || [])
     .filter(c => Array.isArray(c.blocks) && c.blocks.length > 0)
-    .slice(0, hasItems ? picked.length : SLIDE_COUNT);
+    .slice(0, hasItems ? picked.length : SLIDE_COUNT)
+    // 강조어가 제목에 이미 들어 있으면 카드에 두 번 찍힌다 — 저장 전에 정리
+    .map(c => ({ ...c, blocks: normalizeHeadlines(c.blocks) }));
   if (cards.length === 0) return { ok: false, error: '생성된 슬라이드가 없습니다.', status: 502 };
 
   // 손글씨 노트 스타일. 단지 카드와 같은 룩으로 통일하고,
