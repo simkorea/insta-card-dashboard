@@ -108,12 +108,15 @@ function factAdvantages(r: AptRecord): string[] {
 }
 
 /** 생성된 이미지를 Supabase Storage에 올리고 공개 URL을 돌려준다 */
-async function uploadCardImage(base64: string, name: string): Promise<string> {
+async function uploadCardImage(base64: string, index: number): Promise<string> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return '';
   const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  const filename = `notebook/${Date.now()}_${name.replace(/[^\w가-힣]/g, '').slice(0, 20)}_${Math.random().toString(36).slice(2, 7)}.png`;
+  // 파일명은 반드시 ASCII여야 한다 — 단지명을 넣었더니 Supabase Storage가
+  // "Invalid key: notebook/..._안양석수하우스토리아파트_....png"로 전부 거부해서
+  // 이미지가 멀쩡히 생성됐는데도 카드에 붙지 않았다.
+  const filename = `notebook/${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}.png`;
   const { error } = await supabase.storage
     .from('card-images')
     .upload(filename, Buffer.from(base64, 'base64'), { contentType: 'image/png', upsert: false });
@@ -214,7 +217,7 @@ export async function buildAptListCards(opts: {
           ratio,
         });
         if (img) {
-          const url = await uploadCardImage(img.base64, r.name);
+          const url = await uploadCardImage(img.base64, i + 1);
           if (url) {
             page.bgImage = url;
             page.styleVariant = 'image';
@@ -222,6 +225,11 @@ export async function buildAptListCards(opts: {
               page.needsReview = true;
               page.reviewNote = img.note;
             }
+          } else {
+            // 그림은 나왔는데 저장이 안 된 경우 — 조용히 기본 스타일로 넘어가면
+            // 왜 노트가 아닌지 알 수 없으므로 화면에 알린다
+            page.needsReview = true;
+            page.reviewNote = '노트 이미지 저장에 실패해 기본 스타일로 만들었습니다';
           }
         }
       }

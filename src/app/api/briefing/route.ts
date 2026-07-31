@@ -79,6 +79,12 @@ export async function GET() {
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
       throw new Error("SUPABASE_SERVICE_ROLE_KEY 환경변수가 정의되지 않았습니다. .env.local 설정을 확인해주세요.");
     }
+    // KST 기준 오늘/어제. 브리핑 날짜는 뉴스를 수집한 오늘,
+    // 광고 지표만 수치가 확정된 어제를 쓴다.
+    const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const briefingDate = kstNow.toISOString().split("T")[0];
+    const adDateStr = new Date(kstNow.getTime() - 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
     // 1. 부동산 뉴스 RSS 수집 (국토교통부 + 연합뉴스 경제 fallback)
     const KEYWORDS = ["부동산", "주택", "아파트", "분양", "토지", "건설", "청약", "전세", "월세", "공시가격", "재건축", "재개발", "임대", "주거", "토지거래허가구역", "미분양", "집값", "매매가", "입주"];
     const EXCLUDE_KEYWORDS = ["공모주", "유상증자", "코스피", "코스닥", "증시", "주가"];
@@ -122,9 +128,11 @@ export async function GET() {
 
     // 2. OpenRouter API를 통한 뉴스 요약 생성
     let newsSummary = "";
-    const newsPrompt = `아래는 오늘자 국내 부동산·경제 뉴스 목록입니다.
+    const newsPrompt = `오늘은 ${briefingDate}입니다. 아래는 오늘자 국내 부동산·경제 뉴스 목록입니다.
 주요 정책 변화나 시장 이슈를 중심으로 핵심 포인트를 격식 있고 읽기 쉬운 한글 리포트 형식으로 요약해 주세요.
 각 항목별로 요약과 함께 짧은 시사점을 포함해 주세요.
+
+날짜를 적을 때는 반드시 위에 알려드린 ${briefingDate}을 쓰고, 다른 연도·날짜를 임의로 적지 마세요.
 
 뉴스 목록:
 ${newsItems.map((item, idx) => `[뉴스 ${idx + 1}] ${item.title}\n요약: ${item.description}`).join("\n\n")}`;
@@ -157,19 +165,14 @@ ${newsItems.map((item, idx) => `[뉴스 ${idx + 1}] ${item.title}\n요약: ${ite
     }
 
     // 3. Meta 광고 성과 수집 (TODO Stub 데이터 대체)
-    // KST 시간 기준으로 어제 날짜 계산 (UTC + 9)
-    const now = new Date();
-    const kstOffset = 9 * 60 * 60 * 1000;
-    const kstTime = new Date(now.getTime() + kstOffset);
-    const yesterday = new Date(kstTime);
-    yesterday.setDate(kstTime.getDate() - 1);
-    const dateStr = yesterday.toISOString().split("T")[0]; // YYYY-MM-DD
-
+    // 광고 지표만 '어제' 기준이다 — Meta 인사이트는 당일 수치가 확정되지 않는다.
+    // 브리핑 자체의 날짜(briefingDate)는 뉴스를 수집한 '오늘'이어야 한다.
+    // 예전에는 둘 다 어제로 저장해서, 7/31 아침에 만든 브리핑이 7/30자로
+    // 표시되고 본문 제목도 (2026-07-30)으로 나갔다.
     // TODO: Meta Ads API 연동 구현 필요 (계정 ID: 538343246814531)
-    // Meta Graph API에 어제 날짜(dateStr) 기준 광고 성과 지표(Impressions, Clicks, Spend, Leads)를 조회하는 로직 삽입 위치.
     const adPerformance = {
       accountId: "538343246814531",
-      date: dateStr,
+      date: adDateStr,
       impressions: 12480, // 노출수
       clicks: 412,        // 클릭수
       spend: 68500,       // 지출액 (원)
@@ -180,12 +183,13 @@ ${newsItems.map((item, idx) => `[뉴스 ${idx + 1}] ${item.title}\n요약: ${ite
     };
 
     // 4. Supabase briefings 테이블에 저장
-    const fullReport = `# 일일 종합 브리핑 요약 (${dateStr})
+    const fullReport = `# 일일 종합 브리핑 요약 (${briefingDate})
 
 ## 1. 부동산 뉴스 분석 브리핑
 ${newsSummary}
 
-## 2. 소셜 광고 성과 리포트 (Meta Ads)
+## 2. 소셜 광고 성과 리포트 (Meta Ads) — ${adDateStr} 기준
+* 광고 지표는 당일 수치가 확정되지 않아 하루 전 기준으로 집계합니다.
 * **광고 계정 ID:** ${adPerformance.accountId}
 * **노출수:** ${adPerformance.impressions.toLocaleString()} 회
 * **클릭수:** ${adPerformance.clicks.toLocaleString()} 회
@@ -197,7 +201,7 @@ ${newsSummary}
     const { data: dbData, error: dbError } = await supabase
       .from("briefings")
       .insert({
-        date: dateStr,
+        date: briefingDate,
         real_estate_summary: newsSummary,
         ad_performance: adPerformance,
         full_report: fullReport,
