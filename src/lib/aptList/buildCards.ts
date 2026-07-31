@@ -1,8 +1,8 @@
 import { callAI } from '@/lib/ai/openrouter';
-import { createClient } from '@supabase/supabase-js';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import type { AptRecord } from './parseTransactions';
 import { generateNotebookImage } from '@/lib/notebookImage/generate';
+import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 
 // 단지 목록 → 손글씨 노트 스타일 카드뉴스 페이지.
 //
@@ -66,8 +66,15 @@ ${list}
 - "역세권", "초품아" 같은 단정도 위 정보로 확인되지 않으면 쓰지 말 것.
 - 건축년도로 신축/구축 여부, 평형으로 실거주 적합성, 지역으로 생활권 정도만 언급 가능.
 - 각 장점은 공백 포함 16자 이내의 짧은 구.
-- 메모는 40자 이내 한 문장.
+- 메모는 40자 이내 한 문장. 어색한 조어("거주 목적층", "물건대")를 쓰지 말고 자연스러운 한국어로.
 - 과장·투자 권유 표현("무조건 오른다", "지금이 마지막 기회") 금지.
+
+[평형 표기 기준 — 전용면적 기준이며 반드시 지킬 것]
+- 20평 미만: 소형. 1~2인 가구
+- 20~29평: 중소형. 2~3인 가구, 신혼·소가족
+- 30~39평: 중형. 3~4인 가구
+- 40평 이상: 대형. 4인 이상
+26평을 "소형", "1~2인"이라고 쓰는 식의 잘못된 분류를 하지 말 것.
 
 주제: ${theme}
 
@@ -107,26 +114,6 @@ function factAdvantages(r: AptRecord): string[] {
   return out;
 }
 
-/** 생성된 이미지를 Supabase Storage에 올리고 공개 URL을 돌려준다 */
-async function uploadCardImage(base64: string, index: number): Promise<string> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return '';
-  const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  // 파일명은 반드시 ASCII여야 한다 — 단지명을 넣었더니 Supabase Storage가
-  // "Invalid key: notebook/..._안양석수하우스토리아파트_....png"로 전부 거부해서
-  // 이미지가 멀쩡히 생성됐는데도 카드에 붙지 않았다.
-  const filename = `notebook/${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}.png`;
-  const { error } = await supabase.storage
-    .from('card-images')
-    .upload(filename, Buffer.from(base64, 'base64'), { contentType: 'image/png', upsert: false });
-  if (error) {
-    console.warn('[AptList] 카드 이미지 업로드 실패:', error.message);
-    return '';
-  }
-  return supabase.storage.from('card-images').getPublicUrl(filename).data.publicUrl;
-}
-
 export async function buildAptListCards(opts: {
   records: AptRecord[];
   title: string;        // 예: "경기도 5억대 아파트"
@@ -159,10 +146,13 @@ export async function buildAptListCards(opts: {
   const pages: AptCardPage[] = [];
 
   // 표지
+  // 제목에 이미 "TOP4" 같은 표현이 있으면 강조어를 덧붙이지 않는다.
+  // 그냥 붙였더니 "안양 만안구 실거래가 TOP4 TOP 4"가 됐다.
+  const titleHasTop = /top\s*\d/i.test(opts.title);
   pages.push(
     base('1', [
       { type: 'eyebrow', text: '핵심 공개!' },
-      { type: 'headline', text: opts.title, accentText: `TOP ${records.length}` },
+      { type: 'headline', text: opts.title, accentText: titleHasTop ? undefined : `TOP ${records.length}` },
       { type: 'sub', text: '국토부 실거래가로 확인한 단지만 골랐습니다.' },
       {
         type: 'badgeRow',
@@ -217,7 +207,7 @@ export async function buildAptListCards(opts: {
           ratio,
         });
         if (img) {
-          const url = await uploadCardImage(img.base64, i + 1);
+          const url = await uploadNotebookImage(img.base64, i + 1);
           if (url) {
             page.bgImage = url;
             page.styleVariant = 'image';

@@ -120,22 +120,25 @@ export async function verifyCardText(
   }
 }
 
+export type NotebookImageResult = { base64: string; verified: boolean; note?: string };
+
 /**
  * 노트 카드 이미지 생성. Pro가 혼잡하면 재시도하고,
- * 숫자·단지명이 틀리게 나오면 다시 생성한다.
+ * 핵심 문구가 틀리게 나오면 다시 생성한다.
  * 끝내 실패하면 null → 호출부에서 CSS 렌더러로 폴백한다.
+ *
+ * 단지 카드와 뉴스 카드가 같은 재시도·검증 루프를 쓰도록 분리해 둔다.
+ * 프롬프트만 다르고, "틀리면 안 되는 값을 다시 읽어 대조한다"는 원칙은 같다.
  */
-export async function generateNotebookImage(
-  facts: NotebookFacts,
-  opts?: { maxAttempts?: number }
-): Promise<{ base64: string; verified: boolean; note?: string } | null> {
+export async function renderNotebookCard(
+  prompt: string,
+  mustContain: string[],
+  opts?: { maxAttempts?: number; label?: string }
+): Promise<NotebookImageResult | null> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return null;
 
-  const prompt = buildNotebookPrompt(facts);
-  // 틀리면 안 되는 핵심 값들
-  const mustContain = [facts.name, facts.price, facts.pyeong, facts.built].filter(Boolean) as string[];
-
+  const label = opts?.label || '카드';
   const maxAttempts = opts?.maxAttempts ?? 3;
   let lastError = '';
   let lastUnverified: { base64: string; missing: string[] } | null = null;
@@ -150,10 +153,10 @@ export async function generateNotebookImage(
       if (check.ok) return { base64, verified: true };
 
       lastUnverified = { base64, missing: check.missing };
-      console.warn(`[NotebookImage] ${facts.name} 검증 실패(시도 ${attempt + 1}): 누락/오탈자 ${check.missing.join(', ')}`);
+      console.warn(`[NotebookImage] ${label} 검증 실패(시도 ${attempt + 1}): 누락/오탈자 ${check.missing.join(', ')}`);
     } catch (e: any) {
       lastError = e?.message || String(e);
-      console.warn(`[NotebookImage] ${facts.name} 생성 실패(시도 ${attempt + 1}): ${lastError}`);
+      console.warn(`[NotebookImage] ${label} 생성 실패(시도 ${attempt + 1}): ${lastError}`);
       await new Promise(r => setTimeout(r, 2500));
     }
   }
@@ -163,8 +166,80 @@ export async function generateNotebookImage(
     return {
       base64: lastUnverified.base64,
       verified: false,
-      note: `숫자·단지명 확인 필요 (${lastUnverified.missing.join(', ')})`,
+      note: `카드에 적힌 문구 확인 필요 (${lastUnverified.missing.join(', ')})`,
     };
   }
   return null;
+}
+
+/** 단지 카드 — 가격·평형·연식이 틀리면 안 된다 */
+export async function generateNotebookImage(
+  facts: NotebookFacts,
+  opts?: { maxAttempts?: number }
+): Promise<NotebookImageResult | null> {
+  return renderNotebookCard(
+    buildNotebookPrompt(facts),
+    [facts.name, facts.price, facts.pyeong, facts.built].filter(Boolean) as string[],
+    { maxAttempts: opts?.maxAttempts, label: facts.name }
+  );
+}
+
+export type NewsNotebookFacts = {
+  index: number;        // 1부터
+  category: string;     // 청약 / 분양가 / 공급 …
+  headline: string;     // 카드 제목
+  lead?: string;        // 한 문장 설명
+  points: string[];     // 핵심 포인트 3~4개
+  stat?: { value: string; label?: string };  // 대표 수치(있을 때만)
+  source?: string;      // 출처: 연합뉴스
+  noteNumber: string;   // No.012
+  ratio: string;
+};
+
+/**
+ * 뉴스 카드 — 단지 카드와 같은 노트 룩이지만 내용 구성이 다르다.
+ * 검증 대상은 제목과 대표 수치. 수치를 틀리게 그리면 기사와 다른 정보가 나간다.
+ */
+export function buildNewsNotebookPrompt(f: NewsNotebookFacts): string {
+  return `한국 부동산 뉴스 인스타그램 카드뉴스를 **손글씨 스프링 노트** 스타일 이미지로 그려주세요. 비율 ${f.ratio} 세로.
+
+[배경]
+- 화면 전체가 크림색 줄노트 종이, 옅은 가로 줄
+- 왼쪽 가장자리에 검은 스프링 제본 링(사실적으로)
+- 스프링 오른쪽에 얇은 빨간 세로 여백선
+- 실제 노트를 사진 찍은 듯한 종이 질감과 부드러운 그림자
+
+[내용 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
+- 좌측 상단: 빨간 손그림 동그라미 안에 "${f.index}", 옆에 노란 형광펜으로 칠한 "${f.category}"
+- 그 아래 큰 손글씨 제목: "${f.headline}" — 빨간 펜으로 물결 밑줄
+${f.lead ? `- 제목 아래 작은 손글씨 한 줄: "${f.lead}"` : ''}
+${f.stat ? `- 가운데에 손그림 테두리 상자. 안에 빨간 큰 손글씨로 "${f.stat.value}"${f.stat.label ? `, 그 아래 작게 "${f.stat.label}"` : ''}` : ''}
+- 빨간 "✔ 핵심 포인트" 제목과 빨간 밑줄, 그 아래 체크 항목들
+  (각 줄: 빨간 손그림 ☑ 체크박스 + 노란 형광펜으로 칠한 손글씨)
+${f.points.map(p => `  ☑ ${p}`).join('\n')}
+${f.source ? `- 우측 하단 작은 글씨: "${f.source}"` : ''}
+- 우측 하단: 빨간 클립으로 집은 크라프트 종이 태그. 위에 "오늘의 뉴스", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
+- 좌측 하단: 파란 선으로 그린 간단한 도시 스카이라인, 작은 나무와 구름
+
+[스타일]
+- 전부 펜과 마커로 직접 쓴 느낌. 한글 손글씨, 살짝 불규칙한 획
+- 본문 검정, 강조·밑줄 빨강, 낙서 파랑, 형광펜 노랑
+- 여백을 넉넉히 두고 가장자리에서 글자가 잘리지 않게
+- 위에 적힌 것 외의 영어는 넣지 말 것
+
+[가장 중요]
+- 위의 모든 한글 단어와 숫자를 정확히 그대로 재현할 것.
+- 위에 없는 정보(단지명, 분양가, 날짜, 지하철역, 세대수)는 절대 만들어 넣지 말 것.`;
+}
+
+export async function generateNewsNotebookImage(
+  facts: NewsNotebookFacts,
+  opts?: { maxAttempts?: number }
+): Promise<NotebookImageResult | null> {
+  // 제목은 길면 줄바꿈되어 OCR 대조가 흔들린다 → 앞부분과 대표 수치만 대조한다
+  const mustContain = [facts.headline.slice(0, 8), facts.stat?.value].filter(Boolean) as string[];
+  return renderNotebookCard(buildNewsNotebookPrompt(facts), mustContain, {
+    maxAttempts: opts?.maxAttempts ?? 2,
+    label: facts.headline,
+  });
 }

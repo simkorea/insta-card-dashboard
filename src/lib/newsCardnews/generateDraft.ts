@@ -1,6 +1,8 @@
 import { callAI } from '@/lib/ai/openrouter';
 import { createClient } from '@supabase/supabase-js';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
+import { generateNewsNotebookImage } from '@/lib/notebookImage/generate';
+import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 
 // 아침 브리핑 본문 → 카드뉴스 5장 "초안"을 만들어 내 보관함(card_designs)에 저장한다.
 // 발행은 하지 않는다. 크론(/api/cron/news-cardnews)과 수동 생성 버튼이 같이 쓴다.
@@ -98,7 +100,38 @@ async function searchBackground(keyword: string): Promise<string> {
   }
 }
 
-export async function generateNewsCardnewsDraft(opts?: { force?: boolean }): Promise<DraftResult> {
+/**
+ * 카드에 쓰인 blocks에서 노트 이미지에 넣을 사실만 뽑는다.
+ * blocks가 이미 "뉴스 1건 = 카드 1장" 규칙과 가드레일을 통과한 결과이므로,
+ * 여기서 문구를 다시 만들지 않고 그대로 옮기기만 한다.
+ */
+function notebookFactsFromBlocks(blocks: SlideBlock[], index: number) {
+  const find = <T extends SlideBlock['type']>(t: T) =>
+    blocks.find(b => b.type === t) as Extract<SlideBlock, { type: T }> | undefined;
+
+  const eyebrow = find('eyebrow')?.text || '';
+  const headlineBlock = find('headline');
+  const headline = [headlineBlock?.text, headlineBlock?.accentText].filter(Boolean).join(' ').trim();
+  const big = find('bigNumber');
+  const stats = find('statGrid');
+
+  return {
+    // "① 청약" 형태에서 번호 기호를 떼고 분야만 남긴다 (번호는 따로 그린다)
+    category: eyebrow.replace(/^[①②③④⑤⑥⑦⑧⑨⑩\d.\s]+/, '').trim() || '뉴스',
+    headline,
+    lead: find('sub')?.text,
+    points: (find('checklist')?.items || []).slice(0, 4),
+    stat: big
+      ? { value: big.value, label: big.caption }
+      : stats?.items?.[0]
+        ? { value: stats.items[0].value, label: stats.items[0].label }
+        : undefined,
+    source: find('sourceNote')?.text,
+    index,
+  };
+}
+
+export async function generateNewsCardnewsDraft(opts?: { force?: boolean; notebookStyle?: boolean }): Promise<DraftResult> {
   const supabase = serviceClient();
 
   const { data: briefing, error: bErr } = await supabase
@@ -229,14 +262,44 @@ ${sourceBlock}`;
     .slice(0, hasItems ? picked.length : SLIDE_COUNT);
   if (cards.length === 0) return { ok: false, error: '생성된 슬라이드가 없습니다.', status: 502 };
 
-  const backgrounds = await Promise.all(cards.map(c => searchBackground(c.imageKeyword)));
+  // 손글씨 노트 스타일. 단지 카드와 같은 룩으로 통일하고,
+  // 이미지 생성이 안 되면 CSS 노트 렌더러(styleVariant 'notebook')로 떨어진다.
+  // 사진 배경은 노트 스타일에서 쓰지 않으므로 Unsplash 검색도 건너뛴다.
+  const useNotebook = opts?.notebookStyle !== false;
+  const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+  const noteNumber = `No.${String(kstNow.getUTCMonth() + 1).padStart(2, '0')}${String(kstNow.getUTCDate()).padStart(2, '0')}`;
+
+  const backgrounds = useNotebook
+    ? cards.map(() => '')
+    : await Promise.all(cards.map(c => searchBackground(c.imageKeyword)));
+
+  const notebookImages: (string | null)[] = useNotebook
+    ? await Promise.all(
+        cards.map(async (card, i) => {
+          const facts = notebookFactsFromBlocks(card.blocks, i + 1);
+          if (!facts.headline || facts.points.length === 0) return null;
+          const img = await generateNewsNotebookImage({ ...facts, noteNumber, ratio: '4:5' });
+          if (!img) return null;
+          return (await uploadNotebookImage(img.base64, i + 1)) || null;
+        })
+      )
+    : cards.map(() => null);
+
+  console.log(
+    `[NewsCardnews] 노트 이미지 ${notebookImages.filter(Boolean).length}/${cards.length}장 생성`
+  );
 
   // 에디터가 그대로 읽는 PageData 형태
   const pagesData = cards.map((card, i) => ({
     id: String(i + 1),
-    bgImage: backgrounds[i] || '',
-    bgLabel: card.imageKeyword || '배경 이미지',
-    overlay: OVERLAY,
+    bgImage: notebookImages[i] || backgrounds[i] || '',
+    bgLabel: useNotebook ? '손글씨 노트' : card.imageKeyword || '배경 이미지',
+    // 노트 이미지는 그림 한 장이 카드 전체다 — 어둡게 덮으면 글씨가 안 보인다
+    overlay: notebookImages[i] ? '' : useNotebook ? '' : OVERLAY,
+    ratio: '4:5',
+    styleVariant: notebookImages[i] ? 'image' : useNotebook ? 'notebook' : undefined,
+    noteLabel: useNotebook ? '오늘의 뉴스' : undefined,
+    noteNumber: useNotebook ? noteNumber : undefined,
     title: card.title || '',
     subtitle: i === 0 ? (card.body || '') : '',
     layout: 'bottom-left-list',
@@ -252,8 +315,7 @@ ${sourceBlock}`;
     bulletStyle: { fontFamily: 'Noto Sans KR', fontWeight: '600', fontSize: 15, lineHeight: 1.35, color: '#FFFFFF' },
   }));
 
-  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const label = `${kst.getUTCMonth() + 1}/${kst.getUTCDate()}`;
+  const label = `${kstNow.getUTCMonth() + 1}/${kstNow.getUTCDate()}`;
   const name = `[자동] ${label} ${parsed.title || '부동산 뉴스'}`;
 
   const { data: design, error: insErr } = await supabase
