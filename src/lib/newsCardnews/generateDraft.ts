@@ -4,6 +4,7 @@ import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { generateNewsNotebookImage } from '@/lib/notebookImage/generate';
 import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
+import { notebookFactsFromBlocks } from '@/lib/notebookImage/factsFromBlocks';
 
 // 아침 브리핑 본문 → 카드뉴스 5장 "초안"을 만들어 내 보관함(card_designs)에 저장한다.
 // 발행은 하지 않는다. 크론(/api/cron/news-cardnews)과 수동 생성 버튼이 같이 쓴다.
@@ -99,37 +100,6 @@ async function searchBackground(keyword: string): Promise<string> {
   } catch {
     return '';
   }
-}
-
-/**
- * 카드에 쓰인 blocks에서 노트 이미지에 넣을 사실만 뽑는다.
- * blocks가 이미 "뉴스 1건 = 카드 1장" 규칙과 가드레일을 통과한 결과이므로,
- * 여기서 문구를 다시 만들지 않고 그대로 옮기기만 한다.
- */
-function notebookFactsFromBlocks(blocks: SlideBlock[], index: number) {
-  const find = <T extends SlideBlock['type']>(t: T) =>
-    blocks.find(b => b.type === t) as Extract<SlideBlock, { type: T }> | undefined;
-
-  const eyebrow = find('eyebrow')?.text || '';
-  const headlineBlock = find('headline');
-  const headline = [headlineBlock?.text, headlineBlock?.accentText].filter(Boolean).join(' ').trim();
-  const big = find('bigNumber');
-  const stats = find('statGrid');
-
-  return {
-    // "① 청약" 형태에서 번호 기호를 떼고 분야만 남긴다 (번호는 따로 그린다)
-    category: eyebrow.replace(/^[①②③④⑤⑥⑦⑧⑨⑩\d.\s]+/, '').trim() || '뉴스',
-    headline,
-    lead: find('sub')?.text,
-    points: (find('checklist')?.items || []).slice(0, 4),
-    stat: big
-      ? { value: big.value, label: big.caption }
-      : stats?.items?.[0]
-        ? { value: stats.items[0].value, label: stats.items[0].label }
-        : undefined,
-    source: find('sourceNote')?.text,
-    index,
-  };
 }
 
 export async function generateNewsCardnewsDraft(opts?: { force?: boolean; notebookStyle?: boolean }): Promise<DraftResult> {

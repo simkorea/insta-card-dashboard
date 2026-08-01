@@ -814,7 +814,7 @@ function getLayersForPage(page: PageData): CanvasLayerWithSrc[] {
 }
 
 // AI 생성 데이터({ page, title, body, backgroundImage, accent, imageKeyword }[]) → PageData[] 변환
-function cardNewsToPages(raw: { page: number; title: string; body: string; backgroundImage?: string; accent?: string; accentOverride?: string; imageKeyword?: string; blocks?: SlideBlock[]; brandTone?: BrandTone; showFrame?: boolean; blocksOffsetY?: number; titleStyle?: TextStyle; subtitleStyle?: TextStyle; bulletStyle?: TextStyle; }[], theme: any[] = PAGES_DATA): any[] {
+function cardNewsToPages(raw: { page: number; title: string; body: string; backgroundImage?: string; accent?: string; accentOverride?: string; imageKeyword?: string; blocks?: SlideBlock[]; brandTone?: BrandTone; showFrame?: boolean; blocksOffsetY?: number; titleStyle?: TextStyle; subtitleStyle?: TextStyle; bulletStyle?: TextStyle; styleVariant?: PageData['styleVariant']; noteLabel?: string; noteNumber?: string; overlay?: string; }[], theme: any[] = PAGES_DATA): any[] {
   const lastIdx = raw.length - 1;
   return raw.map((card, i) => {
     // 테마 슬롯 매핑: 첫 장은 표지, 마지막 장은 마무리, 나머지는 중간 레이아웃 반복
@@ -837,9 +837,16 @@ function cardNewsToPages(raw: { page: number; title: string; body: string; backg
     const titleStyle = card.titleStyle || base.titleStyle;
     const subtitleStyle = card.subtitleStyle || base.subtitleStyle;
     const bulletStyle = card.bulletStyle || base.bulletStyle;
+    // 손글씨 노트 스타일로 만든 장은 그림 한 장이 카드 전체다.
+    // 어둡게 덮는 오버레이를 그대로 두면 손글씨가 안 보인다.
+    const styleVariant = card.styleVariant;
+    const noteLabel = card.noteLabel;
+    const noteNumber = card.noteNumber;
+    const overlayOverride = card.overlay !== undefined ? { overlay: card.overlay } : {};
+    const noteFields = { styleVariant, noteLabel, noteNumber, ...overlayOverride };
 
     if (i === 0) {
-      return { ...base, id: String(card.page), title: card.title, subtitle: card.body, bullets: undefined, bgImage, accent, accentOverride, imageKeyword, blocks, brandTone, showFrame, blocksOffsetY, titleStyle, subtitleStyle, bulletStyle };
+      return { ...base, id: String(card.page), title: card.title, subtitle: card.body, bullets: undefined, bgImage, accent, accentOverride, imageKeyword, blocks, brandTone, showFrame, blocksOffsetY, titleStyle, subtitleStyle, bulletStyle, ...noteFields };
     }
     const bodyLines = card.body.split('\n').map((l: string) => l.trim()).filter(Boolean);
     return {
@@ -859,6 +866,7 @@ function cardNewsToPages(raw: { page: number; title: string; body: string; backg
       titleStyle,
       subtitleStyle,
       bulletStyle,
+      ...noteFields,
     };
   });
 }

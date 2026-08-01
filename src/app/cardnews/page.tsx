@@ -238,6 +238,10 @@ export default function CardNewsPage() {
   // Settings states
   const [selectedRatio, setSelectedRatio] = useState('4:5');
   const [genStyle, setGenStyle] = useState<'free' | 'origin'>('origin');
+  // 카드 그림체. 'photo' = 기존(사진 배경 + 텍스트), 'notebook' = 손글씨 노트 이미지.
+  // 모든 시작 방식(텍스트/URL/트렌드/완전자동/9단계)이 같은 값을 쓴다.
+  const [cardStyle, setCardStyle] = useState<'photo' | 'notebook'>('photo');
+  const [notebookProgress, setNotebookProgress] = useState('');
   const [slideCountType, setSlideCountType] = useState('auto');
   const [slideCountNumber, setSlideCountNumber] = useState(5);
   const [quickSlideAuto, setQuickSlideAuto] = useState(true);
@@ -1151,7 +1155,13 @@ export default function CardNewsPage() {
       localStorage.removeItem('editingDesign');
       localStorage.removeItem('cardnews_autosave');
       localStorage.removeItem('cardNewsData');
-      const smartPages = applyMyImages(data.pages || [], 'bgImage').map((p: any) => ({ ...p, ratio: selectedRatio }));
+      // 완전자동 파이프라인은 그대로 두고, 만들어진 결과에 그림만 입힌다
+      let autoPages = applyMyImages(data.pages || [], 'bgImage');
+      if (cardStyle === 'notebook') {
+        setSmartStep('손글씨 노트로 그리는 중...');
+        autoPages = await drawNotebookImages(autoPages, 'bgImage');
+      }
+      const smartPages = autoPages.map((p: any) => ({ ...p, ratio: selectedRatio }));
       localStorage.setItem('cardnews_import_templates', JSON.stringify(smartPages));
       window.location.href = '/cardnews/editor';
     } catch (e: any) {
@@ -1159,6 +1169,61 @@ export default function CardNewsPage() {
     } finally {
       setSmartGenerating(false);
       setSmartStep('');
+    }
+  };
+
+  /**
+   * 이미 만들어진 카드에 손글씨 노트 그림을 입힌다.
+   * 카드 문구는 그대로 두고 그림만 바꾸는 구조라, 각 탭의 생성 로직은
+   * 하나도 건드리지 않는다 (완전자동 파이프라인 포함).
+   * 실패한 장은 원래 스타일로 남는다 — 전부 실패해도 생성 자체는 살아있다.
+   */
+  const drawNotebookImages = async <T extends { blocks?: any[] }>(
+    cards: T[],
+    bgField: 'backgroundImage' | 'bgImage'
+  ): Promise<T[]> => {
+    if (cards.length === 0) return cards;
+    setNotebookProgress(`손글씨 노트로 그리는 중... (${cards.length}장, 1~2분 걸립니다)`);
+    try {
+      const res = await fetch('/api/notebook-cards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cards: cards.map(c => ({ blocks: c.blocks })),
+          ratio: selectedRatio,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '노트 이미지 생성 실패');
+
+      const images: { url: string | null; reason?: string }[] = data.images || [];
+      const failed = images.filter(i => !i?.url).length;
+      if (failed === cards.length) {
+        alert(`손글씨 노트 그리기에 실패해 기본 스타일로 만들었습니다. ${images[0]?.reason || ''}`);
+        return cards;
+      }
+      if (failed > 0) {
+        alert(`${cards.length}장 중 ${failed}장은 노트로 그리지 못해 기본 스타일로 남겨뒀습니다.`);
+      }
+
+      return cards.map((card, i) => {
+        const url = images[i]?.url;
+        if (!url) return card;
+        return {
+          ...card,
+          [bgField]: url,
+          // 노트는 그림 한 장이 카드 전체다 — 어둡게 덮으면 손글씨가 안 보인다
+          overlay: '',
+          styleVariant: 'image',
+          noteLabel: '오늘의 노트',
+          noteNumber: data.noteNumber,
+        } as T;
+      });
+    } catch (e: any) {
+      alert(`손글씨 노트 그리기 실패: ${friendlyError(e)} — 기본 스타일로 만들었습니다.`);
+      return cards;
+    } finally {
+      setNotebookProgress('');
     }
   };
 
@@ -1282,14 +1347,19 @@ export default function CardNewsPage() {
           };
         }));
 
+        // 손글씨 노트를 골랐으면 문구는 그대로 두고 그림만 다시 그린다
+        const styledCardNews = cardStyle === 'notebook'
+          ? await drawNotebookImages(updatedCardNews, 'backgroundImage')
+          : updatedCardNews;
+
         // 카드뉴스 텍스트 포맷팅 (기획안 확인용 텍스트)
-        const formattedText = updatedCardNews.map((c: any) => `[${c.page}장 ${c.page === 1 ? '표지' : '본문'}]\n${c.title}\n${c.body}`).join('\n\n');
+        const formattedText = styledCardNews.map((c: any) => `[${c.page}장 ${c.page === 1 ? '표지' : '본문'}]\n${c.title}\n${c.body}`).join('\n\n');
         setPrompt(formattedText);
         setGeneratedBlogPost(data.blogPost);
         setViralHooks(data.viralHooks);
         
         // 에디터에서 바로 쓸 수 있도록 구조화된 원본 데이터 저장 (배경 이미지 포함)
-        localStorage.setItem('cardNewsData', JSON.stringify(updatedCardNews));
+        localStorage.setItem('cardNewsData', JSON.stringify(styledCardNews));
         localStorage.setItem('cardnews_ratio', selectedRatio); // 에디터 캔버스 비율로 사용
         localStorage.setItem('cardNewsBlog', data.blogPost || '');
         localStorage.setItem('cardNewsHooks', JSON.stringify(data.viralHooks || []));
@@ -2377,6 +2447,49 @@ export default function CardNewsPage() {
                     onClick={() => setInputMode('step9')}
                     className={`pb-3 text-sm font-bold border-b-2 transition-colors whitespace-nowrap flex items-center gap-1 ${inputMode === 'step9' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
                   >✨ 9단계 정밀 제작</button>
+                </div>
+
+                {/* 카드 그림체 — 어떤 방식으로 시작하든 똑같이 적용된다 */}
+                <div className="mb-6">
+                  <span className="text-xs font-semibold text-gray-400 block mb-2">카드 스타일</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button
+                      onClick={() => setCardStyle('photo')}
+                      className={`text-left px-4 py-3 rounded-2xl border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] ${
+                        cardStyle === 'photo'
+                          ? 'border-primary-500 bg-primary-50/50'
+                          : 'border-gray-200 hover:border-gray-300 bg-white'
+                      }`}
+                    >
+                      <span className="text-[13px] font-bold text-gray-900 block">📷 기존 이미지로 만들기</span>
+                      <span className="text-[11px] text-gray-500 leading-relaxed block mt-0.5">
+                        사진 배경 위에 텍스트를 얹습니다. 빠르고 지금까지 쓰던 방식입니다.
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => setCardStyle('notebook')}
+                      className={`text-left px-4 py-3 rounded-2xl border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-amber-200 active:scale-[0.99] ${
+                        cardStyle === 'notebook'
+                          ? 'border-amber-500 bg-amber-50/60'
+                          : 'border-gray-200 hover:border-gray-300 bg-white'
+                      }`}
+                    >
+                      <span className="text-[13px] font-bold text-gray-900 block">📓 손글씨 노트로 만들기</span>
+                      <span className="text-[11px] text-gray-500 leading-relaxed block mt-0.5">
+                        실제 노트에 펜으로 쓴 느낌으로 그립니다. 한 장에 20~40초 걸립니다.
+                      </span>
+                    </button>
+                  </div>
+                  {cardStyle === 'notebook' && (
+                    <p className="text-[11px] text-amber-800/80 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-2 leading-relaxed">
+                      카드 문구를 먼저 만든 뒤 그림을 그리므로 5장이면 <b>1~2분</b> 정도 걸립니다.
+                      노트는 그림 한 장이 카드 전체라 <b>올린 이미지와 배경 사진은 쓰이지 않습니다.</b>
+                      그리기에 실패한 장은 기본 스타일로 남고, 에디터에서 언제든 스타일을 바꿀 수 있습니다.
+                    </p>
+                  )}
+                  {notebookProgress && (
+                    <p className="text-[11px] font-semibold text-amber-700 mt-2">{notebookProgress}</p>
+                  )}
                 </div>
 
                 {inputMode === 'text' && (

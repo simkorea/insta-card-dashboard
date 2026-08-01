@@ -192,6 +192,7 @@ export type NewsNotebookFacts = {
   points: string[];     // 핵심 포인트 3~4개
   stat?: { value: string; label?: string };  // 대표 수치(있을 때만)
   source?: string;      // 출처: 연합뉴스
+  noteLabel?: string;   // 태그에 적을 말 (기본: 오늘의 뉴스)
   noteNumber: string;   // No.012
   ratio: string;
 };
@@ -218,7 +219,7 @@ ${f.stat ? `- 가운데에 손그림 테두리 상자. 안에 빨간 큰 손글�
   (각 줄: 빨간 손그림 ☑ 체크박스 + 노란 형광펜으로 칠한 손글씨)
 ${f.points.map(p => `  ☑ ${p}`).join('\n')}
 ${f.source ? `- 우측 하단 작은 글씨: "${f.source}"` : ''}
-- 우측 하단: 빨간 클립으로 집은 크라프트 종이 태그. 위에 "오늘의 뉴스", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
+- 우측 하단: 빨간 클립으로 집은 크라프트 종이 태그. 위에 "${f.noteLabel || '오늘의 뉴스'}", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
 - 좌측 하단: 파란 선으로 그린 간단한 도시 스카이라인, 작은 나무와 구름
 
 [스타일]
