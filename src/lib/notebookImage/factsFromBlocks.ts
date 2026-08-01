@@ -1,4 +1,5 @@
 import type { SlideBlock } from '@/lib/cardnews/blocks';
+import { normalizeHeadlineBlock } from '@/lib/cardnews/normalizeHeadline';
 
 // 이미 만들어진 카드 blocks에서 노트 이미지에 넣을 사실만 뽑는다.
 //
@@ -21,8 +22,12 @@ export function notebookFactsFromBlocks(blocks: SlideBlock[], index: number): No
     blocks.find(b => b.type === t) as Extract<SlideBlock, { type: T }> | undefined;
 
   const eyebrow = find('eyebrow')?.text || '';
-  const headlineBlock = find('headline');
-  const headline = [headlineBlock?.text, headlineBlock?.accentText].filter(Boolean).join(' ').trim();
+  // 강조어가 제목에 이미 들어 있으면 이어붙일 때 두 번 찍힌다.
+  // 생성 라우트에서도 거르지만, 여기로 들어오는 경로가 여럿이라 한 번 더 막는다.
+  const headlineBlock = normalizeHeadlineBlock(
+    find('headline') ?? ({ type: 'headline', text: '' } as SlideBlock)
+  ) as Extract<SlideBlock, { type: 'headline' }>;
+  const headline = [headlineBlock.text, headlineBlock.accentText].filter(Boolean).join(' ').trim();
   const big = find('bigNumber');
   const stats = find('statGrid');
 
@@ -35,10 +40,16 @@ export function notebookFactsFromBlocks(blocks: SlideBlock[], index: number): No
     points = [...badges, ...rows].filter(Boolean).slice(0, 4);
   }
 
+  // "① 청약" 형태에서 번호 기호를 떼고 분야만 남긴다 (번호는 따로 그린다).
+  // 카드뉴스 생성 경로는 라벨을 영문 대문자로 만든다("QUALIFICATION", "H2 APARTMENT").
+  // 손글씨 한글 노트에 영어 대문자가 박히면 어색하므로, 한글이 없는 라벨은
+  // 번역해서 지어내지 말고 아예 빼고 번호만 그린다.
+  const rawCategory = eyebrow.replace(/^[①②③④⑤⑥⑦⑧⑨⑩\d.\s]+/, '').trim();
+  const category = /[가-힣]/.test(rawCategory) ? rawCategory : '';
+
   return {
     index,
-    // "① 청약" 형태에서 번호 기호를 떼고 분야만 남긴다 (번호는 따로 그린다)
-    category: eyebrow.replace(/^[①②③④⑤⑥⑦⑧⑨⑩\d.\s]+/, '').trim() || '오늘의 정보',
+    category,
     headline,
     lead: find('sub')?.text,
     points,

@@ -1,6 +1,7 @@
 import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { callAI } from '@/lib/ai/openrouter';
 import { extractArticle } from '@/lib/extractArticle';
+import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
 import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
@@ -145,6 +146,15 @@ ${sourceFidelityBlock}${languageInstruction}${extraInstructionBlock}
       if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
       else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
       const data = JSON.parse(text);
+      // 강조어가 제목에 이미 들어 있으면 카드에 두 번 찍힌다.
+      // BlockRenderer가 text 뒤에 accentText를 이어붙이는 구조라
+      // "수도권 청약, 지금부터 준비하세요" + "지금부터" → "…준비하세요 지금부터"가 됐다.
+      // 사진 스타일·노트 스타일 양쪽에 똑같이 나타나므로 여기서 한 번에 거른다.
+      if (Array.isArray(data?.cardNews)) {
+        data.cardNews = data.cardNews.map((c: any) =>
+          Array.isArray(c?.blocks) ? { ...c, blocks: normalizeHeadlines(c.blocks) } : c
+        );
+      }
       return NextResponse.json(data);
     } catch {
       console.error('[unified] JSON 파싱 실패. 원본 응답:', text);

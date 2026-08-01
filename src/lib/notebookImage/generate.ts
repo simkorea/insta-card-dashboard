@@ -211,7 +211,7 @@ export function buildNewsNotebookPrompt(f: NewsNotebookFacts): string {
 - 실제 노트를 사진 찍은 듯한 종이 질감과 부드러운 그림자
 
 [내용 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
-- 좌측 상단: 빨간 손그림 동그라미 안에 "${f.index}", 옆에 노란 형광펜으로 칠한 "${f.category}"
+- 좌측 상단: 빨간 손그림 동그라미 안에 "${f.index}"${f.category ? `, 옆에 노란 형광펜으로 칠한 "${f.category}"` : ' (옆에 아무 글자도 넣지 말 것)'}
 - 그 아래 큰 손글씨 제목: "${f.headline}" — 빨간 펜으로 물결 밑줄
 ${f.lead ? `- 제목 아래 작은 손글씨 한 줄: "${f.lead}"` : ''}
 ${f.stat ? `- 가운데에 손그림 테두리 상자. 안에 빨간 큰 손글씨로 "${f.stat.value}"${f.stat.label ? `, 그 아래 작게 "${f.stat.label}"` : ''}` : ''}
