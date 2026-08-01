@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ImagePlus, ChevronLeft, Search, RefreshCw, MessageSquare, Settings, ChevronUp, ChevronDown, UploadCloud, Trash2, Pencil, Loader2, Calendar, Clock, Copy, Check, X, Send, RefreshCcw, Images, Sparkles, Wand2, Globe, Lock, Download, Upload, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { friendlyError } from '@/lib/errors';
 import { STEP9_PRESETS, recommendPreset } from '@/lib/cardnews/step9-presets';
@@ -1470,21 +1471,23 @@ export default function CardNewsPage() {
         </div>
       )}
 
-      {/* Top Banner */}
-      <div className="flex justify-between items-center px-4 md:px-6 py-3 bg-white border-b border-gray-100">
-        <div className="text-primary-600 font-semibold text-xs flex items-center gap-2">
-          <div className="w-1.5 h-1.5 rounded-full bg-primary-600" /> 무료 체험 D-2
-        </div>
-        <div className="flex gap-1.5 md:gap-2">
-          <button className="hidden sm:flex px-3 py-1.5 text-xs font-semibold text-gray-600 bg-yellow-50 border border-yellow-100 rounded-md items-center gap-1">
-            <span className="text-yellow-500">⭐</span> 퀘스트 0/3
-          </button>
-          <button className="hidden md:flex px-3 py-1.5 text-xs font-semibold text-primary-600 bg-primary-50 border border-primary-100 rounded-md items-center gap-1">
-            <MessageSquare size={14} /> 1:1 온보딩
-          </button>
-          <button className="px-3 py-1.5 text-xs font-bold bg-primary-600 text-white rounded-md hover:bg-primary-700 shadow-sm">연동하기</button>
-          <button className="hidden sm:block px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-md text-gray-600 hover:bg-gray-50">요금제</button>
-        </div>
+      {/* Top Banner
+          예전에는 '퀘스트 0/3', '1:1 온보딩', '요금제' 버튼과 '무료 체험 D-2' 배지가 있었는데
+          전부 뒤에 아무 기능이 없었다(퀘스트·온보딩 기능 없음, 요금제 페이지 없음,
+          플랜/크레딧 테이블 없음 — 날짜도 하드코딩이라 매일 D-2로 떴다).
+          눌러도 반응 없는 버튼과 틀린 날짜를 두느니 지우고, 실제로 동작하는 것만 남긴다.
+          판매 단계에서 요금제·플랜이 실제로 생기면 그때 다시 만든다. */}
+      <div className="flex justify-end items-center px-4 md:px-6 py-3 bg-white border-b border-gray-100">
+        <Link
+          href="/sns-settings"
+          className={`px-3 py-1.5 text-xs font-bold rounded-md shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-primary-300 active:scale-[0.98] ${
+            igSettings
+              ? 'bg-green-50 text-green-700 border border-green-200 hover:bg-green-100'
+              : 'bg-primary-600 text-white hover:bg-primary-700'
+          }`}
+        >
+          {igSettings ? `@${igSettings.username} 연동됨` : 'SNS 연동하기'}
+        </Link>
       </div>
 
       <div className="px-4 md:px-10 py-4 md:py-6 max-w-[1200px] mx-auto w-full">

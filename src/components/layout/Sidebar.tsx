@@ -254,15 +254,22 @@ export default function Sidebar() {
         <Link href="/sns-settings" className="w-full flex items-center justify-center gap-2 py-2 mb-2 rounded-lg border border-primary-200 text-primary-600 text-xs font-bold hover:bg-primary-50 bg-white shadow-sm">
           <Share2 size={14} /> SNS 계정 연동·관리
         </Link>
-        <button className="w-full flex items-center justify-center gap-2 py-2 mb-3 rounded-lg bg-gray-900 text-white text-xs font-bold hover:bg-black shadow-sm">
-          <Gift size={14} /> 친구 초대하고 혜택받기
-        </button>
+        {/* 예전에는 onClick이 없어 눌러도 아무 일도 안 일어났다.
+            실제 초대 기능은 /workspace(팀 워크스페이스)에 있으므로 그리로 보낸다. */}
+        <Link
+          href="/workspace"
+          className="w-full flex items-center justify-center gap-2 py-2 mb-3 rounded-lg bg-gray-900 text-white text-xs font-bold hover:bg-black active:scale-[0.99] shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400"
+        >
+          <Gift size={14} /> 팀원 초대하기
+        </Link>
 
         {user && (
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
+              {/* 'free-trial · AI 60'은 하드코딩된 문구였다. 플랜·크레딧을
+                  담는 테이블 자체가 없어 실제 상태와 무관한 값이라 지웠다.
+                  요금제가 실제로 생기면 그때 진짜 값을 넣는다. */}
               <p className="text-[10px] text-gray-400 truncate">{user.email}</p>
-              <p className="text-[10px] text-gray-400">free-trial · AI 60</p>
             </div>
             <button
               onClick={handleLogout}
