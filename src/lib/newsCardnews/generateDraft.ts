@@ -6,7 +6,8 @@ import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
 import { notebookFactsFromBlocks } from '@/lib/notebookImage/factsFromBlocks';
 
-// 아침 브리핑 본문 → 카드뉴스 5장 "초안"을 만들어 내 보관함(card_designs)에 저장한다.
+// 아침 브리핑 본문 → 카드뉴스 "초안"을 만들어 내 보관함(card_designs)에 저장한다.
+// 장수는 그날 쓸 만한 기사 수를 따라간다 (3~10장).
 // 발행은 하지 않는다. 크론(/api/cron/news-cardnews)과 수동 생성 버튼이 같이 쓴다.
 
 type GeneratedCard = {
@@ -24,7 +25,11 @@ export type DraftResult =
 
 const OVERLAY = 'linear-gradient(to top, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.40) 100%)';
 const ACCENT = '#E9B949';
-const SLIDE_COUNT = 5;
+// 장수는 그날 쓸 만한 기사 수에 맞춘다.
+// 예전에는 5장 고정이라 관련 기사가 8건 나온 날에도 3건이 그냥 버려졌다.
+const MAX_SLIDES = 10;  // 인스타 캐러셀 한도
+const MIN_SLIDES = 3;   // 이보다 적으면 기사 배정 없이 요약본으로 만든다
+const FALLBACK_SLIDE_COUNT = 5; // 원본 기사가 없어 요약본으로 만들 때
 
 type NewsItem = { title: string; link?: string; description?: string };
 
@@ -46,6 +51,10 @@ const DROP_PATTERNS = [
   '사망', '숨져', '부상', '화재', '붕괴', '사고', '실종',
   '무상임대', '취약계층', '기부', '후원', '봉사',
   '북한', '트럼프', '관세', '증시', '코스피', '코스닥', '주가',
+  // 주식 기사가 '대출'·'매매' 때문에 부동산으로 잡히는 걸 막는다.
+  // 실제로 "하락장서 던진 개미들 비명…'빚투' 반대매매엔 한숨만"이 3점을 받아
+  // 분양 계정 카드뉴스 후보로 올라왔다.
+  '개미', '빚투', '반대매매', '곱버스', '하락장', '반도체', '공모주', '상장',
   // 부동산 기사로 분류되지만 분양 콘텐츠와는 무관한 것들
   '산단', '산업단지', '공항', '활주로', '건설근로자', '공제회',
   '아카데미', '폭염', '건설현장', '중대재해', '안전점검', '해외',
@@ -102,7 +111,7 @@ async function searchBackground(keyword: string): Promise<string> {
   }
 }
 
-export async function generateNewsCardnewsDraft(opts?: { force?: boolean; notebookStyle?: boolean }): Promise<DraftResult> {
+export async function generateNewsCardnewsDraft(opts?: { force?: boolean; notebookStyle?: boolean; maxSlides?: number }): Promise<DraftResult> {
   const supabase = serviceClient();
 
   const { data: briefing, error: bErr } = await supabase
@@ -123,8 +132,12 @@ export async function generateNewsCardnewsDraft(opts?: { force?: boolean; notebo
   // 요약문만 주면 AI가 여러 기사를 섞어 새로운 이야기를 지어내서
   // 원문에 없는 내용이 나왔다.
   const rawItems = Array.isArray(briefing?.news_items) ? (briefing!.news_items as NewsItem[]) : [];
-  const picked = pickRelevantNews(rawItems, SLIDE_COUNT);
-  const hasItems = picked.length >= 3;
+  // 쓸 만한 기사가 나온 만큼 장을 만든다 (최대 10장).
+  // opts.maxSlides로 그날만 줄여 부를 수도 있다.
+  const cap = Math.min(Math.max(Number(opts?.maxSlides) || MAX_SLIDES, MIN_SLIDES), MAX_SLIDES);
+  const picked = pickRelevantNews(rawItems, cap);
+  const hasItems = picked.length >= MIN_SLIDES;
+  console.log(`[NewsCardnews] 수집 ${rawItems.length}건 → 사용 ${picked.length}건 (최대 ${cap}장)`);
 
   // 같은 브리핑으로 이미 만든 초안이 있으면 중복 생성하지 않는다
   if (!opts?.force) {
@@ -234,7 +247,7 @@ ${sourceBlock}`;
 
   const cards = (parsed.cards || [])
     .filter(c => Array.isArray(c.blocks) && c.blocks.length > 0)
-    .slice(0, hasItems ? picked.length : SLIDE_COUNT)
+    .slice(0, hasItems ? picked.length : FALLBACK_SLIDE_COUNT)
     // 강조어가 제목에 이미 들어 있으면 카드에 두 번 찍힌다 — 저장 전에 정리
     .map(c => ({ ...c, blocks: normalizeHeadlines(c.blocks) }));
   if (cards.length === 0) return { ok: false, error: '생성된 슬라이드가 없습니다.', status: 502 };
