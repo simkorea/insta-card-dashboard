@@ -177,6 +177,7 @@ export default function BrandKitPage() {
   const [kit, setKit] = useState<BrandKit>(DEFAULT_KIT);
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [logoPreview, setLogoPreview] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -248,6 +249,31 @@ export default function BrandKitPage() {
       setKit(prev => ({ ...prev, logo_url: url }));
     };
     reader.readAsDataURL(file);
+  };
+
+  // 초기화는 화면 값만 되돌리고 저장은 하지 않았다. 그래서 누른 뒤 새로고침하면
+  // 예전 설정이 그대로 돌아와 "눌러도 안 된다"로 보였다. 확인창도 없어서
+  // 실수로 누르면 브랜드 설정이 통째로 날아갔다.
+  const handleReset = async () => {
+    if (!confirm('브랜드 설정을 기본값으로 되돌릴까요?\n브랜드명·로고·색상·폰트가 모두 초기화되고 바로 저장됩니다.')) return;
+    setResetting(true);
+    try {
+      const res = await fetch('/api/brand-kit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(DEFAULT_KIT),
+      });
+      if (!res.ok) throw new Error('저장에 실패했습니다.');
+      setKit(DEFAULT_KIT);
+      setLogoPreview('');
+      localStorage.removeItem('brand_kit');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e: any) {
+      alert('초기화에 실패했습니다: ' + (e?.message || '알 수 없는 오류'));
+    } finally {
+      setResetting(false);
+    }
   };
 
   const handleSave = async () => {
@@ -905,9 +931,11 @@ export default function BrandKitPage() {
         </div>
 
         <div className="flex items-center justify-between pb-8">
-          <button onClick={() => { setKit(DEFAULT_KIT); setLogoPreview(''); }}
-            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600">
-            <RotateCcw size={13} /> 초기화
+          <button
+            onClick={handleReset}
+            disabled={resetting}
+            className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-gray-600 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-gray-300 rounded-lg px-1.5 py-1 transition-colors">
+            <RotateCcw size={13} /> {resetting ? '초기화 중...' : '초기화'}
           </button>
           <Link href="/cardnews" className="text-sm text-primary-600 font-semibold hover:underline">카드뉴스 에디터로 이동 →</Link>
         </div>
