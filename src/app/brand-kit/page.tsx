@@ -279,14 +279,22 @@ export default function BrandKitPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await fetch('/api/brand-kit', {
+      // 예전에는 catch를 비워둬서 서버 저장이 500으로 실패해도 '저장됨'이 떴다.
+      // 실제로 RLS 때문에 한 번도 저장되지 않고 있었는데 화면만 성공처럼 보였다.
+      const res = await fetch('/api/brand-kit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brand_name: kit.brand_name, primary_color: kit.primary_color, secondary_color: kit.secondary_color, font_family: kit.font_family, logo_url: kit.logo_url }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `저장에 실패했습니다 (${res.status})`);
+      }
       localStorage.setItem('brand_kit', JSON.stringify({ logo: kit.logo_url, color: kit.primary_color, secondary_color: kit.secondary_color, font_family: kit.font_family, name: kit.brand_name }));
       setSaved(true); setTimeout(() => setSaved(false), 2000);
-    } catch {}
+    } catch (e: any) {
+      alert('브랜드킷 저장에 실패했습니다: ' + (e?.message || '알 수 없는 오류'));
+    }
     setSaving(false);
   };
 

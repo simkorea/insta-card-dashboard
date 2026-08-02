@@ -772,6 +772,13 @@ export default function CardNewsPage() {
     finally { setIsLoadingInsights(false); }
   };
 
+  // 헤더의 연동 배지가 어느 탭에서도 맞게 뜨도록 처음에 한 번 불러온다.
+  // 예전에는 예약 발행·성과 분석 탭을 열 때만 조회해서, 기본 탭에서는
+  // 실제로 연동돼 있어도 계속 '연동하기'로 보였다.
+  useEffect(() => {
+    fetchIgSettings();
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'schedule') {
       fetchScheduledPosts();
