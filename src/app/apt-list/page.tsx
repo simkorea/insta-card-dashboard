@@ -2,11 +2,28 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Loader2, ArrowRight, ExternalLink } from 'lucide-react';
+import { Loader2, ArrowRight, ExternalLink, Search, ClipboardPaste } from 'lucide-react';
+import { SIGUNGU, SIDO_LIST } from '@/lib/aptList/lawdCodes';
 
-type Preview = { name: string; region: string; pyeong?: number; priceText?: string; builtYear?: number };
+type Preview = { name: string; region: string; pyeong?: number; priceText?: string; builtYear?: number; areaM2?: number; priceManwon?: number; floor?: number };
+
+/** 같은 단지라도 평형이 다르면 다른 카드가 되므로 둘을 합쳐 키로 쓴다 */
+const keyOf = (r: Preview) => `${r.name}__${r.pyeong ?? ''}`;
 
 export default function AptListPage() {
+  // 입력 방식: API 조회(기본) / 표 붙여넣기.
+  // 붙여넣기를 남겨두는 이유 — 인증키가 죽거나 하루 한도를 넘겨도 계속 만들 수 있어야 한다.
+  const [source, setSource] = useState<'api' | 'paste'>('api');
+  const [sido, setSido] = useState('경기');
+  const [lawdCd, setLawdCd] = useState('41171');
+  const [months, setMonths] = useState(3);
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [looking, setLooking] = useState(false);
+  const [lookupError, setLookupError] = useState('');
+  const [found, setFound] = useState<Preview[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
   const [raw, setRaw] = useState('');
   const [title, setTitle] = useState('');
   const [limit, setLimit] = useState(8);
@@ -17,6 +34,52 @@ export default function AptListPage() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<{ designId: string; slides: number; complexes: number; parsedTotal: number; preview: Preview[]; aiImages?: number; needsReview?: { title: string; note?: string }[] } | null>(null);
 
+  const lookup = async () => {
+    setLooking(true);
+    setLookupError('');
+    setFound(null);
+    setPicked(new Set());
+    try {
+      const res = await fetch('/api/apt-list/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lawdCd,
+          months,
+          minPrice: minPrice ? Number(minPrice) * 10000 : undefined,
+          maxPrice: maxPrice ? Number(maxPrice) * 10000 : undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setLookupError(json.error || '조회에 실패했습니다.');
+        return;
+      }
+      const records: Preview[] = json.records || [];
+      setFound(records);
+      // 비싼 순으로 이미 정렬돼 있으므로 앞에서 limit개를 미리 골라둔다
+      setPicked(new Set(records.slice(0, limit).map(keyOf)));
+    } catch (e: any) {
+      setLookupError(e?.message || '오류가 발생했습니다.');
+    } finally {
+      setLooking(false);
+    }
+  };
+
+  /**
+   * 고른 단지를 기존 붙여넣기 파서가 읽는 표 형식으로 바꾼다.
+   * 카드 생성 경로를 하나로 유지하려는 것 — API로 왔든 붙여넣었든
+   * 그 뒤 과정은 완전히 같아야 검증 부담이 늘지 않는다.
+   */
+  const pickedAsTable = (): string => {
+    const rows = (found || []).filter(r => picked.has(keyOf(r)));
+    const header = '시군구	단지명	전용면적(㎡)	거래금액(만원)	층	건축년도';
+    const body = rows.map(r =>
+      [r.region, r.name, r.areaM2 ?? '', r.priceManwon ?? '', r.floor ?? '', r.builtYear ?? ''].join('	')
+    );
+    return [header, ...body].join('\n');
+  };
+
   const submit = async () => {
     setLoading(true);
     setError('');
@@ -25,7 +88,7 @@ export default function AptListPage() {
       const res = await fetch('/api/apt-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw, title, limit, noteNumber, ratio, useAiImage }),
+        body: JSON.stringify({ raw: source === 'api' ? pickedAsTable() : raw, title, limit, noteNumber, ratio, useAiImage }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -47,7 +110,163 @@ export default function AptListPage() {
         실거래가 표를 붙여넣으면 한 장에 한 단지씩, 손글씨 노트 스타일 카드뉴스를 만들어 보관함에 저장합니다.
       </p>
 
+      {/* 입력 방식 — API 조회가 기본, 붙여넣기는 대비책으로 남긴다 */}
+      <div className="flex gap-2 mb-5">
+        <button
+          onClick={() => setSource('api')}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] ${
+            source === 'api' ? 'border-primary-500 bg-primary-50/50 text-primary-700' : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+          }`}
+        >
+          <Search size={14} /> 지역 선택해서 불러오기
+        </button>
+        <button
+          onClick={() => setSource('paste')}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl text-[13px] font-bold border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] ${
+            source === 'paste' ? 'border-primary-500 bg-primary-50/50 text-primary-700' : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
+          }`}
+        >
+          <ClipboardPaste size={14} /> 표 붙여넣기
+        </button>
+      </div>
+
+      {source === 'api' && (
+        <div className="rounded-2xl border border-gray-200 p-4 mb-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <div>
+              <label className="text-[12px] font-bold text-gray-700 mb-1.5 block">시·도</label>
+              <select
+                value={sido}
+                onChange={e => {
+                  setSido(e.target.value);
+                  const first = SIGUNGU.find(s => s.sido === e.target.value);
+                  if (first) setLawdCd(first.code);
+                }}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500 bg-white"
+              >
+                {SIDO_LIST.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[12px] font-bold text-gray-700 mb-1.5 block">시·군·구</label>
+              <select
+                value={lawdCd}
+                onChange={e => setLawdCd(e.target.value)}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500 bg-white"
+              >
+                {SIGUNGU.filter(s => s.sido === sido).map(s => (
+                  <option key={s.code} value={s.code}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-[12px] font-bold text-gray-700 mb-1.5 block">기간</label>
+              <select
+                value={months}
+                onChange={e => setMonths(Number(e.target.value))}
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500 bg-white"
+              >
+                <option value={1}>최근 1개월</option>
+                <option value={3}>최근 3개월</option>
+                <option value={6}>최근 6개월</option>
+                <option value={12}>최근 1년</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[12px] font-bold text-gray-700 mb-1.5 block">가격대 (억)</label>
+              <div className="flex items-center gap-1">
+                <input
+                  value={minPrice}
+                  onChange={e => setMinPrice(e.target.value)}
+                  placeholder="4"
+                  inputMode="decimal"
+                  className="w-full min-w-0 px-2 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500"
+                />
+                <span className="text-gray-400 text-sm shrink-0">~</span>
+                <input
+                  value={maxPrice}
+                  onChange={e => setMaxPrice(e.target.value)}
+                  placeholder="7"
+                  inputMode="decimal"
+                  className="w-full min-w-0 px-2 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={lookup}
+            disabled={looking}
+            className="w-full py-2.5 bg-gray-900 text-white rounded-xl font-bold text-sm hover:bg-black focus:outline-none focus:ring-2 focus:ring-gray-400 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          >
+            {looking ? <><Loader2 size={15} className="animate-spin" /> 실거래가 불러오는 중...</> : <><Search size={15} /> 실거래가 불러오기</>}
+          </button>
+
+          <p className="text-[11px] text-gray-400 mt-2">
+            국토교통부 실거래가 API에서 직접 가져옵니다. 가격·평형·연식은 이 데이터만 쓰고, AI는 장점 문구만 씁니다.
+          </p>
+
+          {lookupError && (
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 mt-3">{lookupError}</div>
+          )}
+
+          {found && found.length === 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[13px] text-amber-800 mt-3">
+              조건에 맞는 거래가 없습니다. 기간을 늘리거나 가격대를 넓혀보세요.
+            </div>
+          )}
+
+          {found && found.length > 0 && (
+            <div className="mt-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[12px] font-bold text-gray-700">
+                  {found.length}개 단지 · <span className="text-primary-600">{picked.size}개 선택됨</span>
+                </p>
+                <button
+                  onClick={() => setPicked(new Set(found.slice(0, limit).map(keyOf)))}
+                  className="text-[11px] text-gray-500 hover:text-gray-800 underline focus:outline-none"
+                >
+                  비싼 순 {limit}개로 다시 고르기
+                </button>
+              </div>
+              <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-[320px] overflow-y-auto">
+                {found.map(r => {
+                  const k = keyOf(r);
+                  const on = picked.has(k);
+                  return (
+                    <label
+                      key={k}
+                      className={`flex items-center gap-2.5 px-3 py-2 cursor-pointer text-[12px] ${on ? 'bg-primary-50/40' : 'hover:bg-gray-50'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={on}
+                        onChange={() => {
+                          const next = new Set(picked);
+                          if (on) next.delete(k); else next.add(k);
+                          setPicked(next);
+                        }}
+                        className="w-4 h-4 accent-primary-600 cursor-pointer shrink-0"
+                      />
+                      <span className="font-bold text-gray-800 shrink-0">{r.name}</span>
+                      <span className="text-gray-500 truncate">
+                        {[r.region, r.pyeong && `전용 ${r.pyeong}평`, r.priceText, r.builtYear && `${r.builtYear}년식`]
+                          .filter(Boolean).join(' · ')}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1.5">
+                체크한 단지가 순서대로 카드가 됩니다. 아래에서 제목·스타일을 정하고 만들기를 누르세요.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 가져오는 방법 안내 */}
+      {source === 'paste' && (
       <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4 mb-5">
         <p className="text-[13px] font-bold text-blue-900 mb-2">실거래가 표 가져오는 방법</p>
         <ol className="text-[12px] text-blue-800/90 leading-relaxed list-decimal pl-4 space-y-0.5">
@@ -69,6 +288,7 @@ export default function AptListPage() {
           가격·평형·연식은 붙여넣은 실거래 데이터만 사용합니다. AI는 장점 문구만 씁니다.
         </p>
       </div>
+      )}
 
       <div className="space-y-4">
         <div>
@@ -115,6 +335,7 @@ export default function AptListPage() {
           </div>
         </div>
 
+        {source === 'paste' && (
         <div>
           <label className="text-[12px] font-bold text-gray-700 mb-1.5 block">실거래가 표 붙여넣기</label>
           <textarea
@@ -128,6 +349,7 @@ export default function AptListPage() {
             헤더 줄(단지명·거래금액 등)을 함께 붙여넣어 주세요. 같은 단지·같은 평형은 대표 거래 1건만 사용합니다.
           </p>
         </div>
+        )}
 
         {/* 카드 스타일 */}
         <div className="rounded-xl border border-gray-200 p-3">
@@ -151,7 +373,7 @@ export default function AptListPage() {
 
         <button
           onClick={submit}
-          disabled={loading || raw.trim().length < 20}
+          disabled={loading || (source === 'api' ? picked.size === 0 : raw.trim().length < 20)}
           className="w-full py-3 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-300 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
         >
           {loading ? <><Loader2 size={15} className="animate-spin" /> 만드는 중...</> : '카드뉴스 만들기'}
