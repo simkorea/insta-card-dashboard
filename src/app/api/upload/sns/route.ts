@@ -311,6 +311,76 @@ async function waitForContainer(
   return { ok: false, error: `이미지 처리가 제한 시간 안에 끝나지 않았습니다 (마지막 상태: ${last || '알 수 없음'})` };
 }
 
+/**
+ * 릴스(영상) 발행.
+ *
+ * 이미지와 결정적으로 다른 점: Meta가 영상을 트랜스코딩하는 데 수십 초~수 분이
+ * 걸린다. 라우트 제한(maxDuration) 안에 못 끝나는 경우가 정상적으로 발생하므로,
+ * 실패로 처리하지 않고 컨테이너 id를 돌려줘서 나중에 발행을 마무리할 수 있게 한다.
+ * (컨테이너는 24시간 유효하다)
+ */
+async function uploadReelToInstagram(
+  account: { access_token: string; platform_user_id: string } | null,
+  videoUrl: string,
+  caption: string,
+  coverUrl?: string
+): Promise<{ success: boolean; url?: string; error?: string; pendingContainerId?: string }> {
+  if (!account?.access_token || !account?.platform_user_id) {
+    return { success: false, error: 'Instagram 계정이 연동되지 않았습니다. SNS 설정에서 먼저 연동하세요.' };
+  }
+  const { access_token, platform_user_id: ig_user_id } = account;
+  const authHeader = { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' };
+
+  try {
+    const body: Record<string, unknown> = {
+      media_type: 'REELS',
+      video_url: toProxyUrl(videoUrl),
+      caption,
+    };
+    if (coverUrl) body.cover_url = toProxyUrl(coverUrl);
+
+    const created = await createContainerWithRetry(ig_user_id, authHeader, body);
+    if (!created.id) return { success: false, error: `Instagram 릴스: ${created.error}` };
+
+    // 영상은 오래 걸린다 — 남은 예산만큼만 기다리고, 못 끝나면 이어서 할 수 있게 넘긴다
+    const st = await waitForContainer(created.id, authHeader, Date.now() + 80000);
+    if (!st.ok) {
+      if (/제한 시간/.test(st.error || '')) {
+        return {
+          success: false,
+          pendingContainerId: created.id,
+          error: '영상 변환이 아직 진행 중입니다. 잠시 후 "발행 마무리"를 눌러주세요.',
+        };
+      }
+      return { success: false, error: `Instagram 릴스 ${st.error}` };
+    }
+
+    return await publishContainer(ig_user_id, authHeader, created.id);
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
+
+/** 준비된 컨테이너를 실제로 발행한다 (이미지·릴스 공통) */
+async function publishContainer(
+  igUserId: string,
+  headers: Record<string, string>,
+  containerId: string
+): Promise<{ success: boolean; url?: string; error?: string }> {
+  const res = await fetch(`${IG_API}/${igUserId}/media_publish`, {
+    method: 'POST', headers,
+    body: JSON.stringify({ creation_id: containerId }),
+  });
+  const data = await res.json();
+  if (data.error) return { success: false, error: `Instagram 발행 실패: ${data.error.message}` };
+  // permalink를 따로 조회한다. 발행 id를 그대로 URL에 넣으면 열리지 않는다.
+  try {
+    const info = await (await fetch(`${IG_API}/${data.id}?fields=permalink`, { headers })).json();
+    if (info.permalink) return { success: true, url: info.permalink };
+  } catch { /* permalink 조회 실패는 발행 성공에 영향 없음 */ }
+  return { success: true, url: 'https://www.instagram.com/' };
+}
+
 async function uploadToInstagram(
   account: { access_token: string; platform_user_id: string } | null,
   imageUrls: string[],
@@ -398,13 +468,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '로그인이 필요합니다' }, { status: 401 });
     }
 
-    const { imageUrls, caption, platforms } = await req.json() as {
-      imageUrls: string[];
+    const { imageUrls, videoUrl, coverUrl, finishContainerId, caption, platforms } = await req.json() as {
+      imageUrls?: string[];
+      videoUrl?: string;        // 릴스: 올려둔 MP4 공개 주소
+      coverUrl?: string;        // 릴스 표지(선택)
+      finishContainerId?: string; // 변환이 늦어 미뤄둔 컨테이너를 마저 발행할 때
       caption: string;
       platforms: string[];
     };
 
-    if (!imageUrls?.length) return NextResponse.json({ error: '이미지 URL이 없습니다' }, { status: 400 });
+    const isVideo = Boolean(videoUrl || finishContainerId);
+    if (!isVideo && !imageUrls?.length) {
+      return NextResponse.json({ error: '이미지 URL이 없습니다' }, { status: 400 });
+    }
 
     // 현재 로그인한 사용자의 SNS 계정 토큰 조회
     const { data: snsRows } = await supabase
@@ -423,10 +499,26 @@ export async function POST(req: NextRequest) {
       platforms.map(async (platform) => {
         switch (platform) {
           case 'threads':
-            results.threads = await uploadToThreads(accounts.threads ?? null, imageUrls, caption);
+            results.threads = isVideo
+              ? { success: false, error: 'Threads 영상 업로드는 아직 지원하지 않습니다.' }
+              : await uploadToThreads(accounts.threads ?? null, imageUrls!, caption);
             break;
           case 'instagram':
-            results.instagram = await uploadToInstagram(accounts.instagram ?? null, imageUrls, caption);
+            if (finishContainerId) {
+              // 앞서 변환이 안 끝나 미뤄둔 릴스를 마저 발행한다
+              const acc = accounts.instagram;
+              results.instagram = acc
+                ? await publishContainer(
+                    acc.platform_user_id,
+                    { Authorization: `Bearer ${acc.access_token}`, 'Content-Type': 'application/json' },
+                    finishContainerId
+                  )
+                : { success: false, error: 'Instagram 계정이 연동되지 않았습니다.' };
+            } else if (videoUrl) {
+              results.instagram = await uploadReelToInstagram(accounts.instagram ?? null, videoUrl, caption, coverUrl);
+            } else {
+              results.instagram = await uploadToInstagram(accounts.instagram ?? null, imageUrls!, caption);
+            }
             break;
           case 'tiktok':
             // results.tiktok = await uploadToTikTok(accounts.tiktok ?? null, imageUrls, caption);
