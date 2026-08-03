@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase-server';
 
-export const maxDuration = 60;
+export const maxDuration = 120; // 캐러셀 10장은 컨테이너 처리 대기가 길어질 수 있다
 
 const IG_API = 'https://graph.instagram.com/v21.0';
 const THREADS_API = 'https://graph.threads.net/v1.0';
@@ -248,6 +248,69 @@ async function uploadToTikTok(
 
 // ── Instagram ─────────────────────────────────────────────────────────────────
 
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Meta는 멀쩡한 요청에도 가끔 일시적 오류("Fatal" 등)를 돌려준다.
+ * 실제로 10장짜리 캐러셀 업로드가 하위 컨테이너 단계에서 "Fatal"로 실패했는데,
+ * 곧바로 같은 이미지·같은 토큰으로 다시 시도하니 10장 모두 성공했다.
+ * 한 장이라도 실패하면 업로드 전체가 날아가므로 장별로 재시도한다.
+ */
+const TRANSIENT = /fatal|unknown error|temporarily|try again|internal|timeout/i;
+
+async function createContainerWithRetry(
+  igUserId: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown>,
+  attempts = 3
+): Promise<{ id?: string; error?: string }> {
+  let last = '알 수 없는 오류';
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetch(`${IG_API}/${igUserId}/media`, {
+        method: 'POST',
+        headers,
+        // media_type 명시 필수 — 미설정 시 "Only photo or video" 오류 발생
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (data.id) return { id: data.id };
+      last = data.error?.message || '컨테이너 ID를 받지 못했습니다';
+      // 이미지가 잘못됐거나 권한이 없는 건 다시 해도 같으므로 즉시 포기한다
+      if (!TRANSIENT.test(last)) return { error: last };
+    } catch (e: any) {
+      last = e?.message || '네트워크 오류';
+    }
+    if (i < attempts - 1) await sleep(1500 * (i + 1));
+  }
+  return { error: last };
+}
+
+/**
+ * 컨테이너가 처리될 때까지 기다린다.
+ * 예전에는 고정 2초 뒤 한 번만 확인해서, 10장짜리처럼 오래 걸리는 건
+ * 멀쩡한데도 "이미지 처리 중입니다. 잠시 후 다시 시도하세요"로 실패 처리됐다.
+ */
+async function waitForContainer(
+  containerId: string,
+  headers: Record<string, string>,
+  deadline: number
+): Promise<{ ok: boolean; error?: string }> {
+  let last = '';
+  while (Date.now() < deadline) {
+    const res = await fetch(`${IG_API}/${containerId}?fields=status_code,status`, { headers });
+    const data = await res.json();
+    const code = data.status_code;
+    if (code === 'FINISHED') return { ok: true };
+    if (code === 'ERROR' || code === 'EXPIRED') {
+      return { ok: false, error: `이미지 처리 실패 (${code}${data.status ? `: ${data.status}` : ''})` };
+    }
+    last = code || '';
+    await sleep(2500);
+  }
+  return { ok: false, error: `이미지 처리가 제한 시간 안에 끝나지 않았습니다 (마지막 상태: ${last || '알 수 없음'})` };
+}
+
 async function uploadToInstagram(
   account: { access_token: string; platform_user_id: string } | null,
   imageUrls: string[],
@@ -266,28 +329,39 @@ async function uploadToInstagram(
     let containerId: string;
 
     if (urls.length === 1) {
-      const res = await fetch(`${IG_API}/${ig_user_id}/media`, {
-        method: 'POST', headers: authHeader,
-        body: JSON.stringify({ image_url: urls[0], caption, media_type: 'IMAGE' }),
+      // 단일 이미지는 캡션을 컨테이너에 같이 넣는다
+      const single = await createContainerWithRetry(ig_user_id, authHeader, {
+        image_url: urls[0], caption, media_type: 'IMAGE',
       });
-      const data = await res.json();
-      if (data.error) return { success: false, error: `Instagram: ${data.error.message} (code:${data.error.code})` };
-      containerId = data.id;
-      await new Promise(r => setTimeout(r, 3000));
+      if (!single.id) return { success: false, error: `Instagram: ${single.error}` };
+      containerId = single.id;
     } else {
       const childResults = await Promise.all(
         urls.map(url =>
-          fetch(`${IG_API}/${ig_user_id}/media`, {
-            method: 'POST', headers: authHeader,
-            // media_type 명시 필수 — 미설정 시 "Only photo or video" 오류 발생
-            body: JSON.stringify({ image_url: url, is_carousel_item: true, media_type: 'IMAGE' }),
-          }).then(r => r.json())
+          createContainerWithRetry(ig_user_id, authHeader, {
+            image_url: url, is_carousel_item: true, media_type: 'IMAGE',
+          })
         )
       );
-      const failed = childResults.find(d => d.error);
-      if (failed) return { success: false, error: `Instagram 하위 컨테이너 오류: ${failed.error.message}` };
+      const failed = childResults.filter(d => !d.id);
+      if (failed.length > 0) {
+        return {
+          success: false,
+          error: `Instagram: ${urls.length}장 중 ${failed.length}장을 올리지 못했습니다 — ${failed[0].error}`,
+        };
+      }
 
-      const childIds = childResults.map(d => d.id).filter(Boolean);
+      // 자식들이 다 처리돼야 캐러셀이 만들어진다. 예전에는 확인하지 않고
+      // 바로 캐러셀을 만들어서 간헐적으로 실패했다.
+      // 라우트 제한(maxDuration)이 있으므로 하나씩이 아니라 함께 기다리고,
+      // 전체 대기 예산을 공유한다.
+      const childStates = await Promise.all(
+        childResults.map(c => waitForContainer(c.id!, authHeader, Date.now() + 35000))
+      );
+      const stuck = childStates.find(s => !s.ok);
+      if (stuck) return { success: false, error: `Instagram ${stuck.error}` };
+
+      const childIds = childResults.map(d => d.id!);
       const carouselRes = await fetch(`${IG_API}/${ig_user_id}/media`, {
         method: 'POST', headers: authHeader,
         body: JSON.stringify({ media_type: 'CAROUSEL', children: childIds.join(','), caption }),
@@ -295,14 +369,11 @@ async function uploadToInstagram(
       const carousel = await carouselRes.json();
       if (carousel.error) return { success: false, error: `Instagram 캐러셀 오류: ${carousel.error.message}` };
       containerId = carousel.id;
-      await new Promise(r => setTimeout(r, 2000));
     }
 
-    const statusRes = await fetch(`${IG_API}/${containerId}?fields=status_code`, { headers: authHeader });
-    const statusData = await statusRes.json();
-    if (statusData.status_code && statusData.status_code !== 'FINISHED') {
-      return { success: false, error: `Instagram 이미지 처리 중 (${statusData.status_code}). 잠시 후 다시 시도하세요.` };
-    }
+    // 캐러셀 컨테이너도 처리될 때까지 기다린다 (남은 예산 안에서)
+    const st = await waitForContainer(containerId, authHeader, Date.now() + 20000);
+    if (!st.ok) return { success: false, error: `Instagram ${st.error}` };
 
     const pubRes = await fetch(`${IG_API}/${ig_user_id}/media_publish`, {
       method: 'POST', headers: authHeader,
