@@ -10,6 +10,36 @@ type Preview = { name: string; region: string; pyeong?: number; priceText?: stri
 /** 같은 단지라도 평형이 다르면 다른 카드가 되므로 둘을 합쳐 키로 쓴다 */
 const keyOf = (r: Preview) => `${r.name}__${r.pyeong ?? ''}`;
 
+/**
+ * 자동으로 고를 단지를 뽑는다.
+ *
+ * 그냥 비싼 순 상위 N개를 잡으면 두 가지가 망가진다:
+ *  (1) 큰 단지가 평형별로 여러 번 올라와 같은 단지가 반복된다.
+ *      실제로 상위 8개 중 래미안안양메가트리아가 4번, 두산위브가 2번 나왔다.
+ *      "TOP 8 단지"인데 서로 다른 단지가 5개뿐이면 콘텐츠로 못 쓴다.
+ *  (2) 가격 상한을 걸면 상한 이하 최고가만 남아 결과가 상한선에 몰린다.
+ *      7억 상한을 걸면 여러 장이 전부 "7억 원"으로 찍힌다.
+ *
+ * → 단지당 1개만 남기고, 가격대에 고르게 퍼지도록 고른다.
+ */
+function autoPick(records: Preview[], count: number, mode: 'spread' | 'top'): Preview[] {
+  // 단지당 대표 1건 (가장 비싼 거래)
+  const byComplex = new Map<string, Preview>();
+  for (const r of records) {
+    const prev = byComplex.get(r.name);
+    if (!prev || (r.priceManwon ?? 0) > (prev.priceManwon ?? 0)) byComplex.set(r.name, r);
+  }
+  const unique = [...byComplex.values()].sort((a, b) => (b.priceManwon ?? 0) - (a.priceManwon ?? 0));
+
+  if (mode === 'top' || unique.length <= count) return unique.slice(0, count);
+
+  // 비싼 것부터 싼 것까지 같은 간격으로 집어 가격대가 겹치지 않게 한다
+  const step = (unique.length - 1) / (count - 1);
+  const out: Preview[] = [];
+  for (let i = 0; i < count; i++) out.push(unique[Math.round(i * step)]);
+  return out;
+}
+
 export default function AptListPage() {
   // 입력 방식: API 조회(기본) / 표 붙여넣기.
   // 붙여넣기를 남겨두는 이유 — 인증키가 죽거나 하루 한도를 넘겨도 계속 만들 수 있어야 한다.
@@ -23,6 +53,8 @@ export default function AptListPage() {
   const [lookupError, setLookupError] = useState('');
   const [found, setFound] = useState<Preview[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  // 'spread' = 가격대 고르게, 'top' = 비싼 순. 둘 다 단지 중복은 없앤다.
+  const [pickMode, setPickMode] = useState<'spread' | 'top'>('spread');
 
   const [raw, setRaw] = useState('');
   const [title, setTitle] = useState('');
@@ -57,8 +89,7 @@ export default function AptListPage() {
       }
       const records: Preview[] = json.records || [];
       setFound(records);
-      // 비싼 순으로 이미 정렬돼 있으므로 앞에서 limit개를 미리 골라둔다
-      setPicked(new Set(records.slice(0, limit).map(keyOf)));
+      setPicked(new Set(autoPick(records, limit, pickMode).map(keyOf)));
     } catch (e: any) {
       setLookupError(e?.message || '오류가 발생했습니다.');
     } finally {
@@ -218,16 +249,44 @@ export default function AptListPage() {
 
           {found && found.length > 0 && (
             <div className="mt-4">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                 <p className="text-[12px] font-bold text-gray-700">
-                  {found.length}개 단지 · <span className="text-primary-600">{picked.size}개 선택됨</span>
+                  {new Set(found.map(r => r.name)).size}개 단지 ·{' '}
+                  <span className="text-primary-600">{picked.size}개 선택됨</span>
+                  {(() => {
+                    const names = (found || []).filter(r => picked.has(keyOf(r))).map(r => r.name);
+                    const dup = names.length - new Set(names).size;
+                    return dup > 0 ? <span className="text-amber-600 font-semibold"> · 같은 단지 {dup}개 중복</span> : null;
+                  })()}
                 </p>
-                <button
-                  onClick={() => setPicked(new Set(found.slice(0, limit).map(keyOf)))}
-                  className="text-[11px] text-gray-500 hover:text-gray-800 underline focus:outline-none"
-                >
-                  비싼 순 {limit}개로 다시 고르기
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {/* 어떻게 고를지. 어느 쪽이든 같은 단지가 두 번 뽑히지는 않는다 */}
+                  {([
+                    ['spread', '가격대 고르게'],
+                    ['top', '비싼 순'],
+                  ] as const).map(([m, label]) => (
+                    <button
+                      key={m}
+                      onClick={() => {
+                        setPickMode(m);
+                        setPicked(new Set(autoPick(found, limit, m).map(keyOf)));
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors focus:outline-none focus:ring-2 focus:ring-primary-200 ${
+                        pickMode === m
+                          ? 'border-primary-400 bg-primary-50 text-primary-700'
+                          : 'border-gray-200 text-gray-500 hover:border-gray-300'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setPicked(new Set(autoPick(found, limit, pickMode).map(keyOf)))}
+                    className="text-[11px] text-gray-500 hover:text-gray-800 underline focus:outline-none px-1"
+                  >
+                    {limit}개 다시 고르기
+                  </button>
+                </div>
               </div>
               <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 max-h-[320px] overflow-y-auto">
                 {found.map(r => {
