@@ -60,6 +60,21 @@ const DROP_PATTERNS = [
   '아카데미', '폭염', '건설현장', '중대재해', '안전점검', '해외',
 ];
 
+// 부동산 키워드를 '엉뚱한 뜻으로' 물고 들어오는 기사들.
+// 제외어로 잘라내기엔 애매하고(어떤 날은 관련 기사일 수도 있다), 점수만으로도
+// 안 걸러진다 — 실제로 "서울핀테크랩, 핀테크 기업 15곳 모집…최대 4년 입주"가
+// '입주' 5점을 받아 둔촌주공 기사(3점)보다 높은 순위로 카드가 됐다.
+// 그래서 깎는 방식으로 다룬다.
+const NEGATIVE_WEIGHTS: [string, number][] = [
+  ['핀테크', 10], ['스타트업', 10], ['입주기업', 10], ['창업', 6],  // '입주'가 사무실 입주인 경우
+  ['유류분', 8], ['상속', 5],                                      // 분양 정보와 무관한 판례
+  ['가치체계', 8], ['특별법', 6], ['의회', 6],                       // 기업 홍보·지자체 발표
+];
+
+// 이보다 낮으면 카드로 만들지 않는다. 장수를 채우려고 관련 없는 기사를
+// 끌어오는 걸 막는다 — 빈약한 10장보다 탄탄한 7장이 낫다.
+const MIN_SCORE = 3;
+
 function scoreNews(n: NewsItem): number {
   const text = `${n.title} ${n.description || ''}`;
   if (DROP_PATTERNS.some(p => n.title.includes(p))) return -1;
@@ -68,6 +83,9 @@ function scoreNews(n: NewsItem): number {
     if (n.title.includes(kw)) score += w;
     else if (text.includes(kw)) score += Math.ceil(w / 2);
   }
+  for (const [kw, w] of NEGATIVE_WEIGHTS) {
+    if (text.includes(kw)) score -= w;
+  }
   return score;
 }
 
@@ -75,7 +93,7 @@ function pickRelevantNews(items: NewsItem[], limit: number): NewsItem[] {
   const scored = items
     .filter(n => n && typeof n.title === 'string' && n.title.trim())
     .map(n => ({ n, s: scoreNews(n) }))
-    .filter(x => x.s > 0)
+    .filter(x => x.s >= MIN_SCORE)
     .sort((a, b) => b.s - a.s);
 
   const out: NewsItem[] = [];
