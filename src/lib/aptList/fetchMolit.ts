@@ -80,10 +80,35 @@ export function recentMonths(count: number): string[] {
   return out;
 }
 
+/**
+ * 포털은 인증키를 Encoding/Decoding 두 형태로 준다.
+ * Decoding 키는 인코딩해서 보내야 하고, Encoding 키는 그대로 보내야 한다.
+ * 반대로 넣으면 "등록되지 않은 인증키"가 나오는데, 화면만 보고는 원인을
+ * 알 수 없어 사람들이 여기서 오래 헤맨다. 어느 쪽을 넣었든 되게 두 형태를 다 시도한다.
+ */
+function keyVariants(key: string): string[] {
+  const trimmed = key.trim();
+  const looksEncoded = /%[0-9A-Fa-f]{2}/.test(trimmed);
+  // 이미 인코딩된 키면 그대로 먼저, 아니면 인코딩한 걸 먼저 시도한다
+  return looksEncoded
+    ? [trimmed, encodeURIComponent(trimmed)]
+    : [encodeURIComponent(trimmed), trimmed];
+}
+
 async function fetchOneMonth(key: string, lawdCd: string, ymd: string): Promise<MolitResult> {
-  // serviceKey는 이미 URL 인코딩된 값이 올 수도 있어 직접 붙인다.
+  let last: MolitResult = { ok: false, error: '실거래가를 불러오지 못했습니다.' };
+  for (const variant of keyVariants(key)) {
+    last = await callMolit(variant, lawdCd, ymd);
+    // 키 형태 문제가 아니면 더 시도할 이유가 없다
+    if (last.ok || !/등록되지 않은 인증키/.test(last.error)) return last;
+  }
+  return last;
+}
+
+async function callMolit(serviceKey: string, lawdCd: string, ymd: string): Promise<MolitResult> {
+  // serviceKey는 이미 인코딩된 값일 수 있어 직접 붙인다.
   // URLSearchParams에 넣으면 Encoding 키가 이중 인코딩돼 인증이 깨진다.
-  const params = `LAWD_CD=${lawdCd}&DEAL_YMD=${ymd}&pageNo=1&numOfRows=1000&serviceKey=${encodeURIComponent(key)}`;
+  const params = `LAWD_CD=${lawdCd}&DEAL_YMD=${ymd}&pageNo=1&numOfRows=1000&serviceKey=${serviceKey}`;
 
   try {
     const res = await fetch(`${ENDPOINT}?${params}`, { signal: AbortSignal.timeout(20000) });
