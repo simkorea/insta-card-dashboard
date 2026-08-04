@@ -1,7 +1,7 @@
 import { callAI } from '@/lib/ai/openrouter';
 import { createClient } from '@supabase/supabase-js';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
-import { generateNewsNotebookImage, generateEdgeNotebookImage } from '@/lib/notebookImage/generate';
+import { generateNewsNotebookImage, generateEdgeNotebookImage, type CardStyle } from '@/lib/notebookImage/generate';
 import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
 import { notebookFactsFromBlocks } from '@/lib/notebookImage/factsFromBlocks';
@@ -132,7 +132,12 @@ async function searchBackground(keyword: string): Promise<string> {
   }
 }
 
-export async function generateNewsCardnewsDraft(opts?: { force?: boolean; notebookStyle?: boolean; maxSlides?: number }): Promise<DraftResult> {
+export async function generateNewsCardnewsDraft(opts?: {
+  force?: boolean;
+  notebookStyle?: boolean;
+  maxSlides?: number;
+  cardStyle?: CardStyle; // 'notebook'(기본) | 'newspaper'
+}): Promise<DraftResult> {
   const supabase = serviceClient();
 
   const { data: briefing, error: bErr } = await supabase
@@ -279,6 +284,7 @@ ${sourceBlock}`;
   // 이미지 생성이 안 되면 CSS 노트 렌더러(styleVariant 'notebook')로 떨어진다.
   // 사진 배경은 노트 스타일에서 쓰지 않으므로 Unsplash 검색도 건너뛴다.
   const useNotebook = opts?.notebookStyle !== false;
+  const cardStyle: CardStyle = opts?.cardStyle === 'newspaper' ? 'newspaper' : 'notebook';
   const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const noteNumber = `No.${String(kstNow.getUTCMonth() + 1).padStart(2, '0')}${String(kstNow.getUTCDate()).padStart(2, '0')}`;
 
@@ -291,7 +297,10 @@ ${sourceBlock}`;
         cards.map(async (card, i) => {
           const facts = notebookFactsFromBlocks(card.blocks, i + 1);
           if (!facts.headline || facts.points.length === 0) return null;
-          const img = await generateNewsNotebookImage({ ...facts, noteNumber, ratio: '4:5' });
+          const img = await generateNewsNotebookImage(
+            { ...facts, noteNumber, ratio: '4:5' },
+            { style: cardStyle }
+          );
           if (!img) return null;
           return (await uploadNotebookImage(img.base64, i + 1)) || null;
         })
@@ -308,7 +317,7 @@ ${sourceBlock}`;
   const articlePages = cards.map((card, i) => ({
     id: String(i + 1),
     bgImage: notebookImages[i] || backgrounds[i] || '',
-    bgLabel: useNotebook ? '손글씨 노트' : card.imageKeyword || '배경 이미지',
+    bgLabel: useNotebook ? (cardStyle === 'newspaper' ? '신문 지면' : '손글씨 노트') : card.imageKeyword || '배경 이미지',
     // 노트 이미지는 그림 한 장이 카드 전체다 — 어둡게 덮으면 글씨가 안 보인다
     overlay: notebookImages[i] ? '' : useNotebook ? '' : OVERLAY,
     ratio: '4:5',
@@ -356,7 +365,7 @@ ${sourceBlock}`;
 
   const drawEdge = async (kind: 'cover' | 'closing', uploadIndex: number) => {
     if (!useNotebook) return null;
-    const img = await generateEdgeNotebookImage(edgeFacts(kind));
+    const img = await generateEdgeNotebookImage(edgeFacts(kind), { style: cardStyle });
     if (!img) return null;
     return (await uploadNotebookImage(img.base64, uploadIndex)) || null;
   };
@@ -371,7 +380,7 @@ ${sourceBlock}`;
   ) => ({
     id: kind,
     bgImage: image || '',
-    bgLabel: useNotebook ? '손글씨 노트' : '배경 이미지',
+    bgLabel: useNotebook ? (cardStyle === 'newspaper' ? '신문 지면' : '손글씨 노트') : '배경 이미지',
     overlay: image ? '' : useNotebook ? '' : OVERLAY,
     ratio: '4:5',
     styleVariant: image ? 'image' : useNotebook ? 'notebook' : undefined,

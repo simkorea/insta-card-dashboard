@@ -61,7 +61,9 @@ export default function AptListPage() {
   const [limit, setLimit] = useState(8);
   const [noteNumber, setNoteNumber] = useState('No.001');
   const [ratio, setRatio] = useState('4:5');
-  const [useAiImage, setUseAiImage] = useState(true);
+  // 'photo' = AI 그림 없이 기본 렌더러, 나머지는 AI가 카드를 통째로 그린다
+  const [aptStyle, setAptStyle] = useState<'photo' | 'notebook' | 'newspaper'>('notebook');
+  const useAiImage = aptStyle !== 'photo';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<{ designId: string; slides: number; complexes: number; parsedTotal: number; preview: Preview[]; aiImages?: number; needsReview?: { title: string; note?: string }[] } | null>(null);
@@ -119,7 +121,7 @@ export default function AptListPage() {
       const res = await fetch('/api/apt-list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw: source === 'api' ? pickedAsTable() : raw, title, limit, noteNumber, ratio, useAiImage }),
+        body: JSON.stringify({ raw: source === 'api' ? pickedAsTable() : raw, title, limit, noteNumber, ratio, useAiImage, cardStyle: aptStyle }),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -412,22 +414,32 @@ export default function AptListPage() {
 
         {/* 카드 스타일 */}
         <div className="rounded-xl border border-gray-200 p-3">
-          <label className="flex items-start gap-2.5 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={useAiImage}
-              onChange={e => setUseAiImage(e.target.checked)}
-              className="mt-0.5 w-4 h-4 accent-primary-600 cursor-pointer"
-            />
-            <span>
-              <span className="text-[13px] font-bold text-gray-800 block">손글씨 노트 스타일로 그리기 (AI 이미지)</span>
-              <span className="text-[11px] text-gray-500 leading-relaxed block mt-0.5">
-                실제 노트에 펜으로 쓴 느낌으로 만듭니다. 한 장에 20~40초 걸리고, 만든 뒤
-                카드에 적힌 숫자·단지명이 원본과 같은지 자동으로 대조합니다.
-                끄면 기본 스타일로 빠르게 만듭니다.
-              </span>
-            </span>
-          </label>
+          <span className="text-xs font-semibold text-gray-400 block mb-2">카드 스타일</span>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {([
+              { id: 'photo', label: '📷 기본', desc: '그림 없이 빠르게 만듭니다.' },
+              { id: 'notebook', label: '📓 손글씨 노트', desc: '노트에 펜으로 쓴 느낌으로 그립니다.' },
+              { id: 'newspaper', label: '📰 신문', desc: '경제 신문 지면처럼 큰 활자로 그립니다.' },
+            ] as const).map(s => (
+              <button
+                key={s.id}
+                onClick={() => setAptStyle(s.id)}
+                className={`text-left px-3.5 py-3 rounded-2xl border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] ${
+                  aptStyle === s.id
+                    ? 'border-primary-500 bg-primary-50/50'
+                    : 'border-gray-200 hover:border-gray-300 bg-white'
+                }`}
+              >
+                <span className="text-[13px] font-bold text-gray-900 block">{s.label}</span>
+                <span className="text-[11px] text-gray-500 leading-relaxed block mt-0.5">{s.desc}</span>
+              </button>
+            ))}
+          </div>
+          {useAiImage && (
+            <p className="text-[11px] text-gray-500 leading-relaxed mt-2">
+              한 장에 20~40초 걸리고, 만든 뒤 카드에 적힌 숫자·단지명이 원본과 같은지 자동으로 대조합니다.
+            </p>
+          )}
         </div>
 
         <button

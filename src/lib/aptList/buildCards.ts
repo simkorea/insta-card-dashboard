@@ -5,6 +5,7 @@ import {
   generateNotebookImage,
   generateEdgeNotebookImage,
   type NotebookEdgeFacts,
+  type CardStyle,
 } from '@/lib/notebookImage/generate';
 import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 
@@ -123,11 +124,13 @@ export async function buildAptListCards(opts: {
   title: string;        // 예: "경기도 5억대 아파트"
   ratio?: string;
   noteNumber?: string;  // 예: "No.006"
-  useAiImage?: boolean; // 손글씨 노트를 AI 이미지로 그릴지 (기본 true)
+  useAiImage?: boolean; // AI가 카드를 통째로 그릴지 (기본 true)
+  cardStyle?: CardStyle; // 'notebook'(기본) | 'newspaper'
 }): Promise<AptCardPage[]> {
   const records = opts.records.slice(0, 10);
   const ratio = opts.ratio || '4:5';
-  const noteLabel = '임장노트';
+  const cardStyle: CardStyle = opts.cardStyle === 'newspaper' ? 'newspaper' : 'notebook';
+  const noteLabel = cardStyle === 'newspaper' ? '실거래 리포트' : '임장노트';
   const noteNumber = opts.noteNumber || 'No.001';
 
   const copies = await writeCopy(records, opts.title);
@@ -155,7 +158,7 @@ export async function buildAptListCards(opts: {
    * 빈 줄노트에 브라우저 글씨가 얹힌 모양으로 나갔다.
    */
   const drawEdge = async (page: AptCardPage, facts: NotebookEdgeFacts, uploadIndex: number) => {
-    const img = await generateEdgeNotebookImage(facts);
+    const img = await generateEdgeNotebookImage(facts, { style: cardStyle });
     if (!img) {
       page.needsReview = true;
       page.reviewNote = '노트 그림 생성에 실패해 기본 스타일로 만들었습니다';
@@ -233,7 +236,7 @@ export async function buildAptListCards(opts: {
           noteLabel: '임장 메모',
           noteNumber,
           ratio,
-        });
+        }, { style: cardStyle });
         if (img) {
           const url = await uploadNotebookImage(img.base64, i + 1);
           if (url) {

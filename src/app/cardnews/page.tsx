@@ -241,7 +241,10 @@ export default function CardNewsPage() {
   const [genStyle, setGenStyle] = useState<'free' | 'origin'>('origin');
   // 카드 그림체. 'photo' = 기존(사진 배경 + 텍스트), 'notebook' = 손글씨 노트 이미지.
   // 모든 시작 방식(텍스트/URL/트렌드/완전자동/9단계)이 같은 값을 쓴다.
-  const [cardStyle, setCardStyle] = useState<'photo' | 'notebook'>('photo');
+  const [cardStyle, setCardStyle] = useState<'photo' | 'notebook' | 'newspaper'>('photo');
+  // 'photo'만 기존 렌더러로 그리고, 나머지는 AI가 카드 한 장을 통째로 그린다
+  const isDrawnStyle = cardStyle !== 'photo';
+  const drawnLabel = cardStyle === 'newspaper' ? '신문' : '손글씨 노트';
   const [notebookProgress, setNotebookProgress] = useState('');
   const [slideCountType, setSlideCountType] = useState('auto');
   const [slideCountNumber, setSlideCountNumber] = useState(5);
@@ -1165,8 +1168,8 @@ export default function CardNewsPage() {
       localStorage.removeItem('cardNewsData');
       // 완전자동 파이프라인은 그대로 두고, 만들어진 결과에 그림만 입힌다
       let autoPages = applyMyImages(data.pages || [], 'bgImage');
-      if (cardStyle === 'notebook') {
-        setSmartStep('손글씨 노트로 그리는 중...');
+      if (isDrawnStyle) {
+        setSmartStep(`${drawnLabel}으로 그리는 중...`);
         autoPages = await drawNotebookImages(autoPages, 'bgImage');
       }
       const smartPages = autoPages.map((p: any) => ({ ...p, ratio: selectedRatio }));
@@ -1191,7 +1194,7 @@ export default function CardNewsPage() {
     bgField: 'backgroundImage' | 'bgImage'
   ): Promise<T[]> => {
     if (cards.length === 0) return cards;
-    setNotebookProgress(`손글씨 노트로 그리는 중... (${cards.length}장, 1~2분 걸립니다)`);
+    setNotebookProgress(`${drawnLabel}으로 그리는 중... (${cards.length}장, 1~2분 걸립니다)`);
     try {
       const res = await fetch('/api/notebook-cards', {
         method: 'POST',
@@ -1199,19 +1202,20 @@ export default function CardNewsPage() {
         body: JSON.stringify({
           cards: cards.map(c => ({ blocks: c.blocks })),
           ratio: selectedRatio,
+          style: cardStyle,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '노트 이미지 생성 실패');
+      if (!res.ok) throw new Error(data.error || `${drawnLabel} 이미지 생성 실패`);
 
       const images: { url: string | null; reason?: string }[] = data.images || [];
       const failed = images.filter(i => !i?.url).length;
       if (failed === cards.length) {
-        alert(`손글씨 노트 그리기에 실패해 기본 스타일로 만들었습니다. ${images[0]?.reason || ''}`);
+        alert(`${drawnLabel} 그리기에 실패해 기본 스타일로 만들었습니다. ${images[0]?.reason || ''}`);
         return cards;
       }
       if (failed > 0) {
-        alert(`${cards.length}장 중 ${failed}장은 노트로 그리지 못해 기본 스타일로 남겨뒀습니다.`);
+        alert(`${cards.length}장 중 ${failed}장은 그리지 못해 기본 스타일로 남겨뒀습니다.`);
       }
 
       return cards.map((card, i) => {
@@ -1223,12 +1227,12 @@ export default function CardNewsPage() {
           // 노트는 그림 한 장이 카드 전체다 — 어둡게 덮으면 손글씨가 안 보인다
           overlay: '',
           styleVariant: 'image',
-          noteLabel: '오늘의 노트',
+          noteLabel: cardStyle === 'newspaper' ? '오늘의 뉴스' : '오늘의 노트',
           noteNumber: data.noteNumber,
         } as T;
       });
     } catch (e: any) {
-      alert(`손글씨 노트 그리기 실패: ${friendlyError(e)} — 기본 스타일로 만들었습니다.`);
+      alert(`${drawnLabel} 그리기 실패: ${friendlyError(e)} — 기본 스타일로 만들었습니다.`);
       return cards;
     } finally {
       setNotebookProgress('');
@@ -1355,8 +1359,8 @@ export default function CardNewsPage() {
           };
         }));
 
-        // 손글씨 노트를 골랐으면 문구는 그대로 두고 그림만 다시 그린다
-        const styledCardNews = cardStyle === 'notebook'
+        // 그림 스타일을 골랐으면 문구는 그대로 두고 그림만 다시 그린다
+        const styledCardNews = isDrawnStyle
           ? await drawNotebookImages(updatedCardNews, 'backgroundImage')
           : updatedCardNews;
 
@@ -2462,7 +2466,7 @@ export default function CardNewsPage() {
                 {/* 카드 그림체 — 어떤 방식으로 시작하든 똑같이 적용된다 */}
                 <div className="mb-6">
                   <span className="text-xs font-semibold text-gray-400 block mb-2">카드 스타일</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     <button
                       onClick={() => setCardStyle('photo')}
                       className={`text-left px-4 py-3 rounded-2xl border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] ${
@@ -2489,11 +2493,24 @@ export default function CardNewsPage() {
                         실제 노트에 펜으로 쓴 느낌으로 그립니다. 한 장에 20~40초 걸립니다.
                       </span>
                     </button>
+                    <button
+                      onClick={() => setCardStyle('newspaper')}
+                      className={`text-left px-4 py-3 rounded-2xl border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 active:scale-[0.99] ${
+                        cardStyle === 'newspaper'
+                          ? 'border-gray-800 bg-gray-100'
+                          : 'border-gray-200 hover:border-gray-300 bg-white'
+                      }`}
+                    >
+                      <span className="text-[13px] font-bold text-gray-900 block">📰 신문으로 만들기</span>
+                      <span className="text-[11px] text-gray-500 leading-relaxed block mt-0.5">
+                        경제 신문 지면처럼 큰 활자로 그립니다. 손글씨보다 진중한 인상입니다.
+                      </span>
+                    </button>
                   </div>
-                  {cardStyle === 'notebook' && (
+                  {isDrawnStyle && (
                     <p className="text-[11px] text-amber-800/80 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-2 leading-relaxed">
                       카드 문구를 먼저 만든 뒤 그림을 그리므로 5장이면 <b>1~2분</b> 정도 걸립니다.
-                      노트는 그림 한 장이 카드 전체라 <b>올린 이미지와 배경 사진은 쓰이지 않습니다.</b>
+                      {drawnLabel}은 그림 한 장이 카드 전체라 <b>올린 이미지와 배경 사진은 쓰이지 않습니다.</b>
                       그리기에 실패한 장은 기본 스타일로 남고, 에디터에서 언제든 스타일을 바꿀 수 있습니다.
                     </p>
                   )}

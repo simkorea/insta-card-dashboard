@@ -8,7 +8,7 @@ export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   try {
-    const { raw, title, ratio, noteNumber, limit, useAiImage } = await request.json();
+    const { raw, title, ratio, noteNumber, limit, useAiImage, cardStyle } = await request.json();
 
     if (!raw || typeof raw !== 'string' || raw.trim().length < 20) {
       return NextResponse.json({ error: '실거래가 표를 붙여넣어 주세요.' }, { status: 400 });
@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
       ratio: ratio || '4:5',
       noteNumber,
       useAiImage: useAiImage !== false,
+      cardStyle: cardStyle === 'newspaper' ? 'newspaper' : 'notebook',
     });
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

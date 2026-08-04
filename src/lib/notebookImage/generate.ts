@@ -28,45 +28,100 @@ export type NotebookFacts = {
   ratio: string;          // '4:5' 등
 };
 
-const CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+export type CardStyle = 'notebook' | 'newspaper';
+
+// 손글씨 노트 공통 지시.
+// 예전 버전보다 제목을 크게 키우고 색을 정리했다 — 카드가 여러 장 이어질 때
+// 제목이 작으면 피드에서 무슨 얘긴지 안 읽히고, 색이 많으면 어수선하다.
+const NOTE_BASE = `[배경]
+- 화면 전체가 크림색 줄노트 종이, 옅은 가로 줄
+- 왼쪽 가장자리에 검은 스프링 제본 링(사실적으로)
+- 실제 노트를 사진 찍은 듯한 종이 질감과 부드러운 그림자
+
+[스타일]
+- 전부 펜과 마커로 직접 쓴 느낌. 한글 손글씨, 살짝 불규칙한 획
+- **색은 다섯 가지만**: 검정(본문), 짙은 남색(머리 띠), 빨강(강조·밑줄), 노랑(형광펜), 크라프트 베이지(태그)
+- 제목은 화면 폭을 꽉 채울 만큼 크고 굵게 — 휴대폰에서 한눈에 읽혀야 한다
+- **아래쪽이 텅 비지 않게** 그림과 요소로 채울 것
+- 가장자리에서 글자가 잘리지 않게`;
+
+const NOTE_RULE = `[가장 중요]
+- 위의 모든 한글 단어와 숫자를 정확히 그대로 재현할 것. 띄어쓰기도 그대로.
+- 위에 없는 정보는 절대 만들어 넣지 말 것.
+- 위에 적힌 것 외의 영어는 넣지 말 것.`;
+
+// 신문 스타일 공통 지시. 손글씨를 일절 쓰지 않는 것이 핵심이다.
+const PAPER_BASE = `[배경]
+- 아주 옅은 미색 신문 용지, 은은한 종이 결
+- 화면 위아래에 얇은 검정 괘선
+
+[스타일]
+- **손글씨·낙서·이모지를 절대 쓰지 말 것.** 인쇄된 활자만 사용
+- 색은 검정·미색·짙은 빨강 딱 세 가지
+- 제목은 굵은 고딕으로 아주 크게, 자간을 촘촘하게
+- 인쇄물처럼 정확한 정렬과 넉넉한 여백
+- 신뢰감 있고 진중한 인상`;
+
+const PAPER_RULE = `[가장 중요]
+- 위의 모든 한글 단어와 숫자를 정확히 그대로 재현할 것. 띄어쓰기도 그대로.
+- 위에 없는 정보는 절대 만들어 넣지 말 것.
+- 위에 적힌 것 외의 영어 단어나 문장은 넣지 말 것.
+- 실제 건물이나 인물을 특정할 수 있는 사진은 넣지 말 것.`;
 
 export function buildNotebookPrompt(f: NotebookFacts): string {
   const rows = [
     f.region && `  📍 ${f.region}`,
     f.pyeong && `  🏠 ${f.pyeong}`,
-    f.price && `  ₩ ${f.price}   ← 이 값만 노란 형광펜으로 강조하고 빨간 글씨로 크게`,
+    f.price && `  ₩ ${f.price}   ← 이 값만 노란 형광펜으로 칠하고 빨간 글씨로 가장 크게`,
     f.built && `  📅 ${f.built}`,
   ].filter(Boolean).join('\n');
 
   return `한국 부동산 인스타그램 카드뉴스를 **손글씨 스프링 노트** 스타일 이미지로 그려주세요. 비율 ${f.ratio} 세로.
 
-[배경]
-- 화면 전체가 크림색 줄노트 종이, 옅은 가로 줄
-- 왼쪽 가장자리에 검은 스프링 제본 링(사실적으로)
-- 스프링 오른쪽에 얇은 빨간 세로 여백선
-- 실제 노트를 사진 찍은 듯한 종이 질감과 부드러운 그림자
+${NOTE_BASE}
 
 [내용 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
-- 좌측 상단: 빨간 손그림 동그라미 안에 "${f.index}", 옆에 노란 형광펜으로 칠한 "${f.dong}", 작은 빨간 별
-- 그 아래 큰 손글씨 제목: "${f.name}" — 빨간 펜으로 물결 밑줄
+- 맨 위: 짙은 남색 손그림 가로 띠. 그 안에 흰 손글씨로 "${f.dong}", 오른쪽 끝에 "${f.index}"
+- 그 아래 아주 큰 손글씨 제목: "${f.name}" — 빨간 펜으로 굵게 밑줄
 - 손그림 테두리 정보 상자:
 ${rows}
 - 아래에 빨간 "👍 장점" 제목과 빨간 밑줄, 그 아래 체크 항목들
   (각 줄: 빨간 손그림 ☑ 체크박스 + 노란 형광펜으로 칠한 손글씨)
 ${f.advantages.map(a => `  ☑ ${a}`).join('\n')}
-${f.memo ? `- 오른쪽: 살짝 기울어진 노란 포스트잇, 빨간 압정으로 고정, 제목 "${f.noteLabel}"에 밑줄, 본문 "${f.memo}", 작은 웃는 얼굴` : ''}
-- 우측 하단: 빨간 클립으로 집은 크라프트 종이 태그. 위에 "임장노트", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
-- 좌측 하단: 파란 선으로 그린 간단한 도시 스카이라인, 작은 나무와 구름
+${f.memo ? `- 오른쪽 아래: 살짝 기울어진 노란 포스트잇을 마스킹테이프로 붙이고, 제목 "${f.noteLabel}"에 밑줄, 본문 "${f.memo}"` : ''}
+- 우측 하단: 크라프트 종이 태그. 위에 "${f.noteLabel}", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
+- 남는 아래 여백: 파란 볼펜으로 그린 아파트 단지 스케치(건물 몇 동, 나무, 구름)
 
-[스타일]
-- 전부 펜과 마커로 직접 쓴 느낌. 한글 손글씨, 살짝 불규칙한 획
-- 본문 검정, 강조·밑줄·별 빨강, 낙서 파랑, 형광펜 노랑
-- 여백을 넉넉히 두고 가장자리에서 글자가 잘리지 않게
-- 위에 적힌 것 외의 영어는 넣지 말 것
+${NOTE_RULE}`;
+}
 
-[가장 중요]
-- 위의 모든 한글 단어와 숫자를 정확히 그대로 재현할 것.
-- 위에 없는 정보(지하철역 이름, 도보 시간, 학군, 세대수, 브랜드 순위)는 절대 만들어 넣지 말 것.`;
+/** 단지 카드 — 신문 버전 */
+export function buildNewspaperAptPrompt(f: NotebookFacts): string {
+  const rows = [
+    f.region && `  · 위치   ${f.region}`,
+    f.pyeong && `  · 면적   ${f.pyeong}`,
+    f.price && `  · 실거래 ${f.price}`,
+    f.built && `  · 연식   ${f.built}`,
+  ].filter(Boolean).join('\n');
+
+  return `한국 부동산 인스타그램 카드뉴스를 **경제 신문 지면** 스타일로 디자인해주세요. 비율 ${f.ratio} 세로.
+
+${PAPER_BASE}
+
+[레이아웃 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
+- 맨 위: 왼쪽에 검정 사각형 안 흰 글씨 "${f.index}", 그 옆에 굵은 글씨 "${f.dong}", 오른쪽 끝에 얇은 글씨 "${f.noteLabel}"
+- 그 아래 굵은 가로 실선
+- 아주 큰 제목: "${f.name}"
+- 제목 아래 가는 실선
+- 그 아래 표 형태로 항목을 좌우 정렬해 배치(항목명은 회색, 값은 검정 굵게):
+${rows}
+${f.price ? `- 실거래 값 "${f.price}"만 짙은 빨강으로, 다른 글자보다 훨씬 크게` : ''}
+${f.advantages.length ? `- 그 아래 2단 그리드로 항목 배치, 각 항목 앞에 짙은 빨강 사각 점:\n${f.advantages.map(a => `    ■ ${a}`).join('\n')}` : ''}
+${f.memo ? `- 아래쪽에 얇은 테두리 상자를 두고 그 안에 작은 글씨로: "${f.memo}"` : ''}
+- 맨 아래: 왼쪽 작은 글씨 "출처: 국토교통부 실거래가", 오른쪽 굵게 "${f.noteNumber}"
+- 남는 여백은 얇은 선으로 그린 단순한 건물 실루엣 그래픽으로 채울 것(사진 아님)
+
+${PAPER_RULE}`;
 }
 
 async function callImageModel(key: string, model: string, prompt: string): Promise<string | null> {
@@ -175,10 +230,12 @@ export async function renderNotebookCard(
 /** 단지 카드 — 가격·평형·연식이 틀리면 안 된다 */
 export async function generateNotebookImage(
   facts: NotebookFacts,
-  opts?: { maxAttempts?: number }
+  opts?: { maxAttempts?: number; style?: CardStyle }
 ): Promise<NotebookImageResult | null> {
+  const prompt =
+    opts?.style === 'newspaper' ? buildNewspaperAptPrompt(facts) : buildNotebookPrompt(facts);
   return renderNotebookCard(
-    buildNotebookPrompt(facts),
+    prompt,
     [facts.name, facts.price, facts.pyeong, facts.built].filter(Boolean) as string[],
     { maxAttempts: opts?.maxAttempts, label: facts.name }
   );
@@ -204,42 +261,53 @@ export type NewsNotebookFacts = {
 export function buildNewsNotebookPrompt(f: NewsNotebookFacts): string {
   return `한국 부동산 뉴스 인스타그램 카드뉴스를 **손글씨 스프링 노트** 스타일 이미지로 그려주세요. 비율 ${f.ratio} 세로.
 
-[배경]
-- 화면 전체가 크림색 줄노트 종이, 옅은 가로 줄
-- 왼쪽 가장자리에 검은 스프링 제본 링(사실적으로)
-- 스프링 오른쪽에 얇은 빨간 세로 여백선
-- 실제 노트를 사진 찍은 듯한 종이 질감과 부드러운 그림자
+${NOTE_BASE}
 
 [내용 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
-- 좌측 상단: 빨간 손그림 동그라미 안에 "${f.index}"${f.category ? `, 옆에 노란 형광펜으로 칠한 "${f.category}"` : ' (옆에 아무 글자도 넣지 말 것)'}
-- 그 아래 큰 손글씨 제목: "${f.headline}" — 빨간 펜으로 물결 밑줄
-${f.lead ? `- 제목 아래 작은 손글씨 한 줄: "${f.lead}"` : ''}
-${f.stat ? `- 가운데에 손그림 테두리 상자. 안에 빨간 큰 손글씨로 "${f.stat.value}"${f.stat.label ? `, 그 아래 작게 "${f.stat.label}"` : ''}` : ''}
-- 빨간 "✔ 핵심 포인트" 제목과 빨간 밑줄, 그 아래 체크 항목들
-  (각 줄: 빨간 손그림 ☑ 체크박스 + 노란 형광펜으로 칠한 손글씨)
+- 맨 위: 짙은 남색 손그림 가로 띠. 그 안에 흰 손글씨로 ${f.category ? `"${f.category}"` : '아무 글자도 넣지 말고'}, 오른쪽 끝에 "${f.index}"
+- 그 아래 아주 큰 손글씨 제목: "${f.headline}"
+  검정으로 굵게 쓰고, 핵심 단어 한둘만 노란 형광펜으로 칠할 것
+${f.lead ? `- 제목 아래 얇은 가로 구분선, 그 아래 작은 손글씨 한 줄: "${f.lead}"` : ''}
+${f.stat ? `- 가운데에 손그림 테두리 상자. 안에 빨간 아주 큰 손글씨로 "${f.stat.value}"${f.stat.label ? `, 그 아래 작게 "${f.stat.label}"` : ''}` : ''}
+- 살짝 기울어진 크라프트 종이 카드를 마스킹테이프로 붙인 모양. 그 안에 항목들:
 ${f.points.map(p => `  ☑ ${p}`).join('\n')}
-${f.source ? `- 우측 하단 작은 글씨: "${f.source}"` : ''}
-- 우측 하단: 빨간 클립으로 집은 크라프트 종이 태그. 위에 "${f.noteLabel || '오늘의 뉴스'}", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
-- 좌측 하단: 파란 선으로 그린 간단한 도시 스카이라인, 작은 나무와 구름
+  각 줄 앞에 빨간 손그림 체크박스
+${f.source ? `- 왼쪽 아래 작은 글씨: "${f.source}"` : ''}
+- 우측 하단: 크라프트 종이 태그. 위에 "${f.noteLabel || '오늘의 뉴스'}", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
+- 남는 아래 여백: 기사 내용을 나타내는 파란 볼펜 스케치를 크게 그릴 것
 
-[스타일]
-- 전부 펜과 마커로 직접 쓴 느낌. 한글 손글씨, 살짝 불규칙한 획
-- 본문 검정, 강조·밑줄 빨강, 낙서 파랑, 형광펜 노랑
-- 여백을 넉넉히 두고 가장자리에서 글자가 잘리지 않게
-- 위에 적힌 것 외의 영어는 넣지 말 것
+${NOTE_RULE}`;
+}
 
-[가장 중요]
-- 위의 모든 한글 단어와 숫자를 정확히 그대로 재현할 것.
-- 위에 없는 정보(단지명, 분양가, 날짜, 지하철역, 세대수)는 절대 만들어 넣지 말 것.`;
+/** 뉴스 카드 — 신문 버전 */
+export function buildNewspaperNewsPrompt(f: NewsNotebookFacts): string {
+  return `한국 부동산 뉴스 인스타그램 카드뉴스를 **경제 신문 1면** 스타일로 디자인해주세요. 비율 ${f.ratio} 세로.
+
+${PAPER_BASE}
+
+[레이아웃 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
+- 맨 위: 왼쪽에 검정 사각형 안 흰 글씨 "${f.index}"${f.category ? `, 그 옆에 굵은 글씨 "${f.category}"` : ''}, 오른쪽 끝에 얇은 글씨 "${f.noteLabel || '오늘의 뉴스'}"
+- 그 아래 굵은 가로 실선
+- 아주 큰 제목: "${f.headline}" (2~3줄, 신문 헤드라인처럼 묵직하게)
+${f.lead ? `- 제목 아래 가는 실선, 그 아래 작은 리드문: "${f.lead}"` : ''}
+${f.stat ? `- 지면 가운데 얇은 테두리 상자. 안에 짙은 빨강 아주 큰 숫자 "${f.stat.value}"${f.stat.label ? `, 그 아래 작은 회색 글씨 "${f.stat.label}"` : ''}` : ''}
+- 그 아래 2단 그리드로 항목 배치, 각 항목 앞에 짙은 빨강 사각 점:
+${f.points.map(p => `    ■ ${p}`).join('\n')}
+- 아래쪽 여백: 얇은 선으로 그린 단순한 도시 스카이라인 그래픽(사진 아님)
+- 맨 아래: 왼쪽 작은 글씨 "${f.source || ''}", 오른쪽 굵게 "${f.noteNumber}"
+
+${PAPER_RULE}`;
 }
 
 export async function generateNewsNotebookImage(
   facts: NewsNotebookFacts,
-  opts?: { maxAttempts?: number }
+  opts?: { maxAttempts?: number; style?: CardStyle }
 ): Promise<NotebookImageResult | null> {
   // 제목은 길면 줄바꿈되어 OCR 대조가 흔들린다 → 앞부분과 대표 수치만 대조한다
   const mustContain = [facts.headline.slice(0, 8), facts.stat?.value].filter(Boolean) as string[];
-  return renderNotebookCard(buildNewsNotebookPrompt(facts), mustContain, {
+  const prompt =
+    opts?.style === 'newspaper' ? buildNewspaperNewsPrompt(facts) : buildNewsNotebookPrompt(facts);
+  return renderNotebookCard(prompt, mustContain, {
     maxAttempts: opts?.maxAttempts ?? 2,
     label: facts.headline,
   });
@@ -286,37 +354,55 @@ ${f.points?.length ? `- 빨간 "✔ 오늘의 정리" 제목과 빨간 밑줄, �
 
   return `한국 부동산 인스타그램 카드뉴스의 ${isCover ? '표지' : '마지막'} 장을 **손글씨 스프링 노트** 스타일 이미지로 그려주세요. 비율 ${f.ratio} 세로.
 
-[배경]
-- 화면 전체가 크림색 줄노트 종이, 옅은 가로 줄
-- 왼쪽 가장자리에 검은 스프링 제본 링(사실적으로)
-- 스프링 오른쪽에 얇은 빨간 세로 여백선
-- 실제 노트를 사진 찍은 듯한 종이 질감과 부드러운 그림자
+${NOTE_BASE}
 
 [내용 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
 ${body}
 ${f.source ? `- 맨 아래 작은 글씨: "${f.source}"` : ''}
-- 우측 하단: 빨간 클립으로 집은 크라프트 종이 태그. 위에 "${f.noteLabel}", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
+- 우측 하단: 크라프트 종이 태그. 위에 "${f.noteLabel}", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
 
-[스타일]
-- 전부 펜과 마커로 직접 쓴 느낌. 한글 손글씨, 살짝 불규칙한 획
-- 본문 검정, 강조·밑줄 빨강, 낙서 파랑, 형광펜 노랑
-- 가장자리에서 글자가 잘리지 않게
-- **아래쪽 절반이 텅 비지 않도록** 그림과 요소로 균형 있게 채울 것
-- 위에 적힌 것 외의 영어는 넣지 말 것
+${NOTE_RULE}`;
+}
 
-[가장 중요]
-- 위의 모든 한글 단어와 숫자를 정확히 그대로 재현할 것.
-- 위에 없는 정보(단지명, 가격, 날짜, 지하철역, 세대수)는 절대 만들어 넣지 말 것.`;
+/** 표지·마무리 — 신문 버전 */
+export function buildNewspaperEdgePrompt(f: NotebookEdgeFacts): string {
+  const isCover = f.kind === 'cover';
+
+  const body = isCover
+    ? `- 맨 위: 굵은 가로 실선 두 줄 사이에 작은 글씨 "${f.eyebrow || '오늘의 뉴스'}"
+- 지면 위쪽 절반을 채우는 아주 큰 제목: "${f.headline}"
+${f.sub ? `- 제목 아래 가는 실선, 그 아래 리드문: "${f.sub}"` : ''}
+${f.badges?.length ? `- 그 아래 얇은 테두리 상자 ${f.badges.length}개를 가로로 나란히, 각각 안에 작은 글씨로:\n${f.badges.map(b => `    ${b}`).join('\n')}` : ''}
+- 아래쪽 절반: 얇은 선으로 그린 도시 스카이라인 그래픽(사진 아님)
+- 오른쪽 아래 작은 글씨 "다음 장에서 계속"과 오른쪽 화살표 기호`
+    : `- 맨 위: 굵은 가로 실선 두 줄 사이에 작은 글씨 "${f.eyebrow || '마무리'}"
+- 큰 제목: "${f.headline}"
+${f.sub ? `- 제목 아래 가는 실선, 그 아래 리드문: "${f.sub}"` : ''}
+${f.points?.length ? `- 그 아래 항목을 세로로 배치, 각 항목 앞에 짙은 빨강 사각 점:\n${f.points.map(p => `    ■ ${p}`).join('\n')}` : ''}
+- 지면 아래쪽: 짙은 빨강 테두리의 넓은 상자. 그 안에 굵은 검정 글씨로 "저장", "팔로우" 두 단어를 크게 나란히 쓰고,
+  각각 왼쪽에 단순한 선으로 그린 북마크 기호와 하트 기호`;
+
+  return `한국 부동산 인스타그램 카드뉴스의 ${isCover ? '표지' : '마지막'} 장을 **경제 신문 지면** 스타일로 디자인해주세요. 비율 ${f.ratio} 세로.
+
+${PAPER_BASE}
+
+[레이아웃 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
+${body}
+${f.source ? `- 맨 아래 왼쪽 작은 글씨: "${f.source}"` : ''}
+- 맨 아래 오른쪽: 굵은 글씨 "${f.noteNumber}", 그 위에 작은 글씨 "${f.noteLabel}"
+
+${PAPER_RULE}`;
 }
 
 /** 표지·마무리 카드. 대조할 값은 제목뿐이라 재시도를 적게 잡는다. */
 export async function generateEdgeNotebookImage(
   facts: NotebookEdgeFacts,
-  opts?: { maxAttempts?: number }
+  opts?: { maxAttempts?: number; style?: CardStyle }
 ): Promise<NotebookImageResult | null> {
-  return renderNotebookCard(
-    buildEdgeNotebookPrompt(facts),
-    [facts.headline.slice(0, 8)],
-    { maxAttempts: opts?.maxAttempts ?? 2, label: `${facts.kind}:${facts.headline}` }
-  );
+  const prompt =
+    opts?.style === 'newspaper' ? buildNewspaperEdgePrompt(facts) : buildEdgeNotebookPrompt(facts);
+  return renderNotebookCard(prompt, [facts.headline.slice(0, 8)], {
+    maxAttempts: opts?.maxAttempts ?? 2,
+    label: `${facts.kind}:${facts.headline}`,
+  });
 }
