@@ -265,7 +265,7 @@ export async function buildAptListCards(opts: {
           built: builtText,
           advantages,
           memo: copy.memo,
-          noteLabel: '임장 메모',
+          noteLabel,
           noteNumber,
           ratio,
         },
