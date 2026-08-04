@@ -244,3 +244,79 @@ export async function generateNewsNotebookImage(
     label: facts.headline,
   });
 }
+
+// ── 표지 / 마무리 ────────────────────────────────────────────────────────────
+//
+// 가운데 카드들과 달리 번호 매긴 항목이 아니라 '펼침면' 성격이다.
+// 예전에는 이 두 장만 AI로 그리지 않아서, 가운데는 손그림인데 앞뒤만
+// 빈 줄노트에 브라우저 글씨가 얹힌 모양으로 나갔다.
+
+export type NotebookEdgeFacts = {
+  kind: 'cover' | 'closing';
+  eyebrow?: string;      // 핵심 공개! / 마무리
+  headline: string;      // 큰 제목
+  sub?: string;          // 한 줄 설명
+  badges?: string[];     // 표지: 손그림 태그로 그릴 짧은 말
+  points?: string[];     // 마무리: 체크 항목
+  source?: string;
+  noteLabel: string;     // 임장 메모 / 오늘의 뉴스
+  noteNumber: string;
+  ratio: string;
+};
+
+export function buildEdgeNotebookPrompt(f: NotebookEdgeFacts): string {
+  const isCover = f.kind === 'cover';
+
+  const body = isCover
+    ? `- 종이 위쪽에 마스킹 테이프로 붙인 느낌의 작은 쪽지, 그 안에 "${f.eyebrow || '핵심 공개!'}" 손글씨
+- 화면 가운데 위쪽에 아주 큰 손글씨 제목: "${f.headline}"
+  (두세 줄로 나눠 써도 좋고, 빨간 펜 두 줄 밑줄과 노란 형광펜 강조)
+${f.sub ? `- 제목 아래 작은 손글씨 한 줄: "${f.sub}"` : ''}
+${f.badges?.length ? `- 그 아래 손그림 둥근 태그 ${f.badges.length}개를 가로로 나란히, 각각 안에:\n${f.badges.map(b => `  · ${b}`).join('\n')}` : ''}
+- 가운데 아래 넓은 여백에는 파란 볼펜으로 그린 아파트 단지 스케치(건물 몇 동, 나무, 구름, 해).
+  종이가 비어 보이지 않게 넉넉히 채울 것
+- 오른쪽 아래에 "→" 손그림 화살표와 작은 글씨 "넘겨보기"`
+    : `- 종이 위쪽에 마스킹 테이프로 붙인 느낌의 작은 쪽지, 그 안에 "${f.eyebrow || '마무리'}" 손글씨
+- 그 아래 큰 손글씨 제목: "${f.headline}" — 빨간 펜으로 물결 밑줄
+${f.sub ? `- 제목 아래 작은 손글씨 한 줄: "${f.sub}"` : ''}
+${f.points?.length ? `- 빨간 "✔ 오늘의 정리" 제목과 빨간 밑줄, 그 아래 체크 항목들\n  (각 줄: 빨간 손그림 ☑ 체크박스 + 노란 형광펜으로 칠한 손글씨)\n${f.points.map(p => `  ☑ ${p}`).join('\n')}` : ''}
+- 가운데 아래쪽에 크게: 손그림 북마크(리본) 아이콘과 하트 아이콘을 나란히 그리고,
+  그 옆에 빨간 손글씨로 "저장", "팔로우" — 둘 다 노란 형광펜으로 칠할 것
+- 왼쪽 아래 여백에는 파란 볼펜으로 그린 작은 도시 스케치`;
+
+  return `한국 부동산 인스타그램 카드뉴스의 ${isCover ? '표지' : '마지막'} 장을 **손글씨 스프링 노트** 스타일 이미지로 그려주세요. 비율 ${f.ratio} 세로.
+
+[배경]
+- 화면 전체가 크림색 줄노트 종이, 옅은 가로 줄
+- 왼쪽 가장자리에 검은 스프링 제본 링(사실적으로)
+- 스프링 오른쪽에 얇은 빨간 세로 여백선
+- 실제 노트를 사진 찍은 듯한 종이 질감과 부드러운 그림자
+
+[내용 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
+${body}
+${f.source ? `- 맨 아래 작은 글씨: "${f.source}"` : ''}
+- 우측 하단: 빨간 클립으로 집은 크라프트 종이 태그. 위에 "${f.noteLabel}", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
+
+[스타일]
+- 전부 펜과 마커로 직접 쓴 느낌. 한글 손글씨, 살짝 불규칙한 획
+- 본문 검정, 강조·밑줄 빨강, 낙서 파랑, 형광펜 노랑
+- 가장자리에서 글자가 잘리지 않게
+- **아래쪽 절반이 텅 비지 않도록** 그림과 요소로 균형 있게 채울 것
+- 위에 적힌 것 외의 영어는 넣지 말 것
+
+[가장 중요]
+- 위의 모든 한글 단어와 숫자를 정확히 그대로 재현할 것.
+- 위에 없는 정보(단지명, 가격, 날짜, 지하철역, 세대수)는 절대 만들어 넣지 말 것.`;
+}
+
+/** 표지·마무리 카드. 대조할 값은 제목뿐이라 재시도를 적게 잡는다. */
+export async function generateEdgeNotebookImage(
+  facts: NotebookEdgeFacts,
+  opts?: { maxAttempts?: number }
+): Promise<NotebookImageResult | null> {
+  return renderNotebookCard(
+    buildEdgeNotebookPrompt(facts),
+    [facts.headline.slice(0, 8)],
+    { maxAttempts: opts?.maxAttempts ?? 2, label: `${facts.kind}:${facts.headline}` }
+  );
+}

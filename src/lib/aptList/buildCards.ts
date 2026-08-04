@@ -1,7 +1,11 @@
 import { callAI } from '@/lib/ai/openrouter';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import type { AptRecord } from './parseTransactions';
-import { generateNotebookImage } from '@/lib/notebookImage/generate';
+import {
+  generateNotebookImage,
+  generateEdgeNotebookImage,
+  type NotebookEdgeFacts,
+} from '@/lib/notebookImage/generate';
 import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 
 // 단지 목록 → 손글씨 노트 스타일 카드뉴스 페이지.
@@ -145,22 +149,46 @@ export async function buildAptListCards(opts: {
 
   const pages: AptCardPage[] = [];
 
+  /**
+   * 표지·마무리에 손글씨 노트 그림을 입힌다.
+   * 예전에는 이 두 장만 AI로 그리지 않아서, 가운데는 손그림인데 앞뒤만
+   * 빈 줄노트에 브라우저 글씨가 얹힌 모양으로 나갔다.
+   */
+  const drawEdge = async (page: AptCardPage, facts: NotebookEdgeFacts, uploadIndex: number) => {
+    const img = await generateEdgeNotebookImage(facts);
+    if (!img) {
+      page.needsReview = true;
+      page.reviewNote = '노트 그림 생성에 실패해 기본 스타일로 만들었습니다';
+      return;
+    }
+    const url = await uploadNotebookImage(img.base64, uploadIndex);
+    if (!url) {
+      page.needsReview = true;
+      page.reviewNote = '노트 이미지 저장에 실패해 기본 스타일로 만들었습니다';
+      return;
+    }
+    page.bgImage = url;
+    page.styleVariant = 'image';
+    if (!img.verified) {
+      page.needsReview = true;
+      page.reviewNote = img.note;
+    }
+  };
+
   // 표지
   // 제목에 이미 "TOP4" 같은 표현이 있으면 강조어를 덧붙이지 않는다.
   // 그냥 붙였더니 "안양 만안구 실거래가 TOP4 TOP 4"가 됐다.
   const titleHasTop = /top\s*\d/i.test(opts.title);
-  pages.push(
-    base('1', [
-      { type: 'eyebrow', text: '핵심 공개!' },
-      { type: 'headline', text: opts.title, accentText: titleHasTop ? undefined : `TOP ${records.length}` },
-      { type: 'sub', text: '국토부 실거래가로 확인한 단지만 골랐습니다.' },
-      {
-        type: 'badgeRow',
-        badges: [{ text: '실거래가 기준' }, { text: `${records.length}개 단지` }, { text: '저장 추천' }],
-      },
-      { type: 'sourceNote', text: '출처: 국토교통부 실거래가 공개시스템' },
-    ], opts.title)
-  );
+  const coverTitle = titleHasTop ? opts.title : `${opts.title} TOP ${records.length}`;
+  const coverBadges = ['실거래가 기준', `${records.length}개 단지`, '저장 추천'];
+  const coverPage = base('1', [
+    { type: 'eyebrow', text: '핵심 공개!' },
+    { type: 'headline', text: opts.title, accentText: titleHasTop ? undefined : `TOP ${records.length}` },
+    { type: 'sub', text: '국토부 실거래가로 확인한 단지만 골랐습니다.' },
+    { type: 'badgeRow', badges: coverBadges.map(text => ({ text })) },
+    { type: 'sourceNote', text: '출처: 국토교통부 실거래가 공개시스템' },
+  ], opts.title);
+  pages.push(coverPage);
 
   // 단지별 1장 — 손글씨 노트는 AI 이미지로 그린다 (CSS로는 그 질감이 안 나옴)
   const useAi = opts.useAiImage !== false;
@@ -229,18 +257,40 @@ export async function buildAptListCards(opts: {
   pages.push(...itemPages);
 
   // 마무리
-  pages.push(
-    base(String(records.length + 2), [
-      { type: 'eyebrow', text: '마무리' },
-      { type: 'headline', text: '저장해두면', accentText: '내 집 마련에 도움' },
-      { type: 'sub', text: '궁금한 단지는 댓글이나 DM으로 남겨주세요.' },
-      {
-        type: 'checklist',
-        items: ['실거래가 기준 정리', '평형·연식 비교', '지역별 생활권 확인'],
-      },
-      { type: 'sourceNote', text: '실거래가는 신고 기준이며 현재 시세와 다를 수 있습니다.' },
-    ], '마무리')
-  );
+  const closingPoints = ['실거래가 기준 정리', '평형·연식 비교', '지역별 생활권 확인'];
+  const closingPage = base(String(records.length + 2), [
+    { type: 'eyebrow', text: '마무리' },
+    { type: 'headline', text: '저장해두면', accentText: '내 집 마련에 도움' },
+    { type: 'sub', text: '궁금한 단지는 댓글이나 DM으로 남겨주세요.' },
+    { type: 'checklist', items: closingPoints },
+    { type: 'sourceNote', text: '실거래가는 신고 기준이며 현재 시세와 다를 수 있습니다.' },
+  ], '마무리');
+  pages.push(closingPage);
+
+  // 표지·마무리도 가운데 카드들과 같은 손그림으로 그린다.
+  // 업로드 index는 파일명에만 쓰이므로 단지 카드와 겹치지 않게 0, 99를 준다.
+  if (useAi) {
+    await Promise.all([
+      drawEdge(coverPage, {
+        kind: 'cover',
+        eyebrow: '핵심 공개!',
+        headline: coverTitle,
+        sub: '국토부 실거래가로 확인한 단지만 골랐습니다.',
+        badges: coverBadges,
+        source: '출처: 국토교통부 실거래가 공개시스템',
+        noteLabel, noteNumber, ratio,
+      }, 0),
+      drawEdge(closingPage, {
+        kind: 'closing',
+        eyebrow: '마무리',
+        headline: '저장해두면 내 집 마련에 도움',
+        sub: '궁금한 단지는 댓글이나 DM으로 남겨주세요.',
+        points: closingPoints,
+        source: '실거래가는 신고 기준이며 현재 시세와 다를 수 있습니다.',
+        noteLabel, noteNumber, ratio,
+      }, 99),
+    ]);
+  }
 
   return pages;
 }

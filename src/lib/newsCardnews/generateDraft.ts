@@ -1,7 +1,7 @@
 import { callAI } from '@/lib/ai/openrouter';
 import { createClient } from '@supabase/supabase-js';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
-import { generateNewsNotebookImage } from '@/lib/notebookImage/generate';
+import { generateNewsNotebookImage, generateEdgeNotebookImage } from '@/lib/notebookImage/generate';
 import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
 import { notebookFactsFromBlocks } from '@/lib/notebookImage/factsFromBlocks';
@@ -29,6 +29,9 @@ const ACCENT = '#E9B949';
 // 예전에는 5장 고정이라 관련 기사가 8건 나온 날에도 3건이 그냥 버려졌다.
 const MAX_SLIDES = 10;  // 인스타 캐러셀 한도
 const MIN_SLIDES = 3;   // 이보다 적으면 기사 배정 없이 요약본으로 만든다
+// 표지 + 마무리 2장을 앞뒤로 붙이므로 기사는 그만큼 적게 담는다.
+// 안 그러면 캐러셀 한도(10장)를 넘겨 발행에서 잘린다.
+const EDGE_SLIDES = 2;
 const FALLBACK_SLIDE_COUNT = 5; // 원본 기사가 없어 요약본으로 만들 때
 
 type NewsItem = { title: string; link?: string; description?: string };
@@ -152,10 +155,12 @@ export async function generateNewsCardnewsDraft(opts?: { force?: boolean; notebo
   const rawItems = Array.isArray(briefing?.news_items) ? (briefing!.news_items as NewsItem[]) : [];
   // 쓸 만한 기사가 나온 만큼 장을 만든다 (최대 10장).
   // opts.maxSlides로 그날만 줄여 부를 수도 있다.
-  const cap = Math.min(Math.max(Number(opts?.maxSlides) || MAX_SLIDES, MIN_SLIDES), MAX_SLIDES);
+  const totalCap = Math.min(Math.max(Number(opts?.maxSlides) || MAX_SLIDES, MIN_SLIDES), MAX_SLIDES);
+  // 표지·마무리가 2장을 차지하므로 기사에 쓸 수 있는 장수는 그만큼 줄어든다
+  const cap = Math.max(totalCap - EDGE_SLIDES, 1);
   const picked = pickRelevantNews(rawItems, cap);
   const hasItems = picked.length >= MIN_SLIDES;
-  console.log(`[NewsCardnews] 수집 ${rawItems.length}건 → 사용 ${picked.length}건 (최대 ${cap}장)`);
+  console.log(`[NewsCardnews] 수집 ${rawItems.length}건 → 사용 ${picked.length}건 (기사 최대 ${cap}장 + 표지·마무리)`);
 
   // 같은 브리핑으로 이미 만든 초안이 있으면 중복 생성하지 않는다
   if (!opts?.force) {
@@ -297,8 +302,10 @@ ${sourceBlock}`;
     `[NewsCardnews] 노트 이미지 ${notebookImages.filter(Boolean).length}/${cards.length}장 생성`
   );
 
+  const label = `${kstNow.getUTCMonth() + 1}/${kstNow.getUTCDate()}`;
+
   // 에디터가 그대로 읽는 PageData 형태
-  const pagesData = cards.map((card, i) => ({
+  const articlePages = cards.map((card, i) => ({
     id: String(i + 1),
     bgImage: notebookImages[i] || backgrounds[i] || '',
     bgLabel: useNotebook ? '손글씨 노트' : card.imageKeyword || '배경 이미지',
@@ -309,13 +316,14 @@ ${sourceBlock}`;
     noteLabel: useNotebook ? '오늘의 뉴스' : undefined,
     noteNumber: useNotebook ? noteNumber : undefined,
     title: card.title || '',
-    subtitle: i === 0 ? (card.body || '') : '',
+    // 인트로 문구는 이제 표지가 맡는다
+    subtitle: '',
     layout: 'bottom-left-list',
     accent: ACCENT,
     blocks: card.blocks,
     brandTone: 'gold',
     showFrame: true,
-    blocksOffsetY: i === 0 ? 78 : 90,
+    blocksOffsetY: 90,
     handle: '@aptshowhome',
     imageKeyword: card.imageKeyword,
     titleStyle: { fontFamily: 'Noto Sans KR', fontWeight: '900', fontSize: 32, letterSpacing: -0.5, color: '#FFFFFF' },
@@ -323,8 +331,86 @@ ${sourceBlock}`;
     bulletStyle: { fontFamily: 'Noto Sans KR', fontWeight: '600', fontSize: 15, lineHeight: 1.35, color: '#FFFFFF' },
   }));
 
-  const label = `${kstNow.getUTCMonth() + 1}/${kstNow.getUTCDate()}`;
   const name = `[자동] ${label} ${parsed.title || '부동산 뉴스'}`;
+
+  // ── 표지 · 마무리 ──────────────────────────────────────────────────────────
+  // 예전에는 1장부터 바로 기사로 시작해 기사로 끝났다. 캐러셀은 첫 장에서
+  // 넘길지 말지가 갈리고 마지막 장이 저장·팔로우를 부르는 자리라 둘 다 필요하다.
+  const coverHeadline = parsed.title || `${label} 부동산 뉴스`;
+  const coverBadges = ['오늘의 핵심', `${articlePages.length}가지`, '저장 추천'];
+  const closingPoints = ['오늘의 핵심만 정리', '분양·청약 일정 체크', '매일 아침 업데이트'];
+  const closingHeadline = '저장해두고 매일 아침 확인하세요';
+
+  const edgeFacts = (kind: 'cover' | 'closing') =>
+    kind === 'cover'
+      ? {
+          kind, eyebrow: '오늘의 뉴스', headline: coverHeadline,
+          sub: `${label} 부동산 소식을 한 장씩 정리했습니다.`,
+          badges: coverBadges, noteLabel: '오늘의 뉴스', noteNumber, ratio: '4:5',
+        } as const
+      : {
+          kind, eyebrow: '마무리', headline: closingHeadline,
+          sub: '부동산 소식은 매일 아침 올라옵니다.',
+          points: closingPoints, noteLabel: '오늘의 뉴스', noteNumber, ratio: '4:5',
+        } as const;
+
+  const drawEdge = async (kind: 'cover' | 'closing', uploadIndex: number) => {
+    if (!useNotebook) return null;
+    const img = await generateEdgeNotebookImage(edgeFacts(kind));
+    if (!img) return null;
+    return (await uploadNotebookImage(img.base64, uploadIndex)) || null;
+  };
+
+  const [coverImage, closingImage] = await Promise.all([drawEdge('cover', 0), drawEdge('closing', 99)]);
+
+  const edgePage = (
+    kind: 'cover' | 'closing',
+    image: string | null,
+    blocks: SlideBlock[],
+    title: string
+  ) => ({
+    id: kind,
+    bgImage: image || '',
+    bgLabel: useNotebook ? '손글씨 노트' : '배경 이미지',
+    overlay: image ? '' : useNotebook ? '' : OVERLAY,
+    ratio: '4:5',
+    styleVariant: image ? 'image' : useNotebook ? 'notebook' : undefined,
+    noteLabel: useNotebook ? '오늘의 뉴스' : undefined,
+    noteNumber: useNotebook ? noteNumber : undefined,
+    title,
+    subtitle: '',
+    layout: 'bottom-left-list',
+    accent: ACCENT,
+    blocks,
+    brandTone: 'gold',
+    showFrame: true,
+    blocksOffsetY: 78,
+    handle: '@aptshowhome',
+    imageKeyword: '',
+    titleStyle: { fontFamily: 'Noto Sans KR', fontWeight: '900', fontSize: 32, letterSpacing: -0.5, color: '#FFFFFF' },
+    subtitleStyle: { fontFamily: 'Noto Sans KR', fontWeight: '400', fontSize: 15, color: '#E5E7EB' },
+    bulletStyle: { fontFamily: 'Noto Sans KR', fontWeight: '600', fontSize: 15, lineHeight: 1.35, color: '#FFFFFF' },
+  });
+
+  const coverPage = edgePage('cover', coverImage, [
+    { type: 'eyebrow', text: '오늘의 뉴스' },
+    { type: 'headline', text: coverHeadline },
+    { type: 'sub', text: `${label} 부동산 소식을 한 장씩 정리했습니다.` },
+    { type: 'badgeRow', badges: coverBadges.map(text => ({ text })) },
+  ], coverHeadline);
+
+  const closingPage = edgePage('closing', closingImage, [
+    { type: 'eyebrow', text: '마무리' },
+    { type: 'headline', text: '저장해두고', accentText: '매일 아침 확인하세요' },
+    { type: 'sub', text: '부동산 소식은 매일 아침 올라옵니다.' },
+    { type: 'checklist', items: closingPoints },
+  ], closingHeadline);
+
+  // 장 번호는 합친 뒤 다시 매긴다
+  const pagesData = [coverPage, ...articlePages, closingPage].map((p, i) => ({
+    ...p,
+    id: String(i + 1),
+  }));
 
   const { data: design, error: insErr } = await supabase
     .from('card_designs')

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { FileText, Loader2, Calendar, Hash, FolderOpen, Archive, Layout, Trash2 } from 'lucide-react';
+import { FileText, Loader2, Calendar, Hash, FolderOpen, Archive, Layout, Trash2, X, ChevronLeft, ChevronRight, Pencil, ImageOff } from 'lucide-react';
 
 interface BlogPost {
   id: string;
@@ -25,6 +25,8 @@ interface CardDesign {
 
 export default function ArchivePage() {
   const [activeTab, setActiveTab] = useState<'blog' | 'cardnews'>('blog');
+  const [preview, setPreview] = useState<CardDesign | null>(null);
+  const [previewPage, setPreviewPage] = useState(0);
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [designs, setDesigns] = useState<CardDesign[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -119,6 +121,30 @@ export default function ArchivePage() {
     localStorage.removeItem('cardNewsData');
     window.location.href = `/cardnews/editor?id=${design.id}`;
   };
+
+  // 카드 한 장의 그림 주소. 손글씨 노트는 그림 한 장이 카드 전체라
+  // 이것만으로 미리보기가 된다. 사진 스타일은 배경만 나오므로 제목을 얹어 보여준다.
+  const pageImage = (page: any): string => page?.bgImage || '';
+  const pageTitle = (page: any): string =>
+    page?.title || page?.blocks?.find((b: any) => b.type === 'headline')?.text || '';
+
+  const openPreview = (design: CardDesign) => {
+    setPreview(design);
+    setPreviewPage(0);
+  };
+
+  // 미리보기가 열려 있을 때 좌우 화살표로 넘긴다
+  useEffect(() => {
+    if (!preview) return;
+    const total = preview.pages_data?.length || 0;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreview(null);
+      if (e.key === 'ArrowRight') setPreviewPage(p => Math.min(p + 1, total - 1));
+      if (e.key === 'ArrowLeft') setPreviewPage(p => Math.max(p - 1, 0));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [preview]);
 
   return (
     <div className="flex flex-col h-full bg-gray-50 w-full overflow-hidden">
@@ -292,12 +318,38 @@ export default function ArchivePage() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
                 {designs.map((design) => {
                   const pagesCount = design.pages_data?.length || 0;
+                  const cover = design.pages_data?.[0];
+                  const coverImage = pageImage(cover);
                   return (
                     <div
                       key={design.id}
-                      onClick={() => handleCardNewsClick(design)}
-                      className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-primary-300 transition-all p-5 flex flex-col justify-between cursor-pointer group"
+                      onClick={() => openPreview(design)}
+                      className="bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md hover:border-primary-300 transition-all overflow-hidden flex flex-col cursor-pointer group"
                     >
+                      {/* 표지 미리보기 */}
+                      <div className="relative bg-gray-100 aspect-[4/5] overflow-hidden">
+                        {coverImage ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={coverImage}
+                            alt={`${design.name} 표지`}
+                            loading="lazy"
+                            className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-300"
+                          />
+                        ) : (
+                          <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-gray-300 px-4 text-center">
+                            <ImageOff size={22} />
+                            <span className="text-[11px] font-semibold text-gray-400 line-clamp-3">
+                              {pageTitle(cover) || '그림 없음'}
+                            </span>
+                          </div>
+                        )}
+                        <span className="absolute bottom-2 right-2 text-[10px] font-bold text-white bg-black/55 px-2 py-0.5 rounded-full">
+                          {pagesCount}장
+                        </span>
+                      </div>
+
+                      <div className="p-5 space-y-3 flex-1 flex flex-col justify-between">
                       <div className="space-y-3">
                         <div className="flex items-center justify-between">
                           <span className="text-[10px] font-black px-2 py-0.5 rounded-full border bg-purple-50 text-purple-700 border-purple-200">
@@ -321,6 +373,13 @@ export default function ArchivePage() {
 
                       <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-50 text-xs text-gray-500 font-semibold">
                         <span>슬라이드 개수: {pagesCount}장</span>
+                        <button
+                          onClick={e => { e.stopPropagation(); handleCardNewsClick(design); }}
+                          className="flex items-center gap-1 text-primary-600 hover:text-primary-700 focus:outline-none focus:underline font-bold"
+                        >
+                          <Pencil size={12} /> 편집
+                        </button>
+                      </div>
                       </div>
                     </div>
                   );
@@ -330,6 +389,106 @@ export default function ArchivePage() {
           </>
         )}
       </div>
+
+      {/* 미리보기 — 저장된 장을 그대로 넘겨본다 */}
+      {preview && (() => {
+        const pages = preview.pages_data || [];
+        const total = pages.length;
+        const page = pages[previewPage];
+        const img = pageImage(page);
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+            onClick={() => setPreview(null)}
+          >
+            <div
+              className="bg-white rounded-2xl w-full max-w-[480px] max-h-full overflow-hidden flex flex-col"
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+                <h3 className="flex-1 text-sm font-bold text-gray-900 truncate">{preview.name}</h3>
+                <button
+                  onClick={() => setPreview(null)}
+                  aria-label="닫기"
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-200 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="relative bg-gray-900 flex items-center justify-center" style={{ aspectRatio: '4 / 5' }}>
+                {img ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={img} alt={`${previewPage + 1}번째 장`} className="max-w-full max-h-full object-contain" />
+                ) : (
+                  <div className="text-center px-8">
+                    <p className="text-white text-base font-bold leading-snug">{pageTitle(page) || '내용 없음'}</p>
+                    <p className="text-gray-400 text-[11px] mt-2">이 장에는 저장된 그림이 없습니다</p>
+                  </div>
+                )}
+
+                {previewPage > 0 && (
+                  <button
+                    onClick={() => setPreviewPage(p => p - 1)}
+                    aria-label="이전 장"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/50 active:scale-95 transition-colors"
+                  >
+                    <ChevronLeft size={18} />
+                  </button>
+                )}
+                {previewPage < total - 1 && (
+                  <button
+                    onClick={() => setPreviewPage(p => p + 1)}
+                    aria-label="다음 장"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-black/50 text-white hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/50 active:scale-95 transition-colors"
+                  >
+                    <ChevronRight size={18} />
+                  </button>
+                )}
+                <span className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[11px] font-bold text-white bg-black/55 px-2.5 py-1 rounded-full">
+                  {previewPage + 1} / {total}
+                </span>
+              </div>
+
+              {/* 장 넘기기 썸네일 */}
+              {total > 1 && (
+                <div className="flex gap-1.5 overflow-x-auto px-3 py-2.5 border-t border-gray-100">
+                  {pages.map((p: any, i: number) => {
+                    const t = pageImage(p);
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setPreviewPage(i)}
+                        aria-label={`${i + 1}번째 장 보기`}
+                        className={`shrink-0 w-10 rounded-md overflow-hidden border-2 bg-gray-100 focus:outline-none transition-colors ${
+                          i === previewPage ? 'border-primary-500' : 'border-transparent hover:border-gray-300'
+                        }`}
+                        style={{ aspectRatio: '4 / 5' }}
+                      >
+                        {t ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={t} alt="" loading="lazy" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-[10px] text-gray-400 font-bold">{i + 1}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="px-4 py-3 border-t border-gray-100">
+                <button
+                  onClick={() => handleCardNewsClick(preview)}
+                  className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-primary-600 text-white text-sm font-bold hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-300 active:scale-[0.99] transition-colors"
+                >
+                  <Pencil size={14} /> 편집기에서 열기
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
