@@ -15,12 +15,15 @@ interface PlatformResult {
   success: boolean;
   url?: string;
   error?: string;
-  pendingContainerId?: string;
+  pendingContainerId?: string;  // 인스타: 변환이 안 끝나 미뤄둔 컨테이너
+  pendingPublishId?: string;    // 틱톡: 처리 중인 게시
+  note?: string;                // 요청과 다르게 처리된 부분 알림
 }
 
 const PLATFORMS = [
   { id: 'instagram', label: '인스타그램 릴스', hint: '세로 9:16 · 3초~15분' },
   { id: 'youtube', label: '유튜브 쇼츠', hint: '세로 9:16 · 3분 이하면 쇼츠로 분류' },
+  { id: 'tiktok', label: '틱톡', hint: '세로 9:16 · 문구가 게시글로 들어갑니다' },
 ] as const;
 
 const PRIVACY = [
@@ -44,6 +47,8 @@ export default function ReelsPage() {
 
   const busy = phase === 'signing' || phase === 'uploading' || phase === 'publishing';
   const wantsYoutube = selected.includes('youtube');
+  const wantsTiktok = selected.includes('tiktok');
+  const needsPrivacy = wantsYoutube || wantsTiktok;
   const canPublish = Boolean(file) && selected.length > 0 && (!wantsYoutube || title.trim().length > 0);
 
   const toggle = (id: string) =>
@@ -126,20 +131,27 @@ export default function ReelsPage() {
     }
   };
 
-  /** 인스타 영상 변환이 늦어 미뤄둔 컨테이너를 마저 발행한다. */
-  const finishInstagram = async (containerId: string) => {
+  /**
+   * 처리가 안 끝나 미뤄둔 발행을 이어서 진행한다.
+   * 인스타는 변환이 끝나면 발행 요청을 한 번 더 보내야 하고,
+   * 틱톡은 저쪽에서 알아서 게시하므로 상태만 다시 물으면 된다.
+   */
+  const resume = async (platform: string, body: Record<string, unknown>) => {
     setError('');
     setPhase('publishing');
     try {
       const res = await fetch('/api/upload/sns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ finishContainerId: containerId, caption, platforms: ['instagram'] }),
+        body: JSON.stringify({ ...body, caption, platforms: [platform] }),
       });
       const data = await res.json();
-      const ig = data.results?.instagram;
-      if (!ig?.success) throw new Error(ig?.error || '발행에 실패했습니다.');
-      setResults(prev => ({ ...prev, instagram: ig }));
+      const r = data.results?.[platform];
+      if (!r) throw new Error(data.error || '응답을 받지 못했습니다.');
+      setResults(prev => ({ ...prev, [platform]: r }));
+      if (!r.success && !r.pendingContainerId && !r.pendingPublishId) {
+        setError(r.error || '발행에 실패했습니다.');
+      }
       setPhase('done');
     } catch (e: any) {
       setError(e?.message || '오류가 발생했습니다.');
@@ -226,22 +238,28 @@ export default function ReelsPage() {
         </div>
       </div>
 
-      {/* 유튜브 전용 입력 — 인스타에는 제목·공개범위 개념이 없다 */}
-      {wantsYoutube && (
+      {/* 유튜브·틱톡 전용 입력 — 인스타에는 제목·공개범위 개념이 없다 */}
+      {needsPrivacy && (
         <div className="mt-4 rounded-2xl border border-gray-200 p-4 space-y-3">
-          <p className="text-[12px] font-bold text-gray-700">유튜브 설정</p>
-          <div>
-            <label className="text-[11px] font-semibold text-gray-600 mb-1 block">
-              제목 <span className="text-red-500">*</span>
-              <span className="text-gray-400 font-normal ml-1">{title.length}/100</span>
-            </label>
-            <input
-              value={title}
-              onChange={e => setTitle(e.target.value.slice(0, 100))}
-              placeholder="예: 용인신갈 펜타원 84㎡ 실내 둘러보기"
-              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-200"
-            />
-          </div>
+          <p className="text-[12px] font-bold text-gray-700">
+            {wantsYoutube && wantsTiktok ? '유튜브 · 틱톡 설정' : wantsYoutube ? '유튜브 설정' : '틱톡 설정'}
+          </p>
+
+          {wantsYoutube && (
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 mb-1 block">
+                유튜브 제목 <span className="text-red-500">*</span>
+                <span className="text-gray-400 font-normal ml-1">{title.length}/100</span>
+              </label>
+              <input
+                value={title}
+                onChange={e => setTitle(e.target.value.slice(0, 100))}
+                placeholder="예: 용인신갈 펜타원 84㎡ 실내 둘러보기"
+                className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-200"
+              />
+            </div>
+          )}
+
           <div>
             <label className="text-[11px] font-semibold text-gray-600 mb-1 block">공개 범위</label>
             <select
@@ -252,9 +270,18 @@ export default function ReelsPage() {
               {PRIVACY.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           </div>
-          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            유튜브 API 기본 한도로는 하루 약 6개까지만 올릴 수 있습니다. 아래 캡션이 영상 설명으로 들어갑니다.
-          </p>
+
+          {wantsYoutube && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              유튜브는 API 기본 한도로 하루 약 6개까지만 올릴 수 있습니다. 아래 캡션이 영상 설명으로 들어갑니다.
+            </p>
+          )}
+          {wantsTiktok && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              틱톡은 아래 캡션이 게시글 문구가 됩니다. 앱이 아직 심사 전이면 틱톡이 공개 설정을
+              무시하고 &lsquo;나만 보기&rsquo;로 올립니다 — 이 경우 틱톡 앱에서 직접 공개로 바꿔주세요.
+            </p>
+          )}
         </div>
       )}
 
@@ -300,6 +327,11 @@ export default function ReelsPage() {
                   <p className="text-sm font-bold text-green-900 flex items-center gap-1.5 mb-2">
                     <CheckCircle2 size={16} /> {p.label} 발행 완료
                   </p>
+                  {r.note && (
+                    <p className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2 leading-relaxed">
+                      {r.note}
+                    </p>
+                  )}
                   {r.url && (
                     <a
                       href={r.url}
@@ -313,22 +345,28 @@ export default function ReelsPage() {
                 </div>
               );
             }
-            if (r.pendingContainerId) {
+            if (r.pendingContainerId || r.pendingPublishId) {
+              const isIg = Boolean(r.pendingContainerId);
               return (
                 <div key={p.id} className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
                   <p className="text-[13px] font-bold text-amber-900 flex items-center gap-1.5 mb-1">
-                    <AlertTriangle size={15} /> {p.label} — 영상 변환이 아직 진행 중입니다
+                    <AlertTriangle size={15} /> {p.label} — 아직 처리 중입니다
                   </p>
                   <p className="text-[12px] text-amber-800/90 leading-relaxed mb-3">
-                    영상은 이미 전달됐고 변환만 남았습니다. 30초쯤 뒤 아래 버튼을 눌러 마무리하세요.
-                    (전달된 영상은 24시간 안에 발행하면 됩니다)
+                    {isIg
+                      ? '영상은 이미 전달됐고 변환만 남았습니다. 30초쯤 뒤 아래 버튼을 눌러 마무리하세요. (전달된 영상은 24시간 안에 발행하면 됩니다)'
+                      : '영상은 이미 틱톡에 전달됐습니다. 틱톡이 처리를 마치면 자동으로 올라갑니다. 아래 버튼으로 상태를 다시 확인할 수 있습니다.'}
                   </p>
                   <button
-                    onClick={() => finishInstagram(r.pendingContainerId!)}
+                    onClick={() =>
+                      isIg
+                        ? resume('instagram', { finishContainerId: r.pendingContainerId })
+                        : resume('tiktok', { checkPublishId: r.pendingPublishId })
+                    }
                     disabled={busy}
                     className="px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
-                    발행 마무리
+                    {isIg ? '발행 마무리' : '상태 확인'}
                   </button>
                 </div>
               );

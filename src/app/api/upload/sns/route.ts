@@ -1,6 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase-server';
 import { uploadShortToYoutube } from '@/lib/youtube/upload';
+import { uploadVideoToTikTok, fetchTikTokStatus } from '@/lib/tiktok/upload';
+import { createClient } from '@supabase/supabase-js';
+
+/** 틱톡 토큰 저장용. RLS를 우회해야 하는 쓰기라 service role로 만든다. */
+function serviceClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+/** 유튜브식 공개범위 → 틱톡식. 없는 개념(일부공개)은 가장 좁은 쪽으로 보낸다. */
+function toTikTokPrivacy(p?: string): string {
+  if (p === 'public') return 'PUBLIC_TO_EVERYONE';
+  return 'SELF_ONLY';
+}
 
 export const maxDuration = 120; // 캐러셀 10장은 컨테이너 처리 대기가 길어질 수 있다
 
@@ -471,7 +487,7 @@ export async function POST(req: NextRequest) {
 
     const {
       imageUrls, videoUrl, coverUrl, finishContainerId, caption, platforms,
-      title, privacyStatus,
+      title, privacyStatus, checkPublishId,
     } = await req.json() as {
       imageUrls?: string[];
       videoUrl?: string;        // 릴스: 올려둔 MP4 공개 주소
@@ -481,9 +497,10 @@ export async function POST(req: NextRequest) {
       platforms: string[];
       title?: string;           // 유튜브 제목 (인스타에는 제목 개념이 없다)
       privacyStatus?: 'public' | 'unlisted' | 'private';
+      checkPublishId?: string;  // 틱톡: 처리 중이던 게시의 상태를 다시 물을 때
     };
 
-    const isVideo = Boolean(videoUrl || finishContainerId);
+    const isVideo = Boolean(videoUrl || finishContainerId || checkPublishId);
     if (!isVideo && !imageUrls?.length) {
       return NextResponse.json({ error: '이미지 URL이 없습니다' }, { status: 400 });
     }
@@ -501,7 +518,14 @@ export async function POST(req: NextRequest) {
 
     const results: Record<
       string,
-      { success: boolean; url?: string; error?: string; pendingContainerId?: string }
+      {
+        success: boolean;
+        url?: string;
+        error?: string;
+        pendingContainerId?: string;
+        pendingPublishId?: string;
+        note?: string;
+      }
     > = {};
 
     await Promise.all(
@@ -529,10 +553,35 @@ export async function POST(req: NextRequest) {
               results.instagram = await uploadToInstagram(accounts.instagram ?? null, imageUrls!, caption);
             }
             break;
-          case 'tiktok':
-            // results.tiktok = await uploadToTikTok(accounts.tiktok ?? null, imageUrls, caption);
-            results.tiktok = { success: false, error: 'TikTok은 이미지 게시물을 지원하지 않습니다. 영상 전용(준비 중)입니다.' };
+          case 'tiktok': {
+            const acc = accounts.tiktok;
+            if (!videoUrl && !checkPublishId) {
+              results.tiktok = { success: false, error: 'TikTok은 이미지 게시물을 지원하지 않습니다. 영상 전용입니다.' };
+            } else if (!acc?.refresh_token) {
+              results.tiktok = { success: false, error: 'TikTok 계정이 연동되지 않았습니다. SNS 설정에서 연결해주세요.' };
+            } else if (checkPublishId) {
+              results.tiktok = await fetchTikTokStatus(acc, checkPublishId);
+            } else {
+              results.tiktok = await uploadVideoToTikTok({
+                account: acc,
+                videoUrl: videoUrl!,
+                title: (caption || title || '').trim(),
+                privacyLevel: toTikTokPrivacy(privacyStatus),
+                // 틱톡은 갱신할 때마다 refresh token을 새로 준다. 저장 안 하면
+                // 다음에 못 쓸 수 있다.
+                onTokenRefresh: async ({ accessToken, refreshToken }) => {
+                  const svc = serviceClient();
+                  if (!svc) return;
+                  await svc
+                    .from('sns_accounts')
+                    .update({ access_token: accessToken, refresh_token: refreshToken })
+                    .eq('user_id', user.id)
+                    .eq('platform', 'tiktok');
+                },
+              });
+            }
             break;
+          }
           case 'youtube':
             if (!videoUrl) {
               results.youtube = { success: false, error: 'YouTube는 이미지 게시물을 지원하지 않습니다. 동영상 전용입니다.' };
