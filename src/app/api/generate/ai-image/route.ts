@@ -7,7 +7,11 @@ import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 // 카드뉴스에서 이미 쓰고 있는 Gemini 이미지 모델로 먼저 시도하고,
 // Leonardo 키가 있으면 그쪽으로 넘어간다. 새 키 없이도 동작하게 하는 게 목적이다.
 
-export const maxDuration = 120;
+// 노트 카드 라우트와 같은 상한. 이미지 생성은 한 장에 20~60초 걸린다.
+export const maxDuration = 300;
+// 라우트가 죽기 전에 우리가 먼저 포기하고 결과를 돌려주기 위한 예산.
+const BUDGET_MS = 240_000;
+const ATTEMPT_MS = 60_000;
 
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models';
 const IMAGE_MODELS = ['gemini-3-pro-image', 'gemini-3-pro-image-preview'];
@@ -39,11 +43,14 @@ async function generateWithGemini(
 - 사람 얼굴이 알아볼 수 있게 크게 나오지 않도록 할 것
 - 한국의 풍경·건물 맥락에 맞게 그릴 것`;
 
-  const urls: string[] = [];
-  for (let i = 0; i < count; i++) {
-    let base64: string | null = null;
+  // 남은 예산 안에서만 기다린다. 예전에는 모델마다 90초씩 기다려서
+  // 두 번 시도하면 함수 제한(120초)을 넘겨 504로 죽었다 — 실제로 그렇게 됐다.
+  const deadline = Date.now() + BUDGET_MS;
 
+  const one = async (index: number): Promise<string> => {
     for (const model of IMAGE_MODELS) {
+      const remain = deadline - Date.now();
+      if (remain < 15_000) break; // 남은 시간으로는 못 끝낸다
       try {
         const res = await fetch(`${GEMINI_API}/${model}:generateContent?key=${key}`, {
           method: 'POST',
@@ -52,24 +59,27 @@ async function generateWithGemini(
             contents: [{ parts: [{ text: full }] }],
             generationConfig: { responseModalities: ['IMAGE'] },
           }),
-          signal: AbortSignal.timeout(90000),
+          signal: AbortSignal.timeout(Math.min(ATTEMPT_MS, remain - 10_000)),
         });
         if (!res.ok) continue; // Pro가 혼잡하면 다음 모델로
         const data = await res.json();
-        base64 = data.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData)
+        const base64 = data.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData)
           ?.inlineData?.data ?? null;
-        if (base64) break;
+        if (!base64) continue;
+        // 화면은 URL을 기대한다 — base64를 그대로 넘기면 본문에 박혀버린다
+        return await uploadNotebookImage(base64, index, 'blog');
       } catch {
         /* 다음 모델로 넘어간다 */
       }
     }
+    return '';
+  };
 
-    if (!base64) continue;
-    // 화면은 URL을 기대한다 — base64를 그대로 넘기면 본문에 박혀버린다
-    const url = await uploadNotebookImage(base64, i + 1, 'blog');
-    if (url) urls.push(url);
-  }
-  return urls;
+  // 여러 장을 순서대로 만들면 장수만큼 시간이 곱해진다. 함께 만든다.
+  const results = await Promise.all(
+    Array.from({ length: count }, (_, i) => one(i + 1))
+  );
+  return results.filter(Boolean);
 }
 
 async function generateWithLeonardo(
