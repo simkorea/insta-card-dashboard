@@ -1818,7 +1818,7 @@ function ImageAddModal({
                 className="w-full py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
               >
                 {aiGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                {!hasApiKey ? 'AI 이미지 생성 불가' : aiGenerating ? 'AI 이미지 생성 중... (20~40초)' : '이미지 생성하기'}
+                {!hasApiKey ? 'AI 이미지 생성 불가' : aiGenerating ? 'AI 이미지 생성 중... (1~2분)' : '이미지 생성하기'}
               </button>
 
               {aiError && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{aiError}</p>}

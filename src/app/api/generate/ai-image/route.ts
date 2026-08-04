@@ -10,8 +10,9 @@ import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 // 노트 카드 라우트와 같은 상한. 이미지 생성은 한 장에 20~60초 걸린다.
 export const maxDuration = 300;
 // 라우트가 죽기 전에 우리가 먼저 포기하고 결과를 돌려주기 위한 예산.
-const BUDGET_MS = 240_000;
-const ATTEMPT_MS = 60_000;
+// 사진 한 장에 실측 87초가 걸렸다 — 60초에서 끊었더니 매번 실패했다.
+const BUDGET_MS = 260_000;
+const ATTEMPT_MS = 120_000;
 
 const GEMINI_API = 'https://generativelanguage.googleapis.com/v1beta/models';
 const IMAGE_MODELS = ['gemini-3-pro-image', 'gemini-3-pro-image-preview'];
@@ -147,16 +148,15 @@ export async function POST(req: NextRequest) {
     }
     const n = Math.min(Math.max(1, Number(count) || 1), 4);
 
+    // Gemini가 있으면 Gemini만 쓴다. 실패했다고 Leonardo로 넘기면 시간이 두 배로
+    // 들고, 크레딧이 없을 때 "not enough api tokens" 같은 남의 오류가 화면에 뜬다.
     if (gemini) {
       const urls = await generateWithGemini(gemini, prompt.trim(), ratio, n);
       if (urls.length > 0) return NextResponse.json({ urls });
-      // Gemini가 한 장도 못 만들었고 Leonardo 키도 없으면 여기서 끝
-      if (!leonardo) {
-        return NextResponse.json(
-          { error: '이미지를 만들지 못했습니다. 잠시 뒤 다시 시도해주세요.' },
-          { status: 502 }
-        );
-      }
+      return NextResponse.json(
+        { error: '이미지를 만들지 못했습니다. 잠시 뒤 다시 시도해주세요.' },
+        { status: 502 }
+      );
     }
 
     const urls = await generateWithLeonardo(leonardo!, prompt.trim(), ratio, n);
