@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase-server';
+import { uploadShortToYoutube } from '@/lib/youtube/upload';
 
 export const maxDuration = 120; // 캐러셀 10장은 컨테이너 처리 대기가 길어질 수 있다
 
@@ -468,13 +469,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '로그인이 필요합니다' }, { status: 401 });
     }
 
-    const { imageUrls, videoUrl, coverUrl, finishContainerId, caption, platforms } = await req.json() as {
+    const {
+      imageUrls, videoUrl, coverUrl, finishContainerId, caption, platforms,
+      title, privacyStatus,
+    } = await req.json() as {
       imageUrls?: string[];
       videoUrl?: string;        // 릴스: 올려둔 MP4 공개 주소
       coverUrl?: string;        // 릴스 표지(선택)
       finishContainerId?: string; // 변환이 늦어 미뤄둔 컨테이너를 마저 발행할 때
       caption: string;
       platforms: string[];
+      title?: string;           // 유튜브 제목 (인스타에는 제목 개념이 없다)
+      privacyStatus?: 'public' | 'unlisted' | 'private';
     };
 
     const isVideo = Boolean(videoUrl || finishContainerId);
@@ -493,7 +499,10 @@ export async function POST(req: NextRequest) {
       accounts[row.platform] = row;
     }
 
-    const results: Record<string, { success: boolean; url?: string; error?: string }> = {};
+    const results: Record<
+      string,
+      { success: boolean; url?: string; error?: string; pendingContainerId?: string }
+    > = {};
 
     await Promise.all(
       platforms.map(async (platform) => {
@@ -525,7 +534,19 @@ export async function POST(req: NextRequest) {
             results.tiktok = { success: false, error: 'TikTok은 이미지 게시물을 지원하지 않습니다. 영상 전용(준비 중)입니다.' };
             break;
           case 'youtube':
-            results.youtube = { success: false, error: 'YouTube는 이미지 게시물을 지원하지 않습니다. 동영상 전용입니다.' };
+            if (!videoUrl) {
+              results.youtube = { success: false, error: 'YouTube는 이미지 게시물을 지원하지 않습니다. 동영상 전용입니다.' };
+            } else if (!accounts.youtube?.refresh_token) {
+              results.youtube = { success: false, error: 'YouTube 계정이 연동되지 않았습니다. SNS 설정에서 연결해주세요.' };
+            } else {
+              results.youtube = await uploadShortToYoutube({
+                refreshToken: accounts.youtube.refresh_token,
+                videoUrl,
+                title: (title || caption || '').trim(),
+                description: caption,
+                privacyStatus,
+              });
+            }
             break;
           case 'x':
             results.x = { success: false, error: 'X(Twitter) 연동은 준비 중입니다.' };

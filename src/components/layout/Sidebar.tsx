@@ -174,7 +174,7 @@ export default function Sidebar() {
                 className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors ${isActive('/reels') ? 'bg-primary-50 text-primary-700 font-bold' : 'text-gray-600 hover:bg-gray-50 font-medium'}`}>
                 <div className="flex items-center gap-2">
                   <Film size={14} className={isActive('/reels') ? 'text-primary-600' : 'text-gray-400'} />
-                  <span>릴스 업로드</span>
+                  <span>릴스·쇼츠 업로드</span>
                 </div>
                 <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full font-bold">NEW</span>
               </Link>

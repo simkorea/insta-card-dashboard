@@ -25,6 +25,7 @@ const PLATFORMS = [
     color: 'from-purple-500 via-pink-500 to-orange-400',
     abbr: 'IG',
     oauth: true,
+    authPath: '/api/instagram/auth',
     guide: {
       title: 'Instagram 연동 방법',
       steps: [
@@ -107,9 +108,22 @@ const PLATFORMS = [
     label: 'YouTube',
     color: 'from-red-600 to-red-500',
     abbr: 'YT',
-    oauth: false,
-    comingSoon: true,
-    guide: null,
+    oauth: true,
+    authPath: '/api/youtube/auth',
+    guide: {
+      title: 'YouTube 연동 방법',
+      steps: [
+        { step: '1', text: 'Google Cloud Console에서 이 앱의 OAuth 클라이언트에 승인된 리디렉션 URI로 https://insta-card-dashboard.vercel.app/api/youtube/callback 을 등록합니다.' },
+        { step: '2', text: '같은 프로젝트에서 "YouTube Data API v3"가 사용 설정돼 있는지 확인합니다.' },
+        { step: '3', text: 'OAuth 동의 화면 → 데이터 액세스에 youtube.upload, youtube.readonly 범위를 추가합니다.' },
+        { step: '4', text: '아래 "연동하기"를 눌러 구글 계정으로 로그인하고 권한을 허용합니다.' },
+      ],
+      note: '⚠️ 앱이 아직 테스트 모드라면 OAuth 동의 화면의 "테스트 사용자"에 본인 구글 계정을 추가해야 합니다. 업로드는 유튜브 API 기본 한도로 하루 약 6개까지 가능합니다.',
+      links: [
+        { label: 'Google Cloud Console — 사용자 인증 정보', url: 'https://console.cloud.google.com/apis/credentials' },
+        { label: 'YouTube Data API v3 문서', url: 'https://developers.google.com/youtube/v3/docs/videos/insert' },
+      ],
+    },
     fields: [],
   },
 ];
@@ -212,6 +226,12 @@ function SnsSettingsContent() {
     const igStatus = searchParams.get('instagram');
     if (igStatus === 'connected') showToast(`Instagram @${searchParams.get('user') || ''} 연동 완료!`);
     else if (igStatus === 'error') showToast('Instagram 연동 실패. 다시 시도해 주세요.', false);
+
+    const ytStatus = searchParams.get('youtube');
+    if (ytStatus === 'connected') showToast(`YouTube "${searchParams.get('user') || ''}" 채널 연동 완료!`);
+    // 유튜브는 실패 원인이 여러 가지(리디렉션 미등록·범위 누락·채널 없음)라
+    // "다시 시도"만 알리면 고칠 수가 없다. 서버가 보낸 이유를 그대로 보여준다.
+    else if (ytStatus === 'error') showToast(`YouTube 연동 실패: ${searchParams.get('msg') || '알 수 없는 오류'}`, false);
   }, [searchParams]);
 
   useEffect(() => {
@@ -369,8 +389,8 @@ function SnsSettingsContent() {
                         )}
                         {platform.oauth ? (
                           <a
-                            href="/api/instagram/auth"
-                            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 text-white text-xs font-bold hover:opacity-90 transition-opacity"
+                            href={(platform as any).authPath}
+                            className={`px-3.5 py-2 rounded-xl bg-gradient-to-r ${platform.color} text-white text-xs font-bold hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-gray-300 active:scale-[0.98] transition-opacity`}
                           >
                             {isConnected ? '재연동' : '연동하기'}
                           </a>
@@ -395,6 +415,25 @@ function SnsSettingsContent() {
                     )}
                   </div>
                 </div>
+
+                {/* OAuth 플랫폼은 '연동하기'가 바로 외부로 나가는 링크라 확장 영역이 없다.
+                    유튜브처럼 사전 설정(리디렉션 URI 등록 등)이 필요한 경우 볼 곳이 없어서
+                    가이드 토글을 따로 둔다. */}
+                {platform.oauth && platform.guide && (
+                  <div className="border-t border-gray-100">
+                    <button
+                      onClick={() => setShowGuide(isGuideOpen ? null : platform.id)}
+                      className="w-full flex items-center justify-between px-5 py-3 text-xs font-bold text-blue-600 hover:bg-blue-50/50 focus:outline-none focus:bg-blue-50 transition-colors"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Info size={13} />
+                        연동 전 준비할 것 보기
+                      </span>
+                      {isGuideOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                    </button>
+                    {isGuideOpen && <GuideSection guide={platform.guide} />}
+                  </div>
+                )}
 
                 {/* 확장 영역 (수동 토큰 입력) */}
                 {isExpanded && !platform.oauth && !(platform as any).comingSoon && (

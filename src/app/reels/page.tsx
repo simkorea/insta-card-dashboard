@@ -1,27 +1,53 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { Loader2, Film, UploadCloud, CheckCircle2, ExternalLink, AlertTriangle } from 'lucide-react';
+import { Loader2, Film, UploadCloud, CheckCircle2, ExternalLink, AlertTriangle, XCircle } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 
-// 로컬에서 만든 영상을 올려 인스타 릴스로 발행한다.
+// 로컬에서 만든 영상을 올려 쇼츠·릴스로 발행한다.
 //
 // 왜 여기서 영상을 만들지 않는가: 영상 합성(ffmpeg)은 Vercel 서버리스에서
 // 사실상 불가능하다. 영상은 로컬 쇼츠 도구에서 만들고, 이 화면은 발행만 맡는다.
 
-type Phase = 'idle' | 'signing' | 'uploading' | 'publishing' | 'done' | 'pending';
+type Phase = 'idle' | 'signing' | 'uploading' | 'publishing' | 'done';
+
+interface PlatformResult {
+  success: boolean;
+  url?: string;
+  error?: string;
+  pendingContainerId?: string;
+}
+
+const PLATFORMS = [
+  { id: 'instagram', label: '인스타그램 릴스', hint: '세로 9:16 · 3초~15분' },
+  { id: 'youtube', label: '유튜브 쇼츠', hint: '세로 9:16 · 3분 이하면 쇼츠로 분류' },
+] as const;
+
+const PRIVACY = [
+  { value: 'public', label: '공개' },
+  { value: 'unlisted', label: '일부 공개(링크가 있는 사람만)' },
+  { value: 'private', label: '비공개' },
+] as const;
 
 export default function ReelsPage() {
   const [file, setFile] = useState<File | null>(null);
   const [caption, setCaption] = useState('');
+  const [title, setTitle] = useState('');
+  const [privacy, setPrivacy] = useState<'public' | 'unlisted' | 'private'>('public');
+  const [selected, setSelected] = useState<string[]>(['instagram']);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
-  const [postUrl, setPostUrl] = useState('');
-  const [pendingId, setPendingId] = useState('');
+  const [results, setResults] = useState<Record<string, PlatformResult>>({});
+  // 업로드한 영상 주소. 인스타 마무리 발행이나 재시도 때 다시 올리지 않으려고 들고 있는다.
+  const [uploadedUrl, setUploadedUrl] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   const busy = phase === 'signing' || phase === 'uploading' || phase === 'publishing';
+  const wantsYoutube = selected.includes('youtube');
+  const canPublish = Boolean(file) && selected.length > 0 && (!wantsYoutube || title.trim().length > 0);
+
+  const toggle = (id: string) =>
+    setSelected(prev => (prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]));
 
   const pick = (f: File | null) => {
     if (!f) return;
@@ -30,101 +56,115 @@ export default function ReelsPage() {
       return;
     }
     setError('');
-    setPostUrl('');
-    setPendingId('');
+    setResults({});
+    setUploadedUrl('');
     setPhase('idle');
     setFile(f);
   };
 
+  /** 파일을 Supabase에 올리고 공개 주소를 돌려준다. 이미 올렸으면 그대로 쓴다. */
+  const ensureUploaded = async (): Promise<string> => {
+    if (uploadedUrl) return uploadedUrl;
+    if (!file) throw new Error('영상 파일이 없습니다.');
+
+    // 서명 URL 발급 — 파일 자체는 Vercel을 거치지 않는다(본문 4.5MB 제한)
+    setPhase('signing');
+    const signRes = await fetch('/api/upload-video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size }),
+    });
+    const sign = await signRes.json();
+    if (!signRes.ok) throw new Error(sign.error || '업로드 준비에 실패했습니다.');
+
+    // 브라우저 → Supabase 직접 업로드
+    setPhase('uploading');
+    const supabase = createSupabaseBrowser();
+    const { error: upErr } = await supabase.storage
+      .from(sign.bucket)
+      .uploadToSignedUrl(sign.path, sign.token, file, { contentType: file.type || 'video/mp4' });
+    if (upErr) throw new Error(`업로드 실패: ${upErr.message}`);
+
+    setUploadedUrl(sign.publicUrl);
+    return sign.publicUrl as string;
+  };
+
   const publish = async () => {
-    if (!file) return;
     setError('');
-    setPostUrl('');
-    setProgress(0);
+
+    // 이미 성공한 곳은 다시 보내지 않는다. 한쪽만 실패해서 다시 눌렀을 때
+    // 성공했던 쪽에 같은 영상이 한 번 더 올라가면 안 된다.
+    const targets = selected.filter(p => !results[p]?.success);
+    if (targets.length === 0) {
+      setError('선택한 곳에는 이미 모두 발행했습니다. 다시 올리려면 영상을 새로 선택해주세요.');
+      return;
+    }
 
     try {
-      // 1) 서명 URL 발급 — 파일 자체는 Vercel을 거치지 않는다(본문 4.5MB 제한)
-      setPhase('signing');
-      const signRes = await fetch('/api/upload-video', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: file.name, contentType: file.type, size: file.size }),
-      });
-      const sign = await signRes.json();
-      if (!signRes.ok) throw new Error(sign.error || '업로드 준비에 실패했습니다.');
+      const publicUrl = await ensureUploaded();
 
-      // 2) 브라우저 → Supabase 직접 업로드
-      setPhase('uploading');
-      const supabase = createSupabaseBrowser();
-      const { error: upErr } = await supabase.storage
-        .from(sign.bucket)
-        .uploadToSignedUrl(sign.path, sign.token, file, { contentType: file.type || 'video/mp4' });
-      if (upErr) throw new Error(`업로드 실패: ${upErr.message}`);
-      setProgress(100);
-
-      // 3) 릴스 발행
       setPhase('publishing');
       const pubRes = await fetch('/api/upload/sns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoUrl: sign.publicUrl, caption, platforms: ['instagram'] }),
+        body: JSON.stringify({
+          videoUrl: publicUrl,
+          caption,
+          title: title.trim(),
+          privacyStatus: privacy,
+          platforms: targets,
+        }),
       });
       const pub = await pubRes.json();
-      const ig = pub.results?.instagram;
+      if (!pubRes.ok) throw new Error(pub.error || '발행에 실패했습니다.');
 
-      if (ig?.success) {
-        setPostUrl(ig.url || '');
-        setPhase('done');
-      } else if (ig?.pendingContainerId) {
-        setPendingId(ig.pendingContainerId);
-        setPhase('pending');
-      } else {
-        throw new Error(ig?.error || pub.error || '발행에 실패했습니다.');
-      }
+      setResults(prev => ({ ...prev, ...(pub.results || {}) }));
+      setPhase('done');
     } catch (e: any) {
       setError(e?.message || '오류가 발생했습니다.');
       setPhase('idle');
     }
   };
 
-  const finish = async () => {
+  /** 인스타 영상 변환이 늦어 미뤄둔 컨테이너를 마저 발행한다. */
+  const finishInstagram = async (containerId: string) => {
     setError('');
     setPhase('publishing');
     try {
       const res = await fetch('/api/upload/sns', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ finishContainerId: pendingId, caption, platforms: ['instagram'] }),
+        body: JSON.stringify({ finishContainerId: containerId, caption, platforms: ['instagram'] }),
       });
       const data = await res.json();
       const ig = data.results?.instagram;
       if (!ig?.success) throw new Error(ig?.error || '발행에 실패했습니다.');
-      setPostUrl(ig.url || '');
+      setResults(prev => ({ ...prev, instagram: ig }));
       setPhase('done');
     } catch (e: any) {
       setError(e?.message || '오류가 발생했습니다.');
-      setPhase('pending');
+      setPhase('done');
     }
   };
 
   const phaseLabel = {
     signing: '업로드 준비 중...',
     uploading: '영상 올리는 중...',
-    publishing: '인스타그램에 발행 중... (영상 변환에 시간이 걸립니다)',
+    publishing: '발행 중... (영상 변환에 시간이 걸립니다)',
   }[phase as 'signing' | 'uploading' | 'publishing'];
 
   return (
     <div className="max-w-[760px] mx-auto px-4 md:px-8 py-6 md:py-10">
-      <h1 className="text-xl md:text-2xl font-bold text-gray-900 mb-1">릴스 업로드</h1>
+      <h1 className="text-xl md:text-2xl font-bold text-gray-900 mb-1">릴스·쇼츠 업로드</h1>
       <p className="text-sm text-gray-500 mb-6">
-        만들어 둔 세로 영상을 올리면 인스타그램 릴스로 발행합니다.
+        만들어 둔 세로 영상을 올리면 선택한 플랫폼에 발행합니다.
       </p>
 
       <div className="rounded-2xl border border-blue-200 bg-blue-50/60 p-4 mb-5">
         <p className="text-[13px] font-bold text-blue-900 mb-1.5">영상 규격</p>
         <ul className="text-[12px] text-blue-800/90 leading-relaxed list-disc pl-4 space-y-0.5">
           <li>세로 9:16 (1080×1920 권장), MP4 또는 MOV</li>
-          <li>3초 ~ 15분, 300MB 이하</li>
+          <li>3초 ~ 15분, 300MB 이하 (유튜브는 200MB까지)</li>
           <li>영상 제작은 로컬 쇼츠 도구에서 하고, 완성본만 여기에 올립니다</li>
         </ul>
       </div>
@@ -162,68 +202,149 @@ export default function ReelsPage() {
         )}
       </div>
 
+      {/* 플랫폼 선택 */}
       <div className="mt-4">
-        <label className="text-[12px] font-bold text-gray-700 mb-1.5 block">캡션</label>
+        <label className="text-[12px] font-bold text-gray-700 mb-1.5 block">올릴 곳</label>
+        <div className="grid sm:grid-cols-2 gap-2">
+          {PLATFORMS.map(p => {
+            const on = selected.includes(p.id);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => toggle(p.id)}
+                disabled={busy}
+                className={`text-left px-3.5 py-3 rounded-xl border-2 focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+                  on ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300 bg-white'
+                }`}
+              >
+                <span className={`block text-sm font-bold ${on ? 'text-primary-700' : 'text-gray-700'}`}>{p.label}</span>
+                <span className="block text-[11px] text-gray-500 mt-0.5">{p.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 유튜브 전용 입력 — 인스타에는 제목·공개범위 개념이 없다 */}
+      {wantsYoutube && (
+        <div className="mt-4 rounded-2xl border border-gray-200 p-4 space-y-3">
+          <p className="text-[12px] font-bold text-gray-700">유튜브 설정</p>
+          <div>
+            <label className="text-[11px] font-semibold text-gray-600 mb-1 block">
+              제목 <span className="text-red-500">*</span>
+              <span className="text-gray-400 font-normal ml-1">{title.length}/100</span>
+            </label>
+            <input
+              value={title}
+              onChange={e => setTitle(e.target.value.slice(0, 100))}
+              placeholder="예: 용인신갈 펜타원 84㎡ 실내 둘러보기"
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-200"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-semibold text-gray-600 mb-1 block">공개 범위</label>
+            <select
+              value={privacy}
+              onChange={e => setPrivacy(e.target.value as typeof privacy)}
+              className="w-full px-3 py-2.5 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-200 bg-white"
+            >
+              {PRIVACY.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+            </select>
+          </div>
+          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            유튜브 API 기본 한도로는 하루 약 6개까지만 올릴 수 있습니다. 아래 캡션이 영상 설명으로 들어갑니다.
+          </p>
+        </div>
+      )}
+
+      <div className="mt-4">
+        <label className="text-[12px] font-bold text-gray-700 mb-1.5 block">
+          캡션 {wantsYoutube && <span className="text-gray-400 font-normal">(유튜브에서는 설명)</span>}
+        </label>
         <textarea
           value={caption}
           onChange={e => setCaption(e.target.value)}
           rows={4}
-          placeholder="릴스에 넣을 문구를 입력하세요. 해시태그도 함께 넣을 수 있습니다."
+          placeholder="영상에 넣을 문구를 입력하세요. 해시태그도 함께 넣을 수 있습니다."
           className="w-full px-3 py-3 border border-gray-200 rounded-xl text-sm outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-200 resize-y"
         />
       </div>
 
       <button
         onClick={publish}
-        disabled={!file || busy}
+        disabled={!canPublish || busy}
         className="w-full mt-4 py-3 bg-primary-600 text-white rounded-xl font-bold text-sm hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-300 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
       >
-        {busy ? <><Loader2 size={15} className="animate-spin" /> {phaseLabel}</> : '릴스로 발행하기'}
+        {busy
+          ? <><Loader2 size={15} className="animate-spin" /> {phaseLabel}</>
+          : selected.some(p => results[p]?.success) ? '남은 곳에 발행하기' : '발행하기'}
       </button>
 
-      {phase === 'uploading' && progress > 0 && (
-        <div className="h-1.5 bg-gray-100 rounded-full mt-3 overflow-hidden">
-          <div className="h-full bg-primary-500 transition-[width]" style={{ width: `${progress}%` }} />
-        </div>
+      {wantsYoutube && !title.trim() && file && (
+        <p className="text-[11px] text-gray-500 mt-2 text-center">유튜브에 올리려면 제목이 필요합니다.</p>
       )}
 
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700 mt-4">{error}</div>
       )}
 
-      {phase === 'pending' && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 mt-4">
-          <p className="text-[13px] font-bold text-amber-900 flex items-center gap-1.5 mb-1">
-            <AlertTriangle size={15} /> 영상 변환이 아직 진행 중입니다
-          </p>
-          <p className="text-[12px] text-amber-800/90 leading-relaxed mb-3">
-            영상은 이미 인스타그램에 전달됐고 변환만 남았습니다. 30초쯤 뒤 아래 버튼을 눌러 마무리하세요.
-            (전달된 영상은 24시간 안에 발행하면 됩니다)
-          </p>
-          <button
-            onClick={finish}
-            className="px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300 active:scale-[0.98] transition-colors"
-          >
-            발행 마무리
-          </button>
-        </div>
-      )}
-
-      {phase === 'done' && (
-        <div className="rounded-2xl border border-green-200 bg-green-50/70 p-4 mt-4">
-          <p className="text-sm font-bold text-green-900 flex items-center gap-1.5 mb-2">
-            <CheckCircle2 size={16} /> 릴스가 발행됐습니다
-          </p>
-          {postUrl && (
-            <a
-              href={postUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-xs font-bold rounded-xl hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-300 active:scale-[0.98] transition-colors"
-            >
-              인스타그램에서 보기 <ExternalLink size={13} />
-            </a>
-          )}
+      {/* 플랫폼별 결과 — 하나가 실패해도 나머지 결과는 그대로 보여준다 */}
+      {Object.keys(results).length > 0 && (
+        <div className="mt-4 space-y-3">
+          {PLATFORMS.filter(p => results[p.id]).map(p => {
+            const r = results[p.id];
+            if (r.success) {
+              return (
+                <div key={p.id} className="rounded-2xl border border-green-200 bg-green-50/70 p-4">
+                  <p className="text-sm font-bold text-green-900 flex items-center gap-1.5 mb-2">
+                    <CheckCircle2 size={16} /> {p.label} 발행 완료
+                  </p>
+                  {r.url && (
+                    <a
+                      href={r.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-xs font-bold rounded-xl hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-300 active:scale-[0.98] transition-colors"
+                    >
+                      바로 보기 <ExternalLink size={13} />
+                    </a>
+                  )}
+                </div>
+              );
+            }
+            if (r.pendingContainerId) {
+              return (
+                <div key={p.id} className="rounded-2xl border border-amber-300 bg-amber-50 p-4">
+                  <p className="text-[13px] font-bold text-amber-900 flex items-center gap-1.5 mb-1">
+                    <AlertTriangle size={15} /> {p.label} — 영상 변환이 아직 진행 중입니다
+                  </p>
+                  <p className="text-[12px] text-amber-800/90 leading-relaxed mb-3">
+                    영상은 이미 전달됐고 변환만 남았습니다. 30초쯤 뒤 아래 버튼을 눌러 마무리하세요.
+                    (전달된 영상은 24시간 안에 발행하면 됩니다)
+                  </p>
+                  <button
+                    onClick={() => finishInstagram(r.pendingContainerId!)}
+                    disabled={busy}
+                    className="px-4 py-2 bg-amber-600 text-white text-xs font-bold rounded-xl hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-300 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    발행 마무리
+                  </button>
+                </div>
+              );
+            }
+            return (
+              <div key={p.id} className="rounded-2xl border border-red-200 bg-red-50 p-4">
+                <p className="text-[13px] font-bold text-red-800 flex items-center gap-1.5 mb-1">
+                  <XCircle size={15} /> {p.label} 발행 실패
+                </p>
+                <p className="text-[12px] text-red-700 leading-relaxed">{r.error}</p>
+                <p className="text-[11px] text-red-600/80 mt-2">
+                  영상은 이미 올라가 있습니다. 문제를 고친 뒤 다시 누르면 업로드 없이 발행만 재시도합니다.
+                </p>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
