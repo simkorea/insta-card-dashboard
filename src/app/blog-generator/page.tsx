@@ -1533,7 +1533,7 @@ function ImageAddModal({
           setHasApiKey(data.hasKey);
         }
       })
-      .catch(err => console.error('Failed to check Leonardo API key:', err));
+      .catch(err => console.error('이미지 생성 키 확인 실패:', err));
   }, []);
   
   // 1. 검색 상태
@@ -1773,8 +1773,8 @@ function ImageAddModal({
               {/* API 키가 없는 경우 안내 문구 노출 */}
               {!hasApiKey && (
                 <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-xs leading-relaxed space-y-1">
-                  <p className="font-bold flex items-center gap-1">⚠️ AI 이미지 생성 기능 준비 중</p>
-                  <p>현재 AI 이미지 생성 기능은 시스템 준비 중입니다. 당분간은 상단 탭에서 <strong>스톡 검색</strong> 또는 <strong>직접 업로드</strong> 기능을 이용해주세요.</p>
+                  <p className="font-bold flex items-center gap-1">⚠️ AI 이미지 생성을 쓸 수 없습니다</p>
+                  <p>서버에 이미지 생성 키(<strong>GEMINI_API_KEY</strong>)가 설정돼 있지 않습니다. 그동안은 상단 탭의 <strong>스톡 검색</strong> 또는 <strong>직접 업로드</strong>를 이용해주세요.</p>
                 </div>
               )}
 
@@ -1818,7 +1818,7 @@ function ImageAddModal({
                 className="w-full py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
               >
                 {aiGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                {!hasApiKey ? 'AI 이미지 생성 준비 중' : aiGenerating ? 'AI 이미지 생성 중...' : '이미지 생성하기'}
+                {!hasApiKey ? 'AI 이미지 생성 불가' : aiGenerating ? 'AI 이미지 생성 중... (20~40초)' : '이미지 생성하기'}
               </button>
 
               {aiError && <p className="text-xs text-red-500 bg-red-50 rounded-lg px-3 py-2">{aiError}</p>}

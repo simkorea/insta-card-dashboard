@@ -7,7 +7,11 @@ import { createClient } from '@supabase/supabase-js';
  * Storage가 "Invalid key: notebook/..._안양석수하우스토리아파트_....png"로
  * 전부 거부해서, 이미지가 멀쩡히 생성됐는데도 카드에 하나도 붙지 않았다.
  */
-export async function uploadNotebookImage(base64: string, index: number): Promise<string> {
+export async function uploadNotebookImage(
+  base64: string,
+  index: number,
+  prefix = 'notebook'
+): Promise<string> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return '';
@@ -15,7 +19,7 @@ export async function uploadNotebookImage(base64: string, index: number): Promis
   const supabase = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const filename = `notebook/${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}.png`;
+  const filename = `${prefix}/${Date.now()}_${index}_${Math.random().toString(36).slice(2, 7)}.png`;
 
   const { error } = await supabase.storage
     .from('card-images')
