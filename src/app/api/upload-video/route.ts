@@ -13,16 +13,21 @@ export const maxDuration = 30;
 const BUCKET = 'card-images';           // 기존 공개 버킷을 그대로 쓴다 (videos/ 하위)
 const MAX_BYTES = 300 * 1024 * 1024;    // 300MB. 인스타 릴스 자체 한도가 1GB지만 실용선
 
-const ALLOWED = ['video/mp4', 'video/quicktime'];
+// webm은 영상 생성 화면이 브라우저에서 녹화할 때 나올 수 있다. 유튜브·틱톡은
+// 받지만 인스타는 받지 않는다 — 그 판단은 발행 화면에서 한다.
+const ALLOWED = ['video/mp4', 'video/quicktime', 'video/webm'];
 
 export async function POST(request: NextRequest) {
   try {
     const { filename, contentType, size } = await request.json();
 
     if (!filename) return NextResponse.json({ error: '파일명이 필요합니다.' }, { status: 400 });
-    if (contentType && !ALLOWED.includes(contentType)) {
+
+    // MediaRecorder는 'video/mp4;codecs=avc1.42E01E' 처럼 코덱까지 붙여서 준다.
+    const baseType = String(contentType || '').split(';')[0].trim();
+    if (baseType && !ALLOWED.includes(baseType)) {
       return NextResponse.json(
-        { error: 'MP4 또는 MOV 파일만 올릴 수 있습니다.' },
+        { error: 'MP4 · MOV · WebM 파일만 올릴 수 있습니다.' },
         { status: 400 }
       );
     }

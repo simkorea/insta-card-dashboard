@@ -1,6 +1,29 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle, Wand2, Copy, Upload, Plus, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle, Wand2, Copy, Upload, Plus, Trash2, Send } from 'lucide-react';
+import { createSupabaseBrowser } from '@/lib/supabase-browser';
+
+/**
+ * 녹화 형식을 고른다. MP4(H.264)를 먼저 시도하는 이유:
+ * 인스타그램은 WebM을 아예 받지 않는다. 예전에는 WebM으로만 뽑아서
+ * 릴스에 올리려면 밖에서 변환을 거쳐야 했다.
+ * 최근 크롬은 MP4 녹화를 지원하므로 되면 그걸 쓰고, 안 되면 WebM으로 떨어진다.
+ */
+function pickRecorderType(): { mimeType: string; ext: string } {
+  const candidates: [string, string][] = [
+    ['video/mp4;codecs=avc1.42E01E', 'mp4'],
+    ['video/mp4', 'mp4'],
+    ['video/webm;codecs=vp9', 'webm'],
+    ['video/webm', 'webm'],
+  ];
+  for (const [mimeType, ext] of candidates) {
+    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(mimeType)) {
+      return { mimeType, ext };
+    }
+  }
+  return { mimeType: '', ext: 'webm' };
+}
 
 // ─── 슬라이드 렌더러 (영상 캡처용) ──────────────────────────────────────────
 function SlideFrame({ page, width, height }: { page: any; width: number; height: number }) {
@@ -100,6 +123,12 @@ export default function VideoGeneratorPage() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState('');
   const [exportDone, setExportDone] = useState(false);
+  // 만든 영상을 들고 있다가 발행 화면으로 바로 넘기기 위한 상태
+  const [exportedBlob, setExportedBlob] = useState<Blob | null>(null);
+  const [exportedName, setExportedName] = useState('');
+  const [exportedExt, setExportedExt] = useState('mp4');
+  const [uploading, setUploading] = useState(false);
+  const router = useRouter();
   const [exportError, setExportError] = useState('');
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -169,6 +198,7 @@ export default function VideoGeneratorPage() {
     setIsExporting(true);
     setExportDone(false);
     setExportError('');
+    setExportedBlob(null);
 
     try {
       // 1. 캔버스 셋업
@@ -193,9 +223,7 @@ export default function VideoGeneratorPage() {
       if (slideCanvases.length === 0) throw new Error('슬라이드 캡처 실패');
 
       // 3. MediaRecorder 셋업
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : 'video/webm';
+      const { mimeType, ext } = pickRecorderType();
       const stream = canvas.captureStream(30);
       const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
       const chunks: Blob[] = [];
@@ -254,15 +282,19 @@ export default function VideoGeneratorPage() {
       recorder.stop();
       await recordingDone;
 
-      // 4. 다운로드
+      // 4. 다운로드 + 바로 올리기용으로 들고 있는다
       setExportProgress('파일 저장 중...');
-      const blob = new Blob(chunks, { type: mimeType });
+      const blob = new Blob(chunks, { type: mimeType || `video/${ext}` });
+      const fileName = `${selectedDesign.name || 'cardnews'}_video.${ext}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${selectedDesign.name || 'cardnews'}_video.webm`;
+      a.download = fileName;
       a.click();
       URL.revokeObjectURL(url);
+      setExportedBlob(blob);
+      setExportedName(fileName);
+      setExportedExt(ext);
       setExportDone(true);
     } catch (e: any) {
       setExportError(e.message || '영상 생성 실패');
@@ -271,6 +303,45 @@ export default function VideoGeneratorPage() {
       setExportProgress('');
     }
   }, [selectedDesign, pages, duration, transition, ratio, ratioInfo]);
+
+  /**
+   * 방금 만든 영상을 저장소에 올리고 발행 화면으로 넘긴다.
+   * 파일은 Vercel을 거치지 않고 브라우저에서 Supabase로 바로 간다 —
+   * 라우트는 본문이 약 4.5MB로 제한돼 영상을 통과시킬 수 없다.
+   */
+  const handleUploadToPublish = async () => {
+    if (!exportedBlob) return;
+    setUploading(true);
+    setExportError('');
+    try {
+      const signRes = await fetch('/api/upload-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: `video.${exportedExt}`,
+          contentType: exportedBlob.type,
+          size: exportedBlob.size,
+        }),
+      });
+      const sign = await signRes.json();
+      if (!signRes.ok) throw new Error(sign.error || '업로드 준비에 실패했습니다.');
+
+      const supabase = createSupabaseBrowser();
+      const { error } = await supabase.storage
+        .from(sign.bucket)
+        .uploadToSignedUrl(sign.path, sign.token, exportedBlob, {
+          contentType: exportedBlob.type.split(';')[0] || `video/${exportedExt}`,
+        });
+      if (error) throw new Error(`업로드 실패: ${error.message}`);
+
+      router.push(
+        `/reels?video=${encodeURIComponent(sign.publicUrl)}&name=${encodeURIComponent(exportedName)}`
+      );
+    } catch (e: any) {
+      setExportError(e?.message || '업로드 중 오류가 발생했습니다.');
+      setUploading(false);
+    }
+  };
 
   const handleGeneratePrompts = async () => {
     let source = '';
@@ -685,7 +756,7 @@ export default function VideoGeneratorPage() {
                     ? `총 ${pages.length}장 × ${duration}초 = 약 ${(pages.length * duration).toFixed(0)}초 영상`
                     : '디자인을 선택하면 영상 길이가 표시됩니다'}
                 </p>
-                <p className="text-[10px] text-gray-400 mt-1">출력 형식: WebM (대부분 SNS 업로드 지원)</p>
+                <p className="text-[10px] text-gray-400 mt-1">출력 형식: MP4 (지원하지 않는 브라우저에서는 WebM)</p>
               </div>
 
               {/* Export Button */}
@@ -707,6 +778,25 @@ export default function VideoGeneratorPage() {
                 )}
               </button>
 
+              {/* 만든 영상을 그대로 발행 화면으로 넘긴다 */}
+              {exportedBlob && (
+                <button
+                  onClick={handleUploadToPublish}
+                  disabled={uploading}
+                  className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl font-bold text-sm bg-primary-600 text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-300 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                >
+                  {uploading
+                    ? <><Loader2 size={16} className="animate-spin" /> 올리는 중...</>
+                    : <><Send size={16} /> 이 영상 바로 발행하기</>}
+                </button>
+              )}
+              {exportedBlob && exportedExt === 'webm' && (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  이 브라우저가 MP4 녹화를 지원하지 않아 WebM으로 만들어졌습니다.
+                  유튜브·틱톡은 그대로 올라가지만 인스타그램은 WebM을 받지 않습니다.
+                </p>
+              )}
+
               {exportError && (
                 <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-100 rounded-xl">
                   <AlertCircle size={14} className="text-red-500 mt-0.5 shrink-0" />
@@ -721,7 +811,7 @@ export default function VideoGeneratorPage() {
                   <li>• 릴스/스토리: 9:16 비율 권장</li>
                   <li>• 피드 업로드: 4:5 또는 1:1</li>
                   <li>• 슬라이드당 2-3초가 최적</li>
-                  <li>• WebM → MP4 변환: 클라우드컨버트 등 사용</li>
+                  <li>• 만든 뒤 &lsquo;바로 발행하기&rsquo;로 릴스·쇼츠·틱톡에 올릴 수 있습니다</li>
                 </ul>
               </div>
             </div>

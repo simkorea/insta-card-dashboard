@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Loader2, Film, UploadCloud, CheckCircle2, ExternalLink, AlertTriangle, XCircle } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 
@@ -43,13 +43,30 @@ export default function ReelsPage() {
   const [results, setResults] = useState<Record<string, PlatformResult>>({});
   // 업로드한 영상 주소. 인스타 마무리 발행이나 재시도 때 다시 올리지 않으려고 들고 있는다.
   const [uploadedUrl, setUploadedUrl] = useState('');
+  // 영상 생성 화면에서 넘어온 경우 파일 대신 이름만 보여준다.
+  const [handedOverName, setHandedOverName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 영상 생성 화면이 ?video=... 로 넘겨준다. 이미 저장소에 올라가 있으므로
+  // 파일을 다시 고를 필요가 없다.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const v = q.get('video');
+    if (!v) return;
+    setUploadedUrl(v);
+    setHandedOverName(q.get('name') || '영상 생성에서 만든 영상');
+  }, []);
 
   const busy = phase === 'signing' || phase === 'uploading' || phase === 'publishing';
   const wantsYoutube = selected.includes('youtube');
   const wantsTiktok = selected.includes('tiktok');
   const needsPrivacy = wantsYoutube || wantsTiktok;
-  const canPublish = Boolean(file) && selected.length > 0 && (!wantsYoutube || title.trim().length > 0);
+  const hasVideo = Boolean(file || uploadedUrl);
+  // 인스타는 WebM을 받지 않는다. 영상 생성이 MP4를 못 만든 브라우저에서 넘어올 수 있다.
+  const isWebm = /\.webm(\?|$)/i.test(uploadedUrl) || /\.webm$/i.test(file?.name || '');
+  const igBlocked = isWebm && selected.includes('instagram');
+  const canPublish =
+    hasVideo && selected.length > 0 && !igBlocked && (!wantsYoutube || title.trim().length > 0);
 
   const toggle = (id: string) =>
     setSelected(prev => (prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]));
@@ -63,6 +80,7 @@ export default function ReelsPage() {
     setError('');
     setResults({});
     setUploadedUrl('');
+    setHandedOverName('');
     setPhase('idle');
     setFile(f);
   };
@@ -205,6 +223,14 @@ export default function ReelsPage() {
               <p className="text-[11px] text-gray-500">{(file.size / 1024 / 1024).toFixed(1)}MB</p>
             </div>
           </div>
+        ) : handedOverName ? (
+          <div className="flex items-center justify-center gap-2.5">
+            <Film size={20} className="text-primary-600 shrink-0" />
+            <div className="text-left min-w-0">
+              <p className="text-sm font-bold text-gray-900 truncate">{handedOverName}</p>
+              <p className="text-[11px] text-gray-500">영상 생성에서 넘어옴 · 이미 올라가 있습니다</p>
+            </div>
+          </div>
         ) : (
           <>
             <UploadCloud size={28} className="mx-auto text-gray-400 mb-2" />
@@ -308,8 +334,13 @@ export default function ReelsPage() {
           : selected.some(p => results[p]?.success) ? '남은 곳에 발행하기' : '발행하기'}
       </button>
 
-      {wantsYoutube && !title.trim() && file && (
+      {wantsYoutube && !title.trim() && hasVideo && (
         <p className="text-[11px] text-gray-500 mt-2 text-center">유튜브에 올리려면 제목이 필요합니다.</p>
+      )}
+      {igBlocked && (
+        <p className="text-[11px] text-red-600 mt-2 text-center">
+          이 영상은 WebM이라 인스타그램에 올릴 수 없습니다. 인스타그램을 빼거나 MP4로 다시 만들어주세요.
+        </p>
       )}
 
       {error && (
