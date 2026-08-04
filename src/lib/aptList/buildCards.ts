@@ -8,6 +8,7 @@ import {
   type CardStyle,
 } from '@/lib/notebookImage/generate';
 import { uploadNotebookImage } from '@/lib/notebookImage/upload';
+import { mapWithLimit, budget } from '@/lib/notebookImage/pool';
 
 // 단지 목록 → 손글씨 노트 스타일 카드뉴스 페이지.
 //
@@ -178,6 +179,34 @@ export async function buildAptListCards(opts: {
     }
   };
 
+  /** 단지 카드에 그림을 입힌다. drawEdge와 실패 처리 방식이 같다. */
+  const drawItem = async (
+    page: AptCardPage,
+    facts: Parameters<typeof generateNotebookImage>[0],
+    uploadIndex: number
+  ) => {
+    // 장수가 많으면 재시도까지 할 시간이 없다 — 3회는 예산을 다 먹는다
+    const img = await generateNotebookImage(facts, { style: cardStyle, maxAttempts: 2 });
+    if (!img) {
+      page.needsReview = true;
+      page.reviewNote = '그림 생성에 실패해 기본 스타일로 만들었습니다';
+      return;
+    }
+    const url = await uploadNotebookImage(img.base64, uploadIndex);
+    if (!url) {
+      // 그림은 나왔는데 저장이 안 된 경우 — 조용히 넘어가면 왜 노트가 아닌지 알 수 없다
+      page.needsReview = true;
+      page.reviewNote = '이미지 저장에 실패해 기본 스타일로 만들었습니다';
+      return;
+    }
+    page.bgImage = url;
+    page.styleVariant = 'image';
+    if (!img.verified) {
+      page.needsReview = true;
+      page.reviewNote = img.note;
+    }
+  };
+
   // 표지
   // 제목에 이미 "TOP4" 같은 표현이 있으면 강조어를 덧붙이지 않는다.
   // 그냥 붙였더니 "안양 만안구 실거래가 TOP4 TOP 4"가 됐다.
@@ -195,8 +224,10 @@ export async function buildAptListCards(opts: {
 
   // 단지별 1장 — 손글씨 노트는 AI 이미지로 그린다 (CSS로는 그 질감이 안 나옴)
   const useAi = opts.useAiImage !== false;
-  const itemPages = await Promise.all(
-    records.map(async (r, i) => {
+  // 그림은 여기서 그리지 않는다. 페이지를 먼저 다 만들고, 표지·마무리까지
+  // 합쳐 한 묶음으로 개수를 조절해가며 그린다(아래 '그림 그리기' 참고).
+  const itemJobs: { page: AptCardPage; facts: Parameters<typeof generateNotebookImage>[0] }[] = [];
+  const itemPages = records.map((r, i) => {
       const copy = copies[i];
       const advantages = copy.advantages.length > 0 ? copy.advantages : factAdvantages(r);
       const pyeongText = r.pyeong ? `전용 ${r.pyeong}평` : undefined;
@@ -222,8 +253,9 @@ export async function buildAptListCards(opts: {
 
       const page = base(String(i + 2), blocks, r.name);
 
-      if (useAi) {
-        const img = await generateNotebookImage({
+      itemJobs.push({
+        page,
+        facts: {
           index: i + 1,
           dong: shortDong(r.region) || r.region,
           name: r.name,
@@ -236,27 +268,10 @@ export async function buildAptListCards(opts: {
           noteLabel: '임장 메모',
           noteNumber,
           ratio,
-        }, { style: cardStyle });
-        if (img) {
-          const url = await uploadNotebookImage(img.base64, i + 1);
-          if (url) {
-            page.bgImage = url;
-            page.styleVariant = 'image';
-            if (!img.verified) {
-              page.needsReview = true;
-              page.reviewNote = img.note;
-            }
-          } else {
-            // 그림은 나왔는데 저장이 안 된 경우 — 조용히 기본 스타일로 넘어가면
-            // 왜 노트가 아닌지 알 수 없으므로 화면에 알린다
-            page.needsReview = true;
-            page.reviewNote = '노트 이미지 저장에 실패해 기본 스타일로 만들었습니다';
-          }
-        }
-      }
+        },
+      });
       return page;
-    })
-  );
+  });
   pages.push(...itemPages);
 
   // 마무리
@@ -270,29 +285,56 @@ export async function buildAptListCards(opts: {
   ], '마무리');
   pages.push(closingPage);
 
-  // 표지·마무리도 가운데 카드들과 같은 손그림으로 그린다.
-  // 업로드 index는 파일명에만 쓰이므로 단지 카드와 겹치지 않게 0, 99를 준다.
+  // ── 그림 그리기 ────────────────────────────────────────────────────────────
+  // 표지·단지·마무리를 한 묶음으로 그린다.
+  //
+  // 전부 한꺼번에(Promise.all) 던지면 안 된다. 9장을 동시에 보냈더니 Gemini
+  // 쪽에서 서로 밀려 호출마다 120초 제한에 걸렸고, 재시도까지 겹쳐 라우트가
+  // 300초를 넘겨 통째로 죽었다. 몇 개씩 나눠 도는 편이 오히려 빨리 끝난다.
+  // 업로드 index는 파일명에만 쓰이므로 표지·마무리는 0, 99를 준다.
   if (useAi) {
-    await Promise.all([
-      drawEdge(coverPage, {
-        kind: 'cover',
-        eyebrow: '핵심 공개!',
-        headline: coverTitle,
-        sub: '국토부 실거래가로 확인한 단지만 골랐습니다.',
-        badges: coverBadges,
-        source: '출처: 국토교통부 실거래가 공개시스템',
-        noteLabel, noteNumber, ratio,
-      }, 0),
-      drawEdge(closingPage, {
-        kind: 'closing',
-        eyebrow: '마무리',
-        headline: '저장해두면 내 집 마련에 도움',
-        sub: '궁금한 단지는 댓글이나 DM으로 남겨주세요.',
-        points: closingPoints,
-        source: '실거래가는 신고 기준이며 현재 시세와 다를 수 있습니다.',
-        noteLabel, noteNumber, ratio,
-      }, 99),
-    ]);
+    const bud = budget(230_000);
+    const jobs: { page: AptCardPage; run: () => Promise<void> }[] = [
+      {
+        page: coverPage,
+        run: () => drawEdge(coverPage, {
+          kind: 'cover',
+          eyebrow: '핵심 공개!',
+          headline: coverTitle,
+          sub: '국토부 실거래가로 확인한 단지만 골랐습니다.',
+          badges: coverBadges,
+          source: '출처: 국토교통부 실거래가 공개시스템',
+          noteLabel, noteNumber, ratio,
+        }, 0),
+      },
+      ...itemJobs.map((j, i) => ({
+        page: j.page,
+        run: () => drawItem(j.page, j.facts, i + 1),
+      })),
+      {
+        page: closingPage,
+        run: () => drawEdge(closingPage, {
+          kind: 'closing',
+          eyebrow: '마무리',
+          headline: '저장해두면 내 집 마련에 도움',
+          sub: '궁금한 단지는 댓글이나 DM으로 남겨주세요.',
+          points: closingPoints,
+          source: '실거래가는 신고 기준이며 현재 시세와 다를 수 있습니다.',
+          noteLabel, noteNumber, ratio,
+        }, 99),
+      },
+    ];
+
+    await mapWithLimit(jobs, 3, async job => {
+      // 시간이 다하면 나머지는 기본 스타일로 남긴다.
+      // 라우트가 죽어 통째로 실패하는 것보다 몇 장이라도 건지는 게 낫다.
+      if (!bud.canStart(70_000)) {
+        job.page.needsReview = true;
+        job.page.reviewNote = '시간이 모자라 기본 스타일로 남겼습니다. 단지 수를 줄이면 모두 그려집니다';
+        return;
+      }
+      await job.run();
+    });
   }
 
   return pages;

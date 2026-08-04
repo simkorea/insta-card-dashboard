@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { generateNewsNotebookImage, generateEdgeNotebookImage, type CardStyle } from '@/lib/notebookImage/generate';
 import { uploadNotebookImage } from '@/lib/notebookImage/upload';
+import { mapWithLimit, budget } from '@/lib/notebookImage/pool';
 import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
 import { notebookFactsFromBlocks } from '@/lib/notebookImage/factsFromBlocks';
 
@@ -292,19 +293,20 @@ ${sourceBlock}`;
     ? cards.map(() => '')
     : await Promise.all(cards.map(c => searchBackground(c.imageKeyword)));
 
+  // 한꺼번에 던지면 서로 밀려 호출마다 제한에 걸린다 — 몇 개씩 나눠 돌린다.
+  const imgBudget = budget(400_000);
   const notebookImages: (string | null)[] = useNotebook
-    ? await Promise.all(
-        cards.map(async (card, i) => {
-          const facts = notebookFactsFromBlocks(card.blocks, i + 1);
-          if (!facts.headline || facts.points.length === 0) return null;
-          const img = await generateNewsNotebookImage(
-            { ...facts, noteNumber, ratio: '4:5' },
-            { style: cardStyle }
-          );
-          if (!img) return null;
-          return (await uploadNotebookImage(img.base64, i + 1)) || null;
-        })
-      )
+    ? await mapWithLimit(cards, 3, async (card, i) => {
+        if (!imgBudget.canStart(70_000)) return null;
+        const facts = notebookFactsFromBlocks(card.blocks, i + 1);
+        if (!facts.headline || facts.points.length === 0) return null;
+        const img = await generateNewsNotebookImage(
+          { ...facts, noteNumber, ratio: '4:5' },
+          { style: cardStyle }
+        );
+        if (!img) return null;
+        return (await uploadNotebookImage(img.base64, i + 1)) || null;
+      })
     : cards.map(() => null);
 
   console.log(
@@ -364,7 +366,7 @@ ${sourceBlock}`;
         } as const;
 
   const drawEdge = async (kind: 'cover' | 'closing', uploadIndex: number) => {
-    if (!useNotebook) return null;
+    if (!useNotebook || !imgBudget.canStart(70_000)) return null;
     const img = await generateEdgeNotebookImage(edgeFacts(kind), { style: cardStyle });
     if (!img) return null;
     return (await uploadNotebookImage(img.base64, uploadIndex)) || null;

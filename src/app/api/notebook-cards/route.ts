@@ -3,6 +3,7 @@ import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { notebookFactsFromBlocks } from '@/lib/notebookImage/factsFromBlocks';
 import { generateNewsNotebookImage, type CardStyle } from '@/lib/notebookImage/generate';
 import { uploadNotebookImage } from '@/lib/notebookImage/upload';
+import { mapWithLimit, budget } from '@/lib/notebookImage/pool';
 
 // 이미 만들어진 카드(blocks)를 그림 스타일(손글씨 노트 / 신문)로 다시 그린다.
 //
@@ -38,8 +39,13 @@ export async function POST(request: NextRequest) {
       noteNumber ||
       `No.${String(kst.getUTCMonth() + 1).padStart(2, '0')}${String(kst.getUTCDate()).padStart(2, '0')}`;
 
-    const results = await Promise.all(
-      (cards as InCard[]).map(async (card, i) => {
+    // 한꺼번에 던지면 서로 밀려 호출마다 제한에 걸리고 라우트가 통째로 죽는다.
+    // 몇 개씩 나눠 돌리고, 시간이 다하면 그때까지 만든 것만 돌려준다.
+    const bud = budget(230_000);
+    const results = await mapWithLimit(cards as InCard[], 3, async (card, i) => {
+        if (!bud.canStart(70_000)) {
+          return { url: null, reason: '시간이 모자라 건너뛰었습니다. 장수를 줄여 다시 시도해주세요' };
+        }
         const blocks = Array.isArray(card.blocks) ? card.blocks : [];
         const facts = notebookFactsFromBlocks(blocks, i + 1);
 
@@ -61,8 +67,7 @@ export async function POST(request: NextRequest) {
         if (!url) return { url: null, reason: '이미지 저장에 실패했습니다' };
 
         return { url, verified: img.verified, reason: img.verified ? undefined : img.note };
-      })
-    );
+    });
 
     return NextResponse.json({
       noteNumber: note,
