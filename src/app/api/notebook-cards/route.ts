@@ -41,8 +41,8 @@ export async function POST(request: NextRequest) {
 
     // 한꺼번에 던지면 서로 밀려 호출마다 제한에 걸리고 라우트가 통째로 죽는다.
     // 몇 개씩 나눠 돌리고, 시간이 다하면 그때까지 만든 것만 돌려준다.
-    const bud = budget(230_000);
-    const results = await mapWithLimit(cards as InCard[], 3, async (card, i) => {
+    const bud = budget(265_000);
+    const results = await mapWithLimit(cards as InCard[], 4, async (card, i) => {
         if (!bud.canStart(70_000)) {
           return { url: null, reason: '시간이 모자라 건너뛰었습니다. 장수를 줄여 다시 시도해주세요' };
         }

@@ -293,7 +293,7 @@ export async function buildAptListCards(opts: {
   // 300초를 넘겨 통째로 죽었다. 몇 개씩 나눠 도는 편이 오히려 빨리 끝난다.
   // 업로드 index는 파일명에만 쓰이므로 표지·마무리는 0, 99를 준다.
   if (useAi) {
-    const bud = budget(230_000);
+    const bud = budget(265_000);
     const jobs: { page: AptCardPage; run: () => Promise<void> }[] = [
       {
         page: coverPage,
@@ -325,7 +325,7 @@ export async function buildAptListCards(opts: {
       },
     ];
 
-    await mapWithLimit(jobs, 3, async job => {
+    await mapWithLimit(jobs, 4, async job => {
       // 시간이 다하면 나머지는 기본 스타일로 남긴다.
       // 라우트가 죽어 통째로 실패하는 것보다 몇 장이라도 건지는 게 낫다.
       if (!bud.canStart(70_000)) {
