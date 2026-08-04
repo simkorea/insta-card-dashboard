@@ -2509,8 +2509,9 @@ export default function CardNewsPage() {
                   </div>
                   {isDrawnStyle && (
                     <p className="text-[11px] text-amber-800/80 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-2 leading-relaxed">
-                      카드 문구를 먼저 만든 뒤 그림을 그리므로 5장이면 <b>1~2분</b> 정도 걸립니다.
-                      {drawnLabel}은 그림 한 장이 카드 전체라 <b>올린 이미지와 배경 사진은 쓰이지 않습니다.</b>
+                      {/* {변수} 앞뒤 줄바꿈은 JSX가 지워버려서 문장이 붙는다 — 공백을 명시한다 */}
+                      카드 문구를 먼저 만든 뒤 그림을 그리므로 5장이면 <b>1~2분</b> 정도 걸립니다.{' '}
+                      {drawnLabel}은 그림 한 장이 카드 전체라 <b>올린 이미지와 배경 사진은 쓰이지 않습니다.</b>{' '}
                       그리기에 실패한 장은 기본 스타일로 남고, 에디터에서 언제든 스타일을 바꿀 수 있습니다.
                     </p>
                   )}
