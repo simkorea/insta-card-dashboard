@@ -28,6 +28,23 @@ function pickRecorderType(): { mimeType: string; ext: string } {
 // ─── 슬라이드 렌더러 (영상 캡처용) ──────────────────────────────────────────
 function SlideFrame({ page, width, height }: { page: any; width: number; height: number }) {
   const s = width / 420;
+  // 손글씨 노트·신문 카드는 그림 한 장이 카드 전체다.
+  // 이런 장은 (1) 잘리면 안 되고 (2) 어둡게 덮으면 글씨가 안 보이고
+  // (3) 위에 텍스트를 또 얹으면 같은 말이 두 번 나온다.
+  const isWholeImage = page.styleVariant === 'image' && Boolean(page.bgImage);
+
+  if (isWholeImage) {
+    // 고른 비율과 카드 비율이 다르면 잘라내지 않고 여백을 둔다(레터박스).
+    // 예전에는 cover라서 9:16을 고르면 카드 좌우가 잘려나갔다.
+    return (
+      <div style={{ width, height, position: 'relative', overflow: 'hidden', flexShrink: 0, background: '#F3F1EA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={page.bgImage} alt="" crossOrigin="anonymous"
+          style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' }} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ width, height, position: 'relative', overflow: 'hidden', flexShrink: 0, background: '#111' }}>
       {page.bgImage && (
@@ -35,7 +52,7 @@ function SlideFrame({ page, width, height }: { page: any; width: number; height:
         <img src={page.bgImage} alt="" crossOrigin="anonymous"
           style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
       )}
-      <div style={{ position: 'absolute', inset: 0, background: page.overlay || 'rgba(0,0,0,0.4)' }} />
+      <div style={{ position: 'absolute', inset: 0, background: page.overlay ?? 'rgba(0,0,0,0.4)' }} />
       <div style={{ position: 'absolute', inset: 0 }}>
         {page.layout === 'center' && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 40px', textAlign: 'center' }}>
