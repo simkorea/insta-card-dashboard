@@ -13,7 +13,10 @@ export type AptRecord = {
   priceManwon?: number;// 거래금액(만원)
   priceText?: string;  // "5억 6,000만 원"
   builtYear?: number;  // 건축년도
-  dealDate?: string;   // 2026.06
+  dealDate?: string;   // 2026.06 (붙여넣기 표에는 월까지만 있는 경우가 많다)
+  dealDay?: number;    // 계약일(일). API로 불러온 건에만 있다
+  dealDateText?: string; // "2026.06.29" — 카드에 그대로 쓰는 표시용
+  rgstDate?: string;   // 등기일자. API가 줄 때만 채운다
   floor?: number;
 };
 
@@ -26,6 +29,9 @@ const COLS: Record<keyof Pick<AptRecord, 'name' | 'region' | 'areaM2' | 'priceMa
   builtYear: ['건축년도', '준공년도', '사용승인'],
   floor: ['층'],
 };
+
+// 계약일은 위 표에 넣지 않는다 — 문자열이라 숫자 변환 대상이 아니다
+const DEAL_DATE_COLS = ['계약일', '거래일', '계약년월', '거래년월'];
 
 function normalizeHeader(h: string) {
   return h.replace(/\s|\(|\)|㎡|만원/g, '').trim();
@@ -87,6 +93,7 @@ export function parseTransactions(raw: string): { records: AptRecord[]; warning?
   const iPrice = idxOf(COLS.priceManwon);
   const iBuilt = idxOf(COLS.builtYear);
   const iFloor = idxOf(COLS.floor);
+  const iDealDate = idxOf(DEAL_DATE_COLS);
 
   if (iName === -1) {
     return { records: [], warning: '"단지명" 열을 찾지 못했습니다.' };
@@ -112,6 +119,7 @@ export function parseTransactions(raw: string): { records: AptRecord[]; warning?
       priceText: formatPrice(priceManwon),
       builtYear: iBuilt >= 0 ? toNumber(c[iBuilt]) : undefined,
       floor: iFloor >= 0 ? toNumber(c[iFloor]) : undefined,
+      dealDateText: iDealDate >= 0 ? (c[iDealDate] || '').replace(/["']/g, '').trim() || undefined : undefined,
     };
 
     const key = `${name}__${pyeong ?? ''}`;

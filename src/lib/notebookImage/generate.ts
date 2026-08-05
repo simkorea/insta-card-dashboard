@@ -21,6 +21,7 @@ export type NotebookFacts = {
   pyeong?: string;        // 전용 18평
   price?: string;         // 5억 6,000만 원
   built?: string;         // 2016년식
+  dealDate?: string;      // 2026.06.29 — 언제 거래된 건인지
   advantages: string[];
   memo?: string;
   noteLabel: string;      // 임장 메모

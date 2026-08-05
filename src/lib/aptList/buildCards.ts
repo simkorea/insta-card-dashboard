@@ -239,6 +239,10 @@ export async function buildAptListCards(opts: {
       if (r.priceText) rows.push({ label: '실거래가', value: r.priceText, highlight: true });
       if (builtText) rows.push({ label: '연식', value: builtText });
       if (r.floor) rows.push({ label: '거래층', value: `${r.floor}층` });
+      // 임장할 때 "언제 거래된 값인지"가 가격만큼 중요하다
+      const dealText = r.dealDateText || r.dealDate;
+      if (dealText) rows.push({ label: '계약일', value: dealText });
+      if (r.rgstDate) rows.push({ label: '등기일', value: r.rgstDate });
 
       // blocks는 항상 만들어 둔다 — 이미지 생성이 실패하면 이걸로 그리고,
       // 성공해도 나중에 CSS 스타일로 바꾸거나 문구를 고칠 때 쓴다
@@ -263,6 +267,7 @@ export async function buildAptListCards(opts: {
           pyeong: pyeongText,
           price: r.priceText,
           built: builtText,
+          dealDate: dealText,
           advantages,
           memo: copy.memo,
           noteLabel,

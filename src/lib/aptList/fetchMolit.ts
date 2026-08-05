@@ -51,6 +51,11 @@ function parseItems(xml: string, lawdCd: string): AptRecord[] {
       const umd = tag(b, 'umdNm', '법정동');
       const y = tag(b, 'dealYear', '년');
       const m = tag(b, 'dealMonth', '월');
+      // 계약일(일)까지 온다. 임장 카드에는 "언제 거래된 건인지"가 중요해서 함께 쓴다.
+      const d = tag(b, 'dealDay', '일');
+      // 등기일자는 응답에 없을 수도 있다 — 없으면 그냥 비워 둔다(지어내지 않는다)
+      const rgst = (tag(b, 'rgstDate', '등기일자') || '').trim();
+      const pad = (v: string) => String(v).padStart(2, '0');
 
       const rec: AptRecord = {
         name,
@@ -61,7 +66,10 @@ function parseItems(xml: string, lawdCd: string): AptRecord[] {
         priceManwon,
         priceText: formatPrice(priceManwon),
         builtYear: num(tag(b, 'buildYear', '건축년도')),
-        dealDate: y && m ? `${y}.${String(m).padStart(2, '0')}` : undefined,
+        dealDate: y && m ? `${y}.${pad(m)}` : undefined,
+        dealDay: num(d),
+        dealDateText: y && m ? (d ? `${y}.${pad(m)}.${pad(d)}` : `${y}.${pad(m)}`) : undefined,
+        rgstDate: rgst && !/^-+$/.test(rgst) ? rgst : undefined,
         floor: num(tag(b, 'floor', '층')),
       };
       return rec;

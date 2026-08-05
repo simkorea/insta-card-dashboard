@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { Loader2, ArrowRight, ExternalLink, Search, ClipboardPaste } from 'lucide-react';
 import { SIGUNGU, SIDO_LIST } from '@/lib/aptList/lawdCodes';
 
-type Preview = { name: string; region: string; pyeong?: number; priceText?: string; builtYear?: number; areaM2?: number; priceManwon?: number; floor?: number };
+type Preview = { name: string; region: string; pyeong?: number; priceText?: string; builtYear?: number; areaM2?: number; priceManwon?: number; floor?: number; dealDate?: string; dealDateText?: string };
 
 /** 같은 단지라도 평형이 다르면 다른 카드가 되므로 둘을 합쳐 키로 쓴다 */
 const keyOf = (r: Preview) => `${r.name}__${r.pyeong ?? ''}`;
@@ -106,9 +106,9 @@ export default function AptListPage() {
    */
   const pickedAsTable = (): string => {
     const rows = (found || []).filter(r => picked.has(keyOf(r)));
-    const header = '시군구	단지명	전용면적(㎡)	거래금액(만원)	층	건축년도';
+    const header = '시군구	단지명	전용면적(㎡)	거래금액(만원)	층	건축년도	계약일';
     const body = rows.map(r =>
-      [r.region, r.name, r.areaM2 ?? '', r.priceManwon ?? '', r.floor ?? '', r.builtYear ?? ''].join('	')
+      [r.region, r.name, r.areaM2 ?? '', r.priceManwon ?? '', r.floor ?? '', r.builtYear ?? '', r.dealDateText ?? r.dealDate ?? ''].join('	')
     );
     return [header, ...body].join('\n');
   };
@@ -311,7 +311,7 @@ export default function AptListPage() {
                       />
                       <span className="font-bold text-gray-800 shrink-0">{r.name}</span>
                       <span className="text-gray-500 truncate">
-                        {[r.region, r.pyeong && `전용 ${r.pyeong}평`, r.priceText, r.builtYear && `${r.builtYear}년식`]
+                        {[r.region, r.pyeong && `전용 ${r.pyeong}평`, r.priceText, r.builtYear && `${r.builtYear}년식`, (r.dealDateText || r.dealDate) && `${r.dealDateText || r.dealDate} 계약`]
                           .filter(Boolean).join(' · ')}
                       </span>
                     </label>
@@ -482,7 +482,7 @@ export default function AptListPage() {
                 <div key={i} className="px-3 py-2 text-[12px] flex items-baseline gap-2">
                   <span className="font-bold text-gray-800">{i + 1}. {p.name}</span>
                   <span className="text-gray-500">
-                    {[p.region, p.pyeong && `전용 ${p.pyeong}평`, p.priceText, p.builtYear && `${p.builtYear}년식`]
+                    {[p.region, p.pyeong && `전용 ${p.pyeong}평`, p.priceText, p.builtYear && `${p.builtYear}년식`, (p.dealDateText || p.dealDate) && `${p.dealDateText || p.dealDate} 계약`]
                       .filter(Boolean)
                       .join(' · ')}
                   </span>
