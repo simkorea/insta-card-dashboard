@@ -66,6 +66,35 @@ export default function AptListPage() {
   const useAiImage = aptStyle !== 'photo';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // 아파트 타임머신 — 같은 단지가 시점별로 얼마였는지
+  type TmCell = { label: string; found: boolean; priceText?: string; dealDateText?: string; floor?: number };
+  type TmRow = { name: string; pyeong?: number; cells: TmCell[]; changePct?: number };
+  const [tmLoading, setTmLoading] = useState(false);
+  const [tmError, setTmError] = useState('');
+  const [tmRows, setTmRows] = useState<TmRow[] | null>(null);
+
+  const runTimeMachine = async () => {
+    const rows = (found || []).filter(r => picked.has(keyOf(r))).slice(0, 3);
+    if (rows.length === 0) { setTmError('단지를 하나 이상 골라주세요.'); return; }
+    setTmLoading(true);
+    setTmError('');
+    setTmRows(null);
+    try {
+      const res = await fetch('/api/apt-list/timemachine', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lawdCd, items: rows.map(r => ({ name: r.name, areaM2: r.areaM2 })) }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setTmError(json.error || '조회에 실패했습니다.'); return; }
+      setTmRows(json.rows || []);
+    } catch (e: any) {
+      setTmError(e?.message || '오류가 발생했습니다.');
+    } finally {
+      setTmLoading(false);
+    }
+  };
   const [result, setResult] = useState<{ designId: string; slides: number; complexes: number; parsedTotal: number; preview: Preview[]; aiImages?: number; needsReview?: { title: string; note?: string }[] } | null>(null);
 
   const lookup = async () => {
@@ -321,6 +350,84 @@ export default function AptListPage() {
               <p className="text-[11px] text-gray-400 mt-1.5">
                 체크한 단지가 순서대로 카드가 됩니다. 아래에서 제목·스타일을 정하고 만들기를 누르세요.
               </p>
+
+              {/* 아파트 타임머신 — 고른 단지가 예전엔 얼마였는지 */}
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <button
+                  onClick={runTimeMachine}
+                  disabled={tmLoading || picked.size === 0}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-gray-800 bg-gray-900 text-white text-[13px] font-bold hover:bg-black focus:outline-none focus:ring-2 focus:ring-gray-300 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {tmLoading
+                    ? <><Loader2 size={14} className="animate-spin" /> 예전 거래 찾는 중... (30초쯤)</>
+                    : <>🕰 아파트 타임머신 — 1·3·5·10년 전 가격 보기</>}
+                </button>
+                <p className="text-[11px] text-gray-400 mt-1.5">
+                  체크한 단지 중 <b>앞의 3개</b>를 봅니다. 시점마다 그 앞뒤 달을 뒤져 같은 평형 거래를 찾습니다.
+                </p>
+
+                {tmError && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] text-red-700 mt-2">{tmError}</div>
+                )}
+
+                {tmRows && tmRows.length > 0 && (
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-[12px] border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50">
+                          <th className="text-left font-bold text-gray-500 px-2 py-2 whitespace-nowrap">시점</th>
+                          {tmRows.map(r => (
+                            <th key={r.name} className="text-left font-bold text-gray-800 px-2 py-2 min-w-[130px]">
+                              {r.name}
+                              {r.pyeong ? <span className="block text-[10px] font-medium text-gray-400">전용 {r.pyeong}평</span> : null}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tmRows[0].cells.map((_, ci) => (
+                          <tr key={ci} className="border-t border-gray-100">
+                            <td className="px-2 py-2 font-bold text-gray-500 whitespace-nowrap">{tmRows[0].cells[ci].label}</td>
+                            {tmRows.map(r => {
+                              const c = r.cells[ci];
+                              return (
+                                <td key={r.name} className="px-2 py-2 align-top">
+                                  {c.found ? (
+                                    <>
+                                      <span className="font-bold text-gray-900">{c.priceText}</span>
+                                      <span className="block text-[10px] text-gray-400">
+                                        {c.dealDateText}{c.floor ? ` · ${c.floor}층` : ''}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-gray-300">거래 없음</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                        <tr className="border-t-2 border-gray-200 bg-gray-50/60">
+                          <td className="px-2 py-2 font-bold text-gray-500 whitespace-nowrap">변동</td>
+                          {tmRows.map(r => (
+                            <td key={r.name} className="px-2 py-2 font-bold">
+                              {r.changePct == null
+                                ? <span className="text-gray-300">비교 불가</span>
+                                : <span className={r.changePct >= 0 ? 'text-red-600' : 'text-blue-600'}>
+                                    {r.changePct >= 0 ? '▲' : '▼'} {Math.abs(r.changePct)}%
+                                  </span>}
+                            </td>
+                          ))}
+                        </tr>
+                      </tbody>
+                    </table>
+                    <p className="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                      거래가 없던 시점은 <b>비워 둡니다</b> — 가까운 달 값으로 채우면 그 시점 가격이 아니게 됩니다.
+                      변동률은 &lsquo;현재&rsquo;와 <b>찾은 것 중 가장 오래된 시점</b>을 비교한 값입니다.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

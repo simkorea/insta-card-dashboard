@@ -103,7 +103,7 @@ function keyVariants(key: string): string[] {
     : [encodeURIComponent(trimmed), trimmed];
 }
 
-async function fetchOneMonth(key: string, lawdCd: string, ymd: string): Promise<MolitResult> {
+export async function fetchOneMonth(key: string, lawdCd: string, ymd: string): Promise<MolitResult> {
   let last: MolitResult = { ok: false, error: '실거래가를 불러오지 못했습니다.' };
   for (const variant of keyVariants(key)) {
     last = await callMolit(variant, lawdCd, ymd);
