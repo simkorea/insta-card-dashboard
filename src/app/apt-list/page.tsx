@@ -387,11 +387,11 @@ export default function AptListPage() {
                   className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 border-gray-800 bg-gray-900 text-white text-[13px] font-bold hover:bg-black focus:outline-none focus:ring-2 focus:ring-gray-300 active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {tmLoading
-                    ? <><Loader2 size={14} className="animate-spin" /> 예전 거래 찾는 중... (30초쯤)</>
+                    ? <><Loader2 size={14} className="animate-spin" /> 예전 거래 찾는 중... (1~2분)</>
                     : <>🕰 아파트 타임머신 — 1·3·5·10년 전 가격 보기</>}
                 </button>
                 <p className="text-[11px] text-gray-400 mt-1.5">
-                  체크한 단지 중 <b>앞의 3개</b>를 봅니다. 시점마다 그 앞뒤 달을 뒤져 같은 평형 거래를 찾습니다.
+                  체크한 단지 중 <b>앞의 3개</b>를 봅니다. 시점마다 그 앞뒤 달을 뒤져 같은 평형 거래를 찾습니다 — 15개월치를 조회하므로 <b>1~2분</b> 걸립니다.
                 </p>
 
                 {tmError && (
