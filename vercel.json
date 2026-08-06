@@ -7,10 +7,6 @@
     {
       "path": "/api/briefing",
       "schedule": "0 23 * * *"
-    },
-    {
-      "path": "/api/cron/news-cardnews",
-      "schedule": "30 23 * * *"
     }
   ]
 }

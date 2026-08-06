@@ -138,6 +138,8 @@ export async function generateNewsCardnewsDraft(opts?: {
   notebookStyle?: boolean;
   maxSlides?: number;
   cardStyle?: CardStyle; // 'notebook'(기본) | 'newspaper'
+  /** 그림에 쓸 시간(ms). 브리핑 뒤에 이어 돌 때는 남은 시간만 쓴다 */
+  imageBudgetMs?: number;
 }): Promise<DraftResult> {
   const supabase = serviceClient();
 
@@ -294,7 +296,7 @@ ${sourceBlock}`;
     : await Promise.all(cards.map(c => searchBackground(c.imageKeyword)));
 
   // 한꺼번에 던지면 서로 밀려 호출마다 제한에 걸린다 — 몇 개씩 나눠 돌린다.
-  const imgBudget = budget(400_000);
+  const imgBudget = budget(Math.max(Number(opts?.imageBudgetMs) || 400_000, 30_000));
   const notebookImages: (string | null)[] = useNotebook
     ? await mapWithLimit(cards, 3, async (card, i) => {
         if (!imgBudget.canStart(70_000)) return null;

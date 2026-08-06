@@ -2,6 +2,7 @@ import { callAI } from "@/lib/ai/openrouter";
 import { fetchAdPerformance, adSectionMarkdown } from "@/lib/metaAds/fetchInsights";
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { generateNewsCardnewsDraft } from "@/lib/newsCardnews/generateDraft";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -75,7 +76,13 @@ async function fetchRssItems(url: string, label: string): Promise<NewsItem[]> {
   return [];
 }
 
-export async function GET() {
+// Hobby 플랜은 프로젝트당 크론이 2개까지다. 3개를 걸어놨더니 23시대 두 개가
+// 실행되지 않았다(로그 확인: 09시 크론만 호출됨). 그래서 브리핑이 끝나면
+// 카드뉴스 초안까지 여기서 이어 만든다 — 30분 대기도 없어져 더 빠르다.
+// 대시보드를 열 때도 이 라우트가 불리므로, 크론일 때만 이어서 돌린다.
+export async function GET(request: Request) {
+  const startedAt = Date.now();
+  const isCron = request.headers.get('authorization') === `Bearer ${process.env.CRON_SECRET}`;
   try {
     if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
       throw new Error("SUPABASE_SERVICE_ROLE_KEY 환경변수가 정의되지 않았습니다. .env.local 설정을 확인해주세요.");
@@ -200,10 +207,29 @@ ${adSectionMarkdown(adPerformance)}`;
       throw new Error(`Supabase Insert 에러: ${dbError.message}`);
     }
 
+    // 카드뉴스 초안까지 이어서 (크론일 때만).
+    // 라우트 상한이 300초라 브리핑에 쓴 시간을 빼고 남은 만큼만 그림에 쓴다.
+    // 시간이 모자란 장은 기본 스타일로 남고, 화면에서 다시 만들 수 있다.
+    let cardnews: { ok: boolean; name?: string; slides?: number; error?: string } | undefined;
+    if (isCron) {
+      const remain = 280_000 - (Date.now() - startedAt);
+      if (remain < 40_000) {
+        cardnews = { ok: false, error: `브리핑에 시간을 다 써서 카드뉴스는 건너뜁니다 (남은 ${Math.round(remain / 1000)}초)` };
+        console.warn('[Briefing] 카드뉴스 초안 건너뜀 — 남은 시간 부족');
+      } else {
+        const draft = await generateNewsCardnewsDraft({ imageBudgetMs: remain - 20_000 });
+        cardnews = draft.ok
+          ? { ok: true, name: draft.name, slides: 'slides' in draft ? draft.slides : undefined }
+          : { ok: false, error: draft.error };
+        console.log('[Briefing] 카드뉴스 초안:', cardnews.ok ? cardnews.name : cardnews.error);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: "일일 브리핑이 성공적으로 생성되어 저장되었습니다.",
       data: dbData,
+      cardnews,
     });
   } catch (error: any) {
     console.error("[Briefing] 크론 작업 처리 중 실패:", error.message);
