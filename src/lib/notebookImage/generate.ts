@@ -408,3 +408,95 @@ export async function generateEdgeNotebookImage(
     label: `${facts.kind}:${facts.headline}`,
   });
 }
+
+// ── 아파트 타임머신 ──────────────────────────────────────────────────────────
+//
+// 시점별 가격을 나란히 놓는 표 카드. 이미지 모델에게 표는 제일 어려운 과제라
+// 칸 위치를 한 줄씩 못박아 지시하고, 생성 후 숫자를 다시 읽어 대조한다.
+
+export type TimeMachineFacts = {
+  title: string;                 // 안양 만안구 아파트 타임머신
+  areaLabel?: string;            // 전용 33평 기준
+  columns: { name: string; sub?: string }[];   // 단지명 + 평형
+  rows: { label: string; values: string[] }[]; // 시점 → 칸마다 "12억 4,000만 원 / 2026.07.13"
+  changeRow?: { label: string; values: string[] };
+  source: string;
+  noteLabel: string;
+  noteNumber: string;
+  ratio: string;
+};
+
+function timeMachineBody(f: TimeMachineFacts): string {
+  const head = f.columns
+    .map((c, i) => `  ${i + 1}번째 칸: "${c.name}"${c.sub ? ` / 그 아래 작게 "${c.sub}"` : ''}`)
+    .join('\n');
+  const body = f.rows
+    .map(r => `  · "${r.label}" 줄 → ${r.values.map((v, i) => `${i + 1}번째 칸 "${v}"`).join(', ')}`)
+    .join('\n');
+  const change = f.changeRow
+    ? `  · 맨 아랫줄 "${f.changeRow.label}" → ${f.changeRow.values.map((v, i) => `${i + 1}번째 칸 "${v}"`).join(', ')}`
+    : '';
+  return `${head}\n${body}\n${change}`;
+}
+
+export function buildTimeMachineNotebookPrompt(f: TimeMachineFacts): string {
+  return `한국 부동산 인스타그램 카드뉴스를 **손글씨 스프링 노트** 스타일 이미지로 그려주세요. 비율 ${f.ratio} 세로.
+
+${NOTE_BASE}
+
+[내용 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
+- 맨 위: 짙은 남색 손그림 가로 띠. 그 안에 흰 손글씨로 "${f.title}"
+${f.areaLabel ? `- 그 아래 왼쪽에 노란 형광펜으로 칠한 "${f.areaLabel}"` : ''}
+- 화면 대부분을 차지하는 **손그림 표**를 그릴 것. 세로선·가로선을 자로 그은 듯 반듯하게.
+- 표의 머리줄(맨 윗줄)에 단지 이름을 차례로 쓸 것:
+${timeMachineBody(f)}
+- 시점 이름(왼쪽 첫 열)은 빨간 손글씨, 금액은 검정 굵은 손글씨로 크게,
+  금액 아래 거래 날짜는 아주 작은 회색 글씨로
+- "거래 없음"이라고 적힌 칸은 회색으로 흐리게 쓸 것
+- 맨 아랫줄 변동값은 오른 것은 빨강, 내린 것은 파랑으로
+- 맨 아래 작은 글씨: "${f.source}"
+- 우측 하단: 크라프트 종이 태그. 위에 "${f.noteLabel}", 아래에 빨간 손글씨로 크게 "${f.noteNumber}"
+
+${NOTE_RULE}
+- 표의 칸을 임의로 늘리거나 줄이지 말 것. 위에 적힌 줄과 칸만 그릴 것.`;
+}
+
+export function buildTimeMachineNewspaperPrompt(f: TimeMachineFacts): string {
+  return `한국 부동산 인스타그램 카드뉴스를 **경제 신문 지면** 스타일로 디자인해주세요. 비율 ${f.ratio} 세로.
+
+${PAPER_BASE}
+
+[레이아웃 — 아래 한글과 숫자를 한 글자도 바꾸지 말고 그대로 쓸 것]
+- 맨 위: 굵은 가로 실선 두 줄 사이에 "${f.title}"
+${f.areaLabel ? `- 그 아래 왼쪽에 작은 글씨 "${f.areaLabel}"` : ''}
+- 화면 대부분을 차지하는 **표**. 얇은 검정 선으로 칸을 나눈다.
+- 표의 머리줄에 단지 이름을 차례로:
+${timeMachineBody(f)}
+- 시점 이름(왼쪽 첫 열)은 회색 굵은 글씨, 금액은 검정 굵은 큰 숫자,
+  금액 아래 거래 날짜는 작은 회색 글씨
+- "거래 없음" 칸은 옅은 회색으로
+- 맨 아랫줄 변동값은 오른 것은 짙은 빨강, 내린 것은 검정으로
+- 맨 아래: 왼쪽 작은 글씨 "${f.source}", 오른쪽 굵게 "${f.noteNumber}"
+
+${PAPER_RULE}
+- 표의 칸을 임의로 늘리거나 줄이지 말 것. 위에 적힌 줄과 칸만 그릴 것.`;
+}
+
+export async function generateTimeMachineImage(
+  facts: TimeMachineFacts,
+  opts?: { maxAttempts?: number; style?: CardStyle }
+): Promise<NotebookImageResult | null> {
+  const prompt =
+    opts?.style === 'newspaper'
+      ? buildTimeMachineNewspaperPrompt(facts)
+      : buildTimeMachineNotebookPrompt(facts);
+  // 표는 숫자가 생명이라 대조 대상을 넉넉히 잡는다 — 첫 칸의 금액들
+  const mustContain = facts.rows
+    .map(r => (r.values[0] || '').split('/')[0].trim())
+    .filter(v => v && v !== '거래 없음')
+    .slice(0, 4);
+  return renderNotebookCard(prompt, mustContain, {
+    maxAttempts: opts?.maxAttempts ?? 3,
+    label: `타임머신:${facts.title}`,
+  });
+}

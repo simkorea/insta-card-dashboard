@@ -73,6 +73,34 @@ export default function AptListPage() {
   const [tmLoading, setTmLoading] = useState(false);
   const [tmError, setTmError] = useState('');
   const [tmRows, setTmRows] = useState<TmRow[] | null>(null);
+  const [tmCardLoading, setTmCardLoading] = useState(false);
+  const [tmCard, setTmCard] = useState<{ designId: string; needsReview?: boolean; reviewNote?: string } | null>(null);
+
+  /** 타임머신 표를 카드뉴스 한 장으로 만든다 */
+  const makeTimeMachineCard = async () => {
+    if (!tmRows || tmRows.length === 0) return;
+    setTmCardLoading(true);
+    setTmError('');
+    setTmCard(null);
+    try {
+      const res = await fetch('/api/apt-list/timemachine/card', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rows: tmRows,
+          title: title || `${SIGUNGU.find(s => s.code === lawdCd)?.name || ''} 아파트 타임머신`,
+          noteNumber, ratio, cardStyle: aptStyle === 'photo' ? 'notebook' : aptStyle,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setTmError(json.error || '카드 만들기에 실패했습니다.'); return; }
+      setTmCard(json);
+    } catch (e: any) {
+      setTmError(e?.message || '오류가 발생했습니다.');
+    } finally {
+      setTmCardLoading(false);
+    }
+  };
 
   const runTimeMachine = async () => {
     const rows = (found || []).filter(r => picked.has(keyOf(r))).slice(0, 3);
@@ -425,6 +453,28 @@ export default function AptListPage() {
                       거래가 없던 시점은 <b>비워 둡니다</b> — 가까운 달 값으로 채우면 그 시점 가격이 아니게 됩니다.
                       변동률은 &lsquo;현재&rsquo;와 <b>찾은 것 중 가장 오래된 시점</b>을 비교한 값입니다.
                     </p>
+
+                    <button
+                      onClick={makeTimeMachineCard}
+                      disabled={tmCardLoading}
+                      className="w-full mt-3 py-2.5 rounded-xl bg-primary-600 text-white text-[13px] font-bold hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-300 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+                    >
+                      {tmCardLoading
+                        ? <><Loader2 size={14} className="animate-spin" /> 카드로 그리는 중... (1~2분)</>
+                        : '이 표로 카드뉴스 만들기'}
+                    </button>
+
+                    {tmCard && (
+                      <div className="rounded-xl border border-green-200 bg-green-50/70 px-3 py-2.5 mt-2">
+                        <p className="text-[12px] font-bold text-green-900">보관함에 저장했습니다</p>
+                        {tmCard.needsReview && (
+                          <p className="text-[11px] text-amber-700 mt-1">⚠️ {tmCard.reviewNote || '카드에 적힌 숫자를 확인해주세요'}</p>
+                        )}
+                        <Link href={`/cardnews/editor?id=${tmCard.designId}`} className="inline-flex items-center gap-1 text-[12px] font-bold text-green-700 hover:underline mt-1">
+                          편집기에서 열기 <ArrowRight size={12} />
+                        </Link>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
