@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { FileText, Loader2, Calendar, Hash, FolderOpen, Archive, Layout, Trash2, X, ChevronLeft, ChevronRight, Pencil, ImageOff } from 'lucide-react';
+import { HybridThumb } from '@/components/cardnews/HybridThumb';
 
 interface BlogPost {
   id: string;
@@ -328,7 +329,9 @@ export default function ArchivePage() {
                     >
                       {/* 표지 미리보기 */}
                       <div className="relative bg-gray-100 aspect-[4/5] overflow-hidden">
-                        {coverImage ? (
+                        {(cover?.styleVariant === 'hybrid' || cover?.styleVariant === 'hybridPaper') ? (
+                          <HybridThumb page={cover} index={0} />
+                        ) : coverImage ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
                             src={coverImage}
@@ -417,7 +420,9 @@ export default function ArchivePage() {
               </div>
 
               <div className="relative bg-gray-900 flex items-center justify-center" style={{ aspectRatio: '4 / 5' }}>
-                {img ? (
+                {(page?.styleVariant === 'hybrid' || page?.styleVariant === 'hybridPaper') ? (
+                  <HybridThumb page={page} index={previewPage} />
+                ) : img ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={img} alt={`${previewPage + 1}번째 장`} className="max-w-full max-h-full object-contain" />
                 ) : (
@@ -465,7 +470,9 @@ export default function ArchivePage() {
                         }`}
                         style={{ aspectRatio: '4 / 5' }}
                       >
-                        {t ? (
+                        {(p?.styleVariant === 'hybrid' || p?.styleVariant === 'hybridPaper') ? (
+                          <HybridThumb page={p} index={i} />
+                        ) : t ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={t} alt="" loading="lazy" className="w-full h-full object-cover" />
                         ) : (

@@ -21,13 +21,16 @@ function serviceClient() {
 export async function POST(request: NextRequest) {
   try {
     const { rows, title, noteNumber, ratio, cardStyle } = await request.json() as {
-      rows: Row[]; title?: string; noteNumber?: string; ratio?: string; cardStyle?: CardStyle;
+      rows: Row[]; title?: string; noteNumber?: string; ratio?: string; cardStyle?: CardStyle | 'hybrid';
     };
 
     if (!Array.isArray(rows) || rows.length === 0) {
       return NextResponse.json({ error: '타임머신 결과가 없습니다. 먼저 조회해주세요.' }, { status: 400 });
     }
 
+    // 하이브리드는 표를 브라우저가 조판한다 — 표는 이미지 모델이 가장 자주 틀리는 것이라
+    // 오히려 이쪽이 정확하다.
+    const isHybrid = cardStyle === 'hybrid';
     const style: CardStyle = cardStyle === 'newspaper' ? 'newspaper' : 'notebook';
     const cols = rows.slice(0, 3);
     const cardTitle = (title || '아파트 타임머신').trim();
@@ -67,7 +70,7 @@ export async function POST(request: NextRequest) {
       { type: 'sourceNote', text: '출처: 국토교통부 실거래가 · 거래가 없던 시점은 비워둠' },
     ];
 
-    const img = await generateTimeMachineImage({
+    const img = isHybrid ? null : await generateTimeMachineImage({
       title: cardTitle,
       areaLabel: '실거래가 기준',
       columns: cols.map(r => ({ name: r.name, sub: r.pyeong ? `전용 ${r.pyeong}평` : undefined })),
@@ -83,7 +86,9 @@ export async function POST(request: NextRequest) {
     let needsReview = false;
     let reviewNote: string | undefined;
 
-    if (!img) {
+    if (isHybrid) {
+      // 그릴 것이 없다 — blocks만으로 완성된 카드다
+    } else if (!img) {
       needsReview = true;
       reviewNote = '표 그림 생성에 실패해 기본 스타일로 만들었습니다';
     } else {
@@ -101,12 +106,12 @@ export async function POST(request: NextRequest) {
     const page = {
       id: '1',
       blocks,
-      styleVariant: bgImage ? 'image' : 'notebook',
+      styleVariant: isHybrid ? 'hybrid' : bgImage ? 'image' : 'notebook',
       ratio: ratio || '4:5',
       noteLabel: '타임머신',
       noteNumber: note,
       bgImage,
-      bgLabel: style === 'newspaper' ? '신문 지면' : '손글씨 노트',
+      bgLabel: isHybrid ? '노트(빠름)' : style === 'newspaper' ? '신문 지면' : '손글씨 노트',
       overlay: '',
       title: cardTitle,
       subtitle: '',

@@ -62,8 +62,9 @@ export default function AptListPage() {
   const [noteNumber, setNoteNumber] = useState('No.001');
   const [ratio, setRatio] = useState('4:5');
   // 'photo' = AI 그림 없이 기본 렌더러, 나머지는 AI가 카드를 통째로 그린다
-  const [aptStyle, setAptStyle] = useState<'photo' | 'notebook' | 'newspaper'>('notebook');
-  const useAiImage = aptStyle !== 'photo';
+  const [aptStyle, setAptStyle] = useState<'photo' | 'hybrid' | 'hybridPaper' | 'notebook' | 'newspaper'>('hybrid');
+  // 하이브리드는 미리 뽑아둔 자산을 쓰므로 AI를 부르지 않는다
+  const useAiImage = aptStyle !== 'photo' && aptStyle !== 'hybrid' && aptStyle !== 'hybridPaper';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -572,11 +573,12 @@ export default function AptListPage() {
         {/* 카드 스타일 */}
         <div className="rounded-xl border border-gray-200 p-3">
           <span className="text-xs font-semibold text-gray-400 block mb-2">카드 스타일</span>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {([
+              { id: 'hybrid', label: '✏️ 노트 (빠름·무료)', desc: '미리 그려둔 종이·펜그림에 글자를 얹습니다. 즉시 나옵니다.' },
+              { id: 'hybridPaper', label: '📰 신문 (빠름·무료)', desc: '신문 지면처럼 인쇄 활자로 조판합니다. 즉시 나옵니다.' },
               { id: 'photo', label: '📷 기본', desc: '그림 없이 빠르게 만듭니다.' },
-              { id: 'notebook', label: '📓 손글씨 노트', desc: '노트에 펜으로 쓴 느낌으로 그립니다.' },
-              { id: 'newspaper', label: '📰 신문', desc: '경제 신문 지면처럼 큰 활자로 그립니다.' },
+              { id: 'notebook', label: '📓 손글씨 노트 (AI·유료)', desc: 'AI가 카드를 통째로 그립니다. 장당 약 270원.' },
             ] as const).map(s => (
               <button
                 key={s.id}

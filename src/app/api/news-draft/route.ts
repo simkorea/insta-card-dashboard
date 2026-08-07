@@ -7,14 +7,19 @@ export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   let force = false;
+  let cardStyle: 'notebook' | 'newspaper' | 'hybrid' | 'hybridPaper' | undefined;
   try {
     const body = await request.json();
     force = body?.force === true;
+    // 안 보내면 지금까지처럼 AI가 그리는 손글씨 노트. 'hybrid'면 AI 호출 0회.
+    if (['hybrid', 'hybridPaper', 'newspaper', 'notebook'].includes(body?.cardStyle)) {
+      cardStyle = body.cardStyle;
+    }
   } catch {
     // 본문 없이 호출해도 된다
   }
 
-  const result = await generateNewsCardnewsDraft({ force });
+  const result = await generateNewsCardnewsDraft({ force, cardStyle });
   if (!result.ok) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }

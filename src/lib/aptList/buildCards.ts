@@ -22,7 +22,7 @@ export type AptCardPage = {
   id: string;
   blocks: SlideBlock[];
   // 'image' = AI가 그린 노트 카드 이미지 그대로, 'notebook' = CSS 렌더러(폴백)
-  styleVariant: 'notebook' | 'image';
+  styleVariant: 'notebook' | 'image' | 'hybrid' | 'hybridPaper';
   ratio: string;
   needsReview?: boolean;   // 숫자 검증을 못 넘긴 장 — 사람이 확인해야 함
   reviewNote?: string;
@@ -126,10 +126,14 @@ export async function buildAptListCards(opts: {
   ratio?: string;
   noteNumber?: string;  // 예: "No.006"
   useAiImage?: boolean; // AI가 카드를 통째로 그릴지 (기본 true)
-  cardStyle?: CardStyle; // 'notebook'(기본) | 'newspaper'
+  // 'notebook'(기본) | 'newspaper' 는 AI가 카드를 통째로 그린다.
+  // 'hybrid' 는 미리 뽑아둔 종이·펜그림 위에 브라우저가 글자를 조판한다 — AI 호출 0회.
+  cardStyle?: CardStyle | 'hybrid' | 'hybridPaper';
 }): Promise<AptCardPage[]> {
   const records = opts.records.slice(0, 10);
   const ratio = opts.ratio || '4:5';
+  const isHybrid = opts.cardStyle === 'hybrid' || opts.cardStyle === 'hybridPaper';
+  const hybridVariant = opts.cardStyle === 'hybridPaper' ? 'hybridPaper' : 'hybrid';
   const cardStyle: CardStyle = opts.cardStyle === 'newspaper' ? 'newspaper' : 'notebook';
   const noteLabel = cardStyle === 'newspaper' ? '실거래 리포트' : '임장노트';
   const noteNumber = opts.noteNumber || 'No.001';
@@ -139,12 +143,12 @@ export async function buildAptListCards(opts: {
   const base = (id: string, blocks: SlideBlock[], title: string): AptCardPage => ({
     id,
     blocks,
-    styleVariant: 'notebook' as 'notebook' | 'image',
+    styleVariant: (isHybrid ? hybridVariant : 'notebook') as AptCardPage['styleVariant'],
     ratio,
     noteLabel,
     noteNumber,
     bgImage: '',
-    bgLabel: '노트 배경',
+    bgLabel: isHybrid ? (hybridVariant === 'hybridPaper' ? '신문(빠름)' : '노트(빠름)') : '노트 배경',
     overlay: '',
     title,
     subtitle: '',
@@ -297,7 +301,8 @@ export async function buildAptListCards(opts: {
   // 쪽에서 서로 밀려 호출마다 120초 제한에 걸렸고, 재시도까지 겹쳐 라우트가
   // 300초를 넘겨 통째로 죽었다. 몇 개씩 나눠 도는 편이 오히려 빨리 끝난다.
   // 업로드 index는 파일명에만 쓰이므로 표지·마무리는 0, 99를 준다.
-  if (useAi) {
+  // 하이브리드는 그릴 것이 없다 — 자산이 이미 있고 글자는 브라우저가 얹는다
+  if (useAi && !isHybrid) {
     const bud = budget(265_000);
     const jobs: { page: AptCardPage; run: () => Promise<void> }[] = [
       {

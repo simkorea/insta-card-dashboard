@@ -208,16 +208,19 @@ ${adSectionMarkdown(adPerformance)}`;
     }
 
     // 카드뉴스 초안까지 이어서 (크론일 때만).
-    // 라우트 상한이 300초라 브리핑에 쓴 시간을 빼고 남은 만큼만 그림에 쓴다.
-    // 시간이 모자란 장은 기본 스타일로 남고, 화면에서 다시 만들 수 있다.
+    //
+    // 하이브리드로 만든다. 예전에는 AI가 카드를 통째로 그렸는데, 크론 2개
+    // 제한 때문에 이 작업을 브리핑 안으로 합치면서 그림에 쓸 시간이 남지
+    // 않게 됐다 — 8/6은 10장 중 2장, 8/7은 0장만 그려졌다.
+    // 하이브리드는 그릴 것이 없어 시간도 비용도 들지 않으므로 이 실패가 없다.
     let cardnews: { ok: boolean; name?: string; slides?: number; error?: string } | undefined;
     if (isCron) {
       const remain = 280_000 - (Date.now() - startedAt);
-      if (remain < 40_000) {
+      if (remain < 25_000) {
         cardnews = { ok: false, error: `브리핑에 시간을 다 써서 카드뉴스는 건너뜁니다 (남은 ${Math.round(remain / 1000)}초)` };
         console.warn('[Briefing] 카드뉴스 초안 건너뜀 — 남은 시간 부족');
       } else {
-        const draft = await generateNewsCardnewsDraft({ imageBudgetMs: remain - 20_000 });
+        const draft = await generateNewsCardnewsDraft({ cardStyle: 'hybrid' });
         cardnews = draft.ok
           ? { ok: true, name: draft.name, slides: 'slides' in draft ? draft.slides : undefined }
           : { ok: false, error: draft.error };

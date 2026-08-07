@@ -15,6 +15,9 @@ import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { friendlyError } from '@/lib/errors';
 import type { SlideBlock, BrandTone } from '@/lib/cardnews/blocks';
 import { NotebookRenderer } from '@/components/cardnews/NotebookRenderer';
+import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
+import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
+import { HybridThumb } from '@/components/cardnews/HybridThumb';
 import { BlockRenderer } from '@/components/cardnews/BlockRenderer';
 import { SlideFrame } from '@/components/cardnews/SlideFrame';
 import { FONTS, GOOGLE_FONTS_URL } from '@/lib/cardnews/fonts';
@@ -99,7 +102,8 @@ interface PageData {
   handle?: string;
   accentOverride?: string;
   ratio?: string;   // '1:1' | '4:5' | '3:4' | '9:16' | '16:9' — 없으면 4:5
-  styleVariant?: 'default' | 'notebook' | 'image';  // notebook=CSS 노트, image=AI가 그린 카드 이미지
+  // notebook=CSS 노트, image=AI가 그린 카드 이미지, hybrid=AI 종이·펜그림 위에 CSS 조판
+  styleVariant?: 'default' | 'notebook' | 'image' | 'hybrid' | 'hybridPaper';
   needsReview?: boolean;   // 숫자 검증을 못 넘긴 장
   reviewNote?: string;
   noteLabel?: string;   // 노트 스타일 우하단 배지 윗줄
@@ -3210,6 +3214,10 @@ export default function EditorPage() {
     const link = document.createElement('link');
     link.id = 'gf-cardnews';
     link.rel = 'stylesheet';
+    // crossOrigin이 없으면 브라우저가 이 stylesheet의 CSSOM 접근을 막아,
+    // 다운로드 시 html-to-image가 @font-face를 못 읽고 시스템 기본 글꼴로 그린다.
+    // 화면은 멀쩡한데 내려받은 PNG만 글꼴·줄바꿈이 달라지는 원인이었다.
+    link.crossOrigin = 'anonymous';
     link.href = GOOGLE_FONTS_URL;
     document.head.appendChild(link);
   }, []);
@@ -4182,7 +4190,9 @@ export default function EditorPage() {
                   className={`relative rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-105 hover:shadow-2xl ${currentPage === idx + 1 ? 'ring-3 ring-primary-400 scale-105' : 'ring-1 ring-white/20'}`}
                   style={{ aspectRatio: '4/5' }}
                 >
-                  <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=300')} alt="" className="w-full h-full object-cover" />
+                  {(pg.styleVariant === 'hybrid' || pg.styleVariant === 'hybridPaper')
+                    ? <HybridThumb page={pg} index={idx} />
+                    : <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=300')} alt="" className="w-full h-full object-cover" />}
                   <div className="absolute inset-0" style={{ background: pg.overlay }} />
                   <div className="absolute inset-0 flex flex-col items-center justify-center p-3 text-center">
                     {pg.title && <p className="text-white text-[10px] font-bold leading-tight drop-shadow line-clamp-3">{pg.title}</p>}
@@ -4290,13 +4300,13 @@ export default function EditorPage() {
 
       {/* 오프스크린 캡처 영역 (다운로드용) */}
       <div style={{ position: 'fixed', left: '-99999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
-        {pagesData.map(pg => (
+        {pagesData.map((pg, idx) => (
           <div
             key={pg.id}
             ref={el => { captureRefs.current[pg.id] = el; }}
             style={{ width: 420, height: Math.round(420 * ratioHeightFactor), position: 'relative', overflow: 'hidden' }}
           >
-            <CardView page={pg} bgImage={pageImages[pg.id] ?? pg.bgImage} logo={brandKit?.logo} />
+            <CardView page={pg} bgImage={pageImages[pg.id] ?? pg.bgImage} logo={brandKit?.logo} index={idx} />
           </div>
         ))}
       </div>
@@ -4590,8 +4600,28 @@ export default function EditorPage() {
                 />
               )}
 
+              {/* 하이브리드도 종이가 배경이라 배경사진·오버레이를 쓰지 않는다 */}
+              {pageData.styleVariant === 'hybrid' && (
+                <HybridRenderer
+                  blocks={pageData.blocks || []}
+                  scale={canvasW / 420}
+                  index={currentPage - 1}
+                  noteLabel={pageData.noteLabel}
+                  noteNumber={pageData.noteNumber}
+                />
+              )}
+              {pageData.styleVariant === 'hybridPaper' && (
+                <NewspaperRenderer
+                  blocks={pageData.blocks || []}
+                  scale={canvasW / 420}
+                  index={currentPage - 1}
+                  noteLabel={pageData.noteLabel}
+                  noteNumber={pageData.noteNumber}
+                />
+              )}
+
               {/* Canvas layers */}
-              {pageData.styleVariant !== 'notebook' && pageData.styleVariant !== 'image' && (() => {
+              {pageData.styleVariant !== 'notebook' && pageData.styleVariant !== 'image' && pageData.styleVariant !== 'hybrid' && pageData.styleVariant !== 'hybridPaper' && (() => {
                 const eyebrowBlock = pageData.blocks?.find(b => b.type === 'eyebrow');
                 const eyebrowText = eyebrowBlock && 'text' in eyebrowBlock ? eyebrowBlock.text : undefined;
 
@@ -5055,7 +5085,9 @@ export default function EditorPage() {
                     currentPage === idx + 1 ? 'border-primary-600 shadow-md ring-2 ring-primary-100' : 'border-gray-200 hover:border-gray-400'
                   }`}
                 >
-                  <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=120')} alt={`${pg.id}p`} className="w-full h-full object-cover" loading="lazy" />
+                  {(pg.styleVariant === 'hybrid' || pg.styleVariant === 'hybridPaper')
+                    ? <HybridThumb page={pg} index={idx} />
+                    : <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=120')} alt={`${pg.id}p`} className="w-full h-full object-cover" loading="lazy" />}
                   <div className="absolute inset-0" style={{ background: pg.overlay }} />
                   <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-4 h-4 bg-black/60 rounded-full flex items-center justify-center text-[9px] text-white font-bold">{idx + 1}</div>
                   
@@ -5311,7 +5343,7 @@ const LayoutTemplateIcon = ({ size }: { size: number }) => (
   </svg>
 );
 // ─── CardView (시각 전용, 캡처/썸네일용 — 420px 기준) ───────────────────────
-function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; logo?: string }) {
+function CardView({ page, bgImage, logo, index = 0 }: { page: PageData; bgImage: string; logo?: string; index?: number }) {
   // AI가 그린 카드 이미지는 그 자체가 완성된 카드다 — 오버레이·텍스트를 덧그리지 않는다
   if (page.styleVariant === 'image') {
     return (
@@ -5331,6 +5363,29 @@ function CardView({ page, bgImage, logo }: { page: PageData; bgImage: string; lo
         blocks={page.blocks || []}
         scale={1}
         height={Math.round(420 * (r.h / r.w))}
+        noteLabel={page.noteLabel}
+        noteNumber={page.noteNumber}
+      />
+    );
+  }
+  // 하이브리드 — AI 종이·펜그림 자산 위에 글자는 CSS로 조판
+  if (page.styleVariant === 'hybridPaper') {
+    return (
+      <NewspaperRenderer
+        blocks={page.blocks || []}
+        scale={1}
+        index={index}
+        noteLabel={page.noteLabel}
+        noteNumber={page.noteNumber}
+      />
+    );
+  }
+  if (page.styleVariant === 'hybrid') {
+    return (
+      <HybridRenderer
+        blocks={page.blocks || []}
+        scale={1}
+        index={index}
         noteLabel={page.noteLabel}
         noteNumber={page.noteNumber}
       />
@@ -5960,7 +6015,9 @@ function FullscreenEditor({
                 className={`relative flex-shrink-0 rounded-lg overflow-hidden cursor-pointer transition-all ${fsPage === idx + 1 ? 'ring-2 ring-primary-400 ring-offset-2 ring-offset-[#13132a]' : 'opacity-60 hover:opacity-90'}`}
                 style={{ width: 44, height: 55 }}
               >
-                <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=80')} className="w-full h-full object-cover" />
+                {(pg.styleVariant === 'hybrid' || pg.styleVariant === 'hybridPaper')
+                  ? <HybridThumb page={pg} index={idx} />
+                  : <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=80')} className="w-full h-full object-cover" />}
                 <div className="absolute inset-0" style={{ background: pg.overlay }} />
                 <div className="absolute bottom-0.5 right-0.5 text-[7px] text-white font-bold bg-black/50 rounded px-0.5">{idx + 1}</div>
               </div>
@@ -6305,7 +6362,7 @@ function SaveDesignModal({
                   <div key={pg.id} className="flex flex-col gap-1.5">
                     <span className="text-[11px] font-semibold text-gray-500 text-center">{pageLabels[idx] || `페이지 ${pg.id}`}</span>
                     <div className="relative overflow-hidden rounded-lg shadow-md border border-gray-200" style={{ width: 140, height: 175 }}>
-                      <CardView page={pg} bgImage={pageImages[pg.id] ?? pg.bgImage} />
+                      <CardView page={pg} bgImage={pageImages[pg.id] ?? pg.bgImage} index={idx} />
                     </div>
                   </div>
                 ))}

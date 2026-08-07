@@ -137,7 +137,9 @@ export async function generateNewsCardnewsDraft(opts?: {
   force?: boolean;
   notebookStyle?: boolean;
   maxSlides?: number;
-  cardStyle?: CardStyle; // 'notebook'(기본) | 'newspaper'
+  // 'notebook'(기본) | 'newspaper' 는 AI가 카드를 통째로 그린다.
+  // 'hybrid' 는 미리 뽑아둔 종이·펜그림 위에 브라우저가 글자를 조판한다 — AI 호출 0회.
+  cardStyle?: CardStyle | 'hybrid' | 'hybridPaper';
   /** 그림에 쓸 시간(ms). 브리핑 뒤에 이어 돌 때는 남은 시간만 쓴다 */
   imageBudgetMs?: number;
 }): Promise<DraftResult> {
@@ -287,6 +289,11 @@ ${sourceBlock}`;
   // 이미지 생성이 안 되면 CSS 노트 렌더러(styleVariant 'notebook')로 떨어진다.
   // 사진 배경은 노트 스타일에서 쓰지 않으므로 Unsplash 검색도 건너뛴다.
   const useNotebook = opts?.notebookStyle !== false;
+  // 하이브리드는 그림을 새로 그리지 않는다 — 자산이 이미 있고 글자는 브라우저가 얹는다.
+  // 브리핑 뒤에 이어 돌 때 남은 시간이 모자라 그림을 한 장도 못 그리던 문제가
+  // 이 경로에서는 아예 생기지 않는다.
+  const isHybrid = opts?.cardStyle === 'hybrid' || opts?.cardStyle === 'hybridPaper';
+  const hybridVariant = opts?.cardStyle === 'hybridPaper' ? 'hybridPaper' : 'hybrid';
   const cardStyle: CardStyle = opts?.cardStyle === 'newspaper' ? 'newspaper' : 'notebook';
   const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
   const noteNumber = `No.${String(kstNow.getUTCMonth() + 1).padStart(2, '0')}${String(kstNow.getUTCDate()).padStart(2, '0')}`;
@@ -297,7 +304,7 @@ ${sourceBlock}`;
 
   // 한꺼번에 던지면 서로 밀려 호출마다 제한에 걸린다 — 몇 개씩 나눠 돌린다.
   const imgBudget = budget(Math.max(Number(opts?.imageBudgetMs) || 400_000, 30_000));
-  const notebookImages: (string | null)[] = useNotebook
+  const notebookImages: (string | null)[] = useNotebook && !isHybrid
     ? await mapWithLimit(cards, 3, async (card, i) => {
         if (!imgBudget.canStart(70_000)) return null;
         const facts = notebookFactsFromBlocks(card.blocks, i + 1);
@@ -321,11 +328,11 @@ ${sourceBlock}`;
   const articlePages = cards.map((card, i) => ({
     id: String(i + 1),
     bgImage: notebookImages[i] || backgrounds[i] || '',
-    bgLabel: useNotebook ? (cardStyle === 'newspaper' ? '신문 지면' : '손글씨 노트') : card.imageKeyword || '배경 이미지',
+    bgLabel: isHybrid ? (hybridVariant === 'hybridPaper' ? '신문(빠름)' : '노트(빠름)') : useNotebook ? (cardStyle === 'newspaper' ? '신문 지면' : '손글씨 노트') : card.imageKeyword || '배경 이미지',
     // 노트 이미지는 그림 한 장이 카드 전체다 — 어둡게 덮으면 글씨가 안 보인다
     overlay: notebookImages[i] ? '' : useNotebook ? '' : OVERLAY,
     ratio: '4:5',
-    styleVariant: notebookImages[i] ? 'image' : useNotebook ? 'notebook' : undefined,
+    styleVariant: isHybrid ? hybridVariant : notebookImages[i] ? 'image' : useNotebook ? 'notebook' : undefined,
     noteLabel: useNotebook ? '오늘의 뉴스' : undefined,
     noteNumber: useNotebook ? noteNumber : undefined,
     title: card.title || '',
@@ -368,7 +375,7 @@ ${sourceBlock}`;
         } as const;
 
   const drawEdge = async (kind: 'cover' | 'closing', uploadIndex: number) => {
-    if (!useNotebook || !imgBudget.canStart(70_000)) return null;
+    if (!useNotebook || isHybrid || !imgBudget.canStart(70_000)) return null;
     const img = await generateEdgeNotebookImage(edgeFacts(kind), { style: cardStyle });
     if (!img) return null;
     return (await uploadNotebookImage(img.base64, uploadIndex)) || null;
@@ -384,10 +391,10 @@ ${sourceBlock}`;
   ) => ({
     id: kind,
     bgImage: image || '',
-    bgLabel: useNotebook ? (cardStyle === 'newspaper' ? '신문 지면' : '손글씨 노트') : '배경 이미지',
+    bgLabel: isHybrid ? (hybridVariant === 'hybridPaper' ? '신문(빠름)' : '노트(빠름)') : useNotebook ? (cardStyle === 'newspaper' ? '신문 지면' : '손글씨 노트') : '배경 이미지',
     overlay: image ? '' : useNotebook ? '' : OVERLAY,
     ratio: '4:5',
-    styleVariant: image ? 'image' : useNotebook ? 'notebook' : undefined,
+    styleVariant: isHybrid ? hybridVariant : image ? 'image' : useNotebook ? 'notebook' : undefined,
     noteLabel: useNotebook ? '오늘의 뉴스' : undefined,
     noteNumber: useNotebook ? noteNumber : undefined,
     title,

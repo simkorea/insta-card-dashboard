@@ -47,6 +47,7 @@ function Slide({ page, width }: { page: PageData; width: number }) {
     const link = document.createElement('link');
     link.id = 'gf-view';
     link.rel = 'stylesheet';
+    link.crossOrigin = 'anonymous';  // 캡처 시 @font-face를 읽으려면 필요 (cardnews/editor/page.tsx 주석 참고)
     link.href = GOOGLE_FONTS_URL;
     document.head.appendChild(link);
   }, []);

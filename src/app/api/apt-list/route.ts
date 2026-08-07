@@ -26,7 +26,10 @@ export async function POST(request: NextRequest) {
       ratio: ratio || '4:5',
       noteNumber,
       useAiImage: useAiImage !== false,
-      cardStyle: cardStyle === 'newspaper' ? 'newspaper' : 'notebook',
+      cardStyle: cardStyle === 'newspaper' ? 'newspaper'
+        : cardStyle === 'hybrid' ? 'hybrid'
+        : cardStyle === 'hybridPaper' ? 'hybridPaper'
+        : 'notebook',
     });
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

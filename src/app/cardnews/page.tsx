@@ -232,6 +232,7 @@ export default function CardNewsPage() {
     const link = document.createElement('link');
     link.id = 'gf-cardnews';
     link.rel = 'stylesheet';
+    link.crossOrigin = 'anonymous';  // 캡처 시 @font-face를 읽으려면 필요 (editor/page.tsx 주석 참고)
     link.href = GOOGLE_FONTS_URL;
     document.head.appendChild(link);
   }, []);
@@ -241,10 +242,15 @@ export default function CardNewsPage() {
   const [genStyle, setGenStyle] = useState<'free' | 'origin'>('origin');
   // 카드 그림체. 'photo' = 기존(사진 배경 + 텍스트), 'notebook' = 손글씨 노트 이미지.
   // 모든 시작 방식(텍스트/URL/트렌드/완전자동/9단계)이 같은 값을 쓴다.
-  const [cardStyle, setCardStyle] = useState<'photo' | 'notebook' | 'newspaper'>('photo');
-  // 'photo'만 기존 렌더러로 그리고, 나머지는 AI가 카드 한 장을 통째로 그린다
+  const [cardStyle, setCardStyle] = useState<'photo' | 'notebook' | 'newspaper' | 'hybrid' | 'hybridPaper'>('photo');
+  // 'photo'는 기존 렌더러, 'hybrid'는 미리 뽑아둔 자산 위에 CSS로 조판,
+  // 나머지는 AI가 카드 한 장을 통째로 그린다
   const isDrawnStyle = cardStyle !== 'photo';
-  const drawnLabel = cardStyle === 'newspaper' ? '신문' : '손글씨 노트';
+  const isHybridStyle = cardStyle === 'hybrid' || cardStyle === 'hybridPaper';
+  const drawnLabel = cardStyle === 'newspaper' ? '신문'
+    : cardStyle === 'hybrid' ? '노트(빠름)'
+    : cardStyle === 'hybridPaper' ? '신문(빠름)'
+    : '손글씨 노트';
   const [notebookProgress, setNotebookProgress] = useState('');
   const [slideCountType, setSlideCountType] = useState('auto');
   const [slideCountNumber, setSlideCountNumber] = useState(5);
@@ -1194,6 +1200,22 @@ export default function CardNewsPage() {
     bgField: 'backgroundImage' | 'bgImage'
   ): Promise<T[]> => {
     if (cards.length === 0) return cards;
+
+    // 하이브리드는 그림을 새로 그리지 않는다. 종이·펜그림은 이미 뽑아둔 정적
+    // 자산이고 글자는 브라우저가 조판하므로, AI 호출도 대기 시간도 없다.
+    if (isHybridStyle) {
+      const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
+      const note = `No.${String(kst.getUTCMonth() + 1).padStart(2, '0')}${String(kst.getUTCDate()).padStart(2, '0')}`;
+      return cards.map(card => ({
+        ...card,
+        [bgField]: '',
+        overlay: '',
+        styleVariant: cardStyle === 'hybridPaper' ? 'hybridPaper' : 'hybrid',
+        noteLabel: cardStyle === 'hybridPaper' ? '오늘의 뉴스' : '임장노트',
+        noteNumber: note,
+      } as T));
+    }
+
     setNotebookProgress(`${drawnLabel}으로 그리는 중... (${cards.length}장, 1~2분 걸립니다)`);
     try {
       const res = await fetch('/api/notebook-cards', {
@@ -2466,7 +2488,22 @@ export default function CardNewsPage() {
                 {/* 카드 그림체 — 어떤 방식으로 시작하든 똑같이 적용된다 */}
                 <div className="mb-6">
                   <span className="text-xs font-semibold text-gray-400 block mb-2">카드 스타일</span>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <button
+                      onClick={() => setCardStyle('hybrid')}
+                      className={`text-left px-4 py-3 rounded-2xl border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-200 active:scale-[0.99] ${
+                        cardStyle === 'hybrid'
+                          ? 'border-emerald-500 bg-emerald-50/60'
+                          : 'border-gray-200 hover:border-gray-300 bg-white'
+                      }`}
+                    >
+                      <span className="text-[13px] font-bold text-gray-900 block">
+                        ✏️ 노트로 만들기 <span className="text-emerald-600">(빠름·무료)</span>
+                      </span>
+                      <span className="text-[11px] text-gray-500 leading-relaxed block mt-0.5">
+                        미리 그려둔 종이·펜그림 위에 글자를 얹습니다. 즉시 나오고 글자가 절대 틀리지 않습니다.
+                      </span>
+                    </button>
                     <button
                       onClick={() => setCardStyle('photo')}
                       className={`text-left px-4 py-3 rounded-2xl border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] ${
@@ -2488,26 +2525,35 @@ export default function CardNewsPage() {
                           : 'border-gray-200 hover:border-gray-300 bg-white'
                       }`}
                     >
-                      <span className="text-[13px] font-bold text-gray-900 block">📓 손글씨 노트로 만들기</span>
+                      <span className="text-[13px] font-bold text-gray-900 block">📓 손글씨 노트 <span className="text-amber-700">(AI·유료)</span></span>
                       <span className="text-[11px] text-gray-500 leading-relaxed block mt-0.5">
-                        실제 노트에 펜으로 쓴 느낌으로 그립니다. 한 장에 20~40초 걸립니다.
+                        AI가 카드를 통째로 그립니다. 한 장에 20~40초, 약 270원이 듭니다.
                       </span>
                     </button>
                     <button
-                      onClick={() => setCardStyle('newspaper')}
-                      className={`text-left px-4 py-3 rounded-2xl border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 active:scale-[0.99] ${
-                        cardStyle === 'newspaper'
-                          ? 'border-gray-800 bg-gray-100'
+                      onClick={() => setCardStyle('hybridPaper')}
+                      className={`text-left px-4 py-3 rounded-2xl border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-200 active:scale-[0.99] ${
+                        cardStyle === 'hybridPaper'
+                          ? 'border-emerald-500 bg-emerald-50/60'
                           : 'border-gray-200 hover:border-gray-300 bg-white'
                       }`}
                     >
-                      <span className="text-[13px] font-bold text-gray-900 block">📰 신문으로 만들기</span>
+                      <span className="text-[13px] font-bold text-gray-900 block">
+                        📰 신문으로 만들기 <span className="text-emerald-600">(빠름·무료)</span>
+                      </span>
                       <span className="text-[11px] text-gray-500 leading-relaxed block mt-0.5">
-                        경제 신문 지면처럼 큰 활자로 그립니다. 손글씨보다 진중한 인상입니다.
+                        경제 신문 지면처럼 인쇄 활자로 조판합니다. 손글씨보다 진중한 인상입니다.
                       </span>
                     </button>
                   </div>
-                  {isDrawnStyle && (
+                  {isHybridStyle && (
+                    <p className="text-[11px] text-emerald-800/80 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 mt-2 leading-relaxed">
+                      그림을 새로 그리지 않아 <b>추가 비용도 대기 시간도 없습니다.</b>{' '}
+                      글자가 진짜 텍스트라 에디터에서 바로 고칠 수 있고, 숫자가 틀릴 일이 없습니다.{' '}
+                      배경 종이가 카드 전체라 <b>올린 이미지와 배경 사진은 쓰이지 않습니다.</b>
+                    </p>
+                  )}
+                  {isDrawnStyle && !isHybridStyle && (
                     <p className="text-[11px] text-amber-800/80 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-2 leading-relaxed">
                       {/* {변수} 앞뒤 줄바꿈은 JSX가 지워버려서 문장이 붙는다 — 공백을 명시한다 */}
                       카드 문구를 먼저 만든 뒤 그림을 그리므로 5장이면 <b>1~2분</b> 정도 걸립니다.{' '}
