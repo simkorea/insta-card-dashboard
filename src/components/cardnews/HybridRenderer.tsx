@@ -17,7 +17,6 @@ import { pickPenSketch, penSketchUrl } from '@/lib/cardnews/penSketch';
 // 좌표/폰트는 전부 420px 폭 캔버스 기준. scale로 실제 폭에 맞춘다
 // (NotebookRenderer와 같은 규약).
 
-const NAVY = '#2b3a5e';
 const RED = '#c8261f';
 const INK = '#111';
 const FONT = "'Jua', 'Do Hyeon', 'Noto Sans KR', sans-serif";
@@ -65,43 +64,80 @@ function Mark({ children, s, flow }: { children: React.ReactNode; s: (v: number)
   );
 }
 
-/** 표 항목 왼쪽 아이콘 — 이모지 대신 선화를 직접 그린다 */
+/** 손으로 그린 빨간 별. 노트 카드의 여백을 채우는 장식 */
+function Star({ s, size = 14 }: { s: (v: number) => number; size?: number }) {
+  return (
+    <svg width={s(size)} height={s(size)} viewBox="0 0 24 24" fill={RED} stroke={RED}
+         strokeWidth="2" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <path d="M12 3.5 L14.6 9.4 L21 10.1 L16.2 14.3 L17.6 20.5 L12 17.3 L6.4 20.5 L7.8 14.3 L3 10.1 L9.4 9.4 Z" />
+    </svg>
+  );
+}
+
+/**
+ * 표 항목 왼쪽 아이콘.
+ * 이모지가 아니라 직접 그린다 — 이모지는 기기마다 모양이 달라지고,
+ * 캡처하면 흑백으로 빠지는 환경도 있다.
+ * 흑백 선화였다가 색을 넣었다. 참고한 노트 카드들은 아이콘마다 색이
+ * 달라서 표가 한눈에 구분된다.
+ */
 function RowIcon({ kind, size }: { kind: string; size: number }) {
-  if (!kind) return <span style={{ width: size, height: size, flex: `0 0 ${size}px` }} />;
-  const common = {
-    width: size,
-    height: size,
-    flex: `0 0 ${size}px`,
-    viewBox: '0 0 40 40',
-    fill: 'none' as const,
-    stroke: INK,
-    strokeWidth: 2.6,
-  };
+  const box = { width: size, height: size, flex: `0 0 ${size}px` };
+  if (!kind) return <span style={box} />;
+  const common = { ...box, viewBox: '0 0 40 40', strokeWidth: 2.4, strokeLinejoin: 'round' as const };
+
   if (kind === 'won') {
     return (
-      <span style={{ width: size, height: size, flex: `0 0 ${size}px`, color: RED, fontSize: size, lineHeight: 1, textAlign: 'center' }}>
-        ₩
-      </span>
+      <svg {...common} fill="none">
+        <circle cx="20" cy="20" r="15" fill="#1f9d55" stroke="#177a41" />
+        <text x="20" y="27" textAnchor="middle" fontSize="19" fill="#fff" fontFamily="sans-serif">₩</text>
+      </svg>
     );
   }
   if (kind === 'house') {
     return (
-      <svg {...common} strokeLinejoin="round">
-        <path d="M5 19 L20 7 L35 19" /><path d="M9 18 V34 H31 V18" /><path d="M17 34 V25 H23 V34" />
+      <svg {...common} fill="none" stroke="#c8261f">
+        <path d="M5 19 L20 7 L35 19" fill="#f6c6c1" />
+        <path d="M9 18 V34 H31 V18 Z" fill="#fff" />
+        <path d="M17 34 V25 H23 V34" />
       </svg>
     );
   }
   if (kind === 'calendar') {
     return (
-      <svg {...common}>
-        <rect x="6" y="9" width="28" height="26" rx="3" /><path d="M6 17 H34" /><path d="M14 5 V12 M26 5 V12" />
+      <svg {...common} fill="none" stroke="#2f6fb3">
+        <rect x="6" y="9" width="28" height="26" rx="3" fill="#fff" />
+        <path d="M6 17 H34" stroke="#2f6fb3" strokeWidth="4" />
+        <path d="M14 5 V12 M26 5 V12" />
       </svg>
     );
   }
+  if (kind === 'people') {
+    return (
+      <svg {...common} fill="none" stroke="#2f6fb3">
+        <circle cx="14" cy="14" r="5" fill="#cfe0f2" />
+        <circle cx="27" cy="16" r="4" fill="#cfe0f2" />
+        <path d="M5 33 C 5 25, 23 25, 23 33" />
+        <path d="M23 33 C 23 27, 35 27, 35 33" />
+      </svg>
+    );
+  }
+  if (kind === 'subway') {
+    return (
+      <svg {...common} fill="none" stroke="#2f6fb3">
+        <rect x="9" y="6" width="22" height="22" rx="4" fill="#cfe0f2" />
+        <path d="M11 16 H29" />
+        <circle cx="14" cy="23" r="1.8" fill="#2f6fb3" stroke="none" />
+        <circle cx="26" cy="23" r="1.8" fill="#2f6fb3" stroke="none" />
+        <path d="M13 28 L9 35 M27 28 L31 35" />
+      </svg>
+    );
+  }
+  // 위치 핀
   return (
-    <svg {...common}>
-      <path d="M20 36 C 20 36, 32 24, 32 16 A 12 12 0 1 0 8 16 C 8 24, 20 36, 20 36 Z" />
-      <circle cx="20" cy="16" r="4.6" />
+    <svg {...common} fill="none" stroke="#c8261f">
+      <path d="M20 36 C 20 36, 32 24, 32 16 A 12 12 0 1 0 8 16 C 8 24, 20 36, 20 36 Z" fill="#c8261f" stroke="#9c1d15" />
+      <circle cx="20" cy="16" r="4.6" fill="#fff" stroke="none" />
     </svg>
   );
 }
@@ -112,6 +148,8 @@ function iconFor(label: string, value = ''): string {
   if (/가격|시세|실거래|매매|전세|분양가|금액|억|만 ?원|₩/.test(t)) return 'won';
   if (/평형|전용|면적|타입|구조|\d+\s*평(?!균)/.test(t)) return 'house';
   if (/날짜|연식|거래일|계약|준공|입주|시점|기간|\d{4}[.년]/.test(t)) return 'calendar';
+  if (/세대|가구|규모/.test(t)) return 'people';
+  if (/역세권|지하철|노선|호선|역$|교통/.test(t)) return 'subway';
   if (/위치|주소|지역|동네|소재/.test(t)) return 'pin';
   return '';
 }
@@ -136,7 +174,9 @@ export function HybridRenderer({
   // 블록 해석은 신문 렌더러와 공유한다 — 각자 하면 한쪽만 고쳐져 어긋난다
   const f = readCardBlocks(blocks, index);
   const { headline, sub, points, source, ribbon } = f;
-  const rows = f.rows.slice(0, 4);
+  // 참고한 노트 카드는 위치·역·평형·가격·세대수·연식 여섯 줄을 다 보여준다.
+  // 네 줄로 자르면 세대수와 연식이 통째로 날아간다 — 임장에서 실제로 보는 값이다.
+  const rows = f.rows.slice(0, 6);
   const bandText = f.bandText || noteLabel || '';
 
   const sketch = penSketchUrl(pickPenSketch(f.sketchText, index));
@@ -187,41 +227,37 @@ export function HybridRenderer({
           flexDirection: 'column',
         }}
       >
-        {/* 남색 띠 + 번호 리본 */}
+        {/* 번호 동그라미 + 동네명 + 별.
+            예전에는 남색 띠였는데, 참고한 노트 카드들은 손으로 그린 동그라미에
+            번호를 넣고 동네명에 형광펜을 긋는다. 띠보다 노트에 가깝다. */}
         {(bandText || ribbon) && (
-          <div style={{ position: 'relative', flexShrink: 0 }}>
-            <div
+          <div style={{ display: 'flex', alignItems: 'center', gap: s(9), flexShrink: 0 }}>
+            <span
               style={{
-                height: s(37),
-                background: NAVY,
+                width: s(31),
+                height: s(31),
+                flex: `0 0 ${s(31)}px`,
+                border: `${Math.max(1, s(2.4))}px solid ${RED}`,
+                borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                // 손으로 칠한 듯 위아래 가장자리를 흐트러뜨린다
-                clipPath: 'polygon(0 9%, 18% 2%, 52% 6%, 86% 1%, 100% 8%, 100% 92%, 64% 99%, 26% 94%, 0 100%)',
+                fontSize: s(19),
+                color: RED,
+                // 손으로 그린 동그라미는 정원이 아니다
+                transform: 'rotate(-3deg)',
               }}
             >
-              <span style={{ fontSize: s(21), color: '#fff', letterSpacing: s(1.5) }}>{bandText}</span>
-            </div>
-            <div
-              style={{
-                position: 'absolute',
-                right: s(3),
-                top: -s(10),
-                width: s(44),
-                height: s(56),
-                background: NAVY,
-                clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%)',
-                display: 'flex',
-                justifyContent: 'center',
-                paddingTop: s(7),
-              }}
-            >
-              <span style={{ fontSize: s(22), color: '#fff' }}>{ribbon}</span>
-            </div>
+              {ribbon}
+            </span>
+            {bandText && (
+              <span style={{ fontSize: s(23) }}>
+                <Mark s={s} flow>{bandText}</Mark>
+              </span>
+            )}
+            <Star s={s} size={15} />
           </div>
         )}
-
         {/* 제목 + 손으로 그은 빨간 밑줄 */}
         {headline && (
           <div style={{ flexShrink: 0, marginTop: s(10) }}>
@@ -252,7 +288,7 @@ export function HybridRenderer({
 
         {/* 정보 상자 — 자로 잰 사각형이 아니라 손으로 그린 듯 흔들리는 테두리 */}
         {rows.length > 0 && (
-          <div style={{ position: 'relative', flexShrink: 0, marginTop: s(7), padding: `${s(8)}px ${s(13)}px ${s(7)}px` }}>
+          <div style={{ position: 'relative', flexShrink: 0, marginTop: s(7), padding: `${s(6)}px ${s(13)}px ${s(5)}px` }}>
             <svg
               viewBox="0 0 690 250"
               preserveAspectRatio="none"
@@ -277,17 +313,26 @@ export function HybridRenderer({
                     position: 'relative',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: s(8),
+                    gap: s(9),
                     fontSize: strong ? s(23) : s(17),
-                    padding: `${s(2)}px 0`,
+                    padding: `${s(2.5)}px 0`,
                     minWidth: 0,
+                    // 항목 사이 점선 — 참고한 카드들이 표를 이렇게 끊는다.
+                    // 마지막 줄에는 긋지 않는다
+                    borderBottom: i < rows.length - 1
+                      ? `${Math.max(1, s(1))}px dashed rgba(17,17,17,0.22)`
+                      : undefined,
                   }}
                 >
-                  <RowIcon kind={kind} size={strong ? s(23) : s(20)} />
+                  <RowIcon kind={kind} size={strong ? s(24) : s(21)} />
                   {strong ? (
                     <Mark s={s}><span style={{ color: RED }}>{r.value}</span></Mark>
                   ) : (
-                    <span style={{ wordBreak: 'keep-all' }}>{r.value}</span>
+                    // 역·평형처럼 눈에 걸려야 하는 값에도 형광펜을 긋는다.
+                    // 참고 카드는 가격 한 곳만이 아니라 여러 곳을 칠한다.
+                    (kind === 'house' || kind === 'subway')
+                      ? <span style={{ wordBreak: 'keep-all' }}><Mark s={s} flow>{r.value}</Mark></span>
+                      : <span style={{ wordBreak: 'keep-all' }}>{r.value}</span>
                   )}
                   {/* 강조 줄은 값만 크게 보여주므로 무엇의 값인지 작게 덧붙인다 */}
                   {strong && r.label && (
@@ -312,8 +357,10 @@ export function HybridRenderer({
                   {/* 단지 카드(표가 있는 것)는 '장점', 뉴스 카드는 '핵심 포인트' */}
                   <span style={{ fontSize: s(22), color: RED }}>{f.hasTable ? '장점' : '핵심 포인트'}</span>
                 </div>
-                <svg viewBox="0 0 186 12" preserveAspectRatio="none" style={{ display: 'block', width: s(93), height: s(6), margin: `-${s(1)}px 0 0 ${s(2)}px` }}>
-                  <path d="M4 7 C 54 2, 128 11, 182 5" stroke={RED} strokeWidth="6" fill="none" strokeLinecap="round" />
+                {/* 물결 밑줄 — 참고 카드가 '장점' 아래에 긋는 그 선 */}
+                <svg viewBox="0 0 186 14" preserveAspectRatio="none" style={{ display: 'block', width: s(96), height: s(7), margin: `-${s(1)}px 0 0 ${s(2)}px` }}>
+                  <path d="M3 8 Q 18 1, 33 8 T 63 8 T 93 8 T 123 8 T 153 8 T 183 8"
+                        stroke={RED} strokeWidth="4" fill="none" strokeLinecap="round" />
                 </svg>
                 <div style={{ marginTop: s(5), display: 'flex', flexDirection: 'column', gap: s(3) }}>
                   {points.map((it, i) => (
@@ -360,13 +407,35 @@ export function HybridRenderer({
               {/* 오른쪽 아래 태그에 이미 noteLabel이 있다 — 여기까지 같은 말을 쓰면 두 번 찍힌다 */}
               <div style={{ fontSize: s(17), textAlign: 'center' }}>메모</div>
               <div style={{ height: s(2), background: INK, margin: `${s(1)}px ${s(17)}px ${s(6)}px` }} />
-              <div style={{ fontSize: s(13.5), lineHeight: 1.42, textAlign: 'center', wordBreak: 'keep-all' }}>{sub}</div>
+              {/* 오른쪽 아래 태그가 고정 위치라, 메모가 길면 그 밑으로 들어가 잘린다.
+                  네 줄에서 끊는다 */}
+              <div
+                style={{
+                  fontSize: s(13.5),
+                  lineHeight: 1.42,
+                  textAlign: 'center',
+                  wordBreak: 'keep-all',
+                  maxHeight: s(13.5) * 1.42 * 4 + s(4),
+                  overflow: 'hidden',
+                }}
+              >
+                {sub}
+              </div>
             </div>
           )}
         </div>
 
         {/* 펜 그림 — 남는 공간을 채운다. 내용이 길면 알아서 작아진다 */}
-        <div style={{ position: 'relative', flex: 1, minHeight: s(95), marginTop: s(4) }}>
+        <div
+          style={{
+            position: 'relative',
+            flex: 1,
+            minHeight: s(70),
+            // 신문 쪽과 같은 이유 — 내용이 적은 장에서 그림이 지면을 먹는다
+            maxHeight: s(150),
+            marginTop: s(4),
+          }}
+        >
           {/* next/image가 아니라 순수 img여야 한다 — html-to-image로 카드를 캡처한다 */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
