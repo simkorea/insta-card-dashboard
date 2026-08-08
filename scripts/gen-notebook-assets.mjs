@@ -14,6 +14,7 @@
 //   node scripts/gen-notebook-assets.mjs pen:key    # 이름으로 골라서
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import sharp from 'sharp';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -166,6 +167,22 @@ ${CUT_STYLE}`,
   })),
 ];
 
+// 모델이 주는 원본은 1024px 이상인데 카드에서는 200~380px로 그려진다.
+// 그대로 두면 자산만 20MB가 넘어 카드를 여러 장 여는 화면이 무거워진다.
+// 선화라 팔레트로 줄여도 선이 뭉개지지 않는다 (실측 76~88% 감소).
+const MAX_W = { pen: 720, cut: 960, paper: 900 };
+
+async function shrink(buf, kind) {
+  try {
+    return await sharp(buf)
+      .resize({ width: MAX_W[kind] || 900, withoutEnlargement: true })
+      .png({ compressionLevel: 9, palette: true, colors: kind === 'paper' ? 128 : 64 })
+      .toBuffer();
+  } catch {
+    return buf;   // 압축이 실패해도 원본은 남긴다
+  }
+}
+
 async function generate(key, prompt) {
   let lastErr;
   for (const model of MODELS) {
@@ -221,7 +238,8 @@ async function main() {
       for (let job = queue.shift(); job; job = queue.shift()) {
         try {
           const b64 = await generate(key, job.prompt);
-          writeFileSync(job.file, Buffer.from(b64, 'base64'));
+          const small = await shrink(Buffer.from(b64, 'base64'), job.name.split(':')[0]);
+          writeFileSync(job.file, small);
           console.log(`  [${++done}/${jobs.length}] ${job.name}`);
         } catch (e) {
           failed.push(job.name);
