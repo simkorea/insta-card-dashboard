@@ -28,6 +28,17 @@ const PAPER_URL = '/notebook-assets/paper/paper-spring.png';
 // 이미지 폭의 16.9%까지 나온다. 종이를 바꾸면 이 값도 다시 재야 한다.
 const SPRING_W = 71;
 
+// 펜 그림은 카드 왼쪽 아래 같은 자리에 같은 크기로 놓는다.
+// 크기까지 고정해야 여러 장을 넘길 때 그림이 커졌다 작아졌다 하지 않는다.
+const SKETCH_W = 168;
+const SKETCH_H = 96;
+const SKETCH_BOTTOM = 14;
+// PNG 사방에 흰 여백이 넓어 상자 크기만큼 안 보인다. 조금 키워 밀어낸다.
+const SKETCH_ZOOM = 1.2;
+// 본문이 그림 위로 내려오지 않게 비워둘 높이.
+// 확대 배율만큼 그림이 위로 더 뻗는다 — 이걸 빼먹어 글자와 겹쳤다.
+const SKETCH_BAND = Math.round(SKETCH_BOTTOM + SKETCH_H * SKETCH_ZOOM) + 6;
+
 /**
  * 노란 형광펜. 곱하기로 얹어야 종이 결이 비쳐 진짜 마커처럼 보인다.
  *
@@ -181,13 +192,19 @@ export function HybridRenderer({
 
   const sketch = penSketchUrl(pickPenSketch(f.sketchText, index));
 
+  // 담을 내용이 적으면 글씨를 키워 빈 곳을 메운다.
+  // 없는 내용을 지어낼 수는 없으니, 있는 글을 크게 써서 채우는 쪽이 맞다.
+  // 배수는 세 단계뿐이다 — 카드마다 크기가 제각각이면 넘길 때 어수선하다.
+  const bodyCount = rows.length + points.length + (sub ? 1 : 0);
+  const z = bodyCount <= 3 ? 1.18 : bodyCount <= 5 ? 1.08 : 1;
+
   // 제목은 단지명 길이가 제각각이라 고정 크기로는 잘리거나 남는다.
   // 두 줄 안에 들어갈 때까지 줄인다.
   //
   // '양주옥정신도시대방노블랜드더시그니처'처럼 띄어쓰기가 없는 단지명은
   // keep-all이면 줄바꿈이 아예 안 돼 그대로 잘려나간다 — anywhere여야 한다.
   const titleRef = useRef<HTMLDivElement>(null);
-  const MAX_TITLE = 29;
+  const MAX_TITLE = Math.round(29 * z);
   const LINE = 1.08;
   const [titleSize, setTitleSize] = useState(MAX_TITLE);
   useLayoutEffect(() => {
@@ -200,7 +217,7 @@ export function HybridRenderer({
       el.style.fontSize = `${s(size)}px`;
     }
     setTitleSize(size);
-  }, [headline, scale]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [headline, scale, z]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
@@ -222,7 +239,8 @@ export function HybridRenderer({
           left: s(SPRING_W + 7),
           right: s(14),
           top: s(13),
-          bottom: s(10),
+          // 아래쪽은 고정된 그림 자리로 비워둔다
+          bottom: s(SKETCH_BAND),
           display: 'flex',
           flexDirection: 'column',
         }}
@@ -314,7 +332,7 @@ export function HybridRenderer({
                     display: 'flex',
                     alignItems: 'center',
                     gap: s(9),
-                    fontSize: strong ? s(23) : s(17),
+                    fontSize: strong ? s(23 * z) : s(17 * z),
                     padding: `${s(2.5)}px 0`,
                     minWidth: 0,
                     // 항목 사이 점선 — 참고한 카드들이 표를 이렇게 끊는다.
@@ -324,7 +342,7 @@ export function HybridRenderer({
                       : undefined,
                   }}
                 >
-                  <RowIcon kind={kind} size={strong ? s(24) : s(21)} />
+                  <RowIcon kind={kind} size={strong ? s(24 * z) : s(21 * z)} />
                   {strong ? (
                     <Mark s={s}><span style={{ color: RED }}>{r.value}</span></Mark>
                   ) : (
@@ -344,6 +362,11 @@ export function HybridRenderer({
           </div>
         )}
 
+        {/* 남는 높이를 위아래로 나눠 본문을 가운데 아래쪽으로 내린다.
+            내용이 적은 장에서 위쪽만 빽빽하고 아래가 텅 비어 보이던 것을 없앤다.
+            빽빽한 장에서는 남는 공간이 0이라 아무 일도 일어나지 않는다. */}
+        <div style={{ flex: '1 1 0', minHeight: 0 }} />
+
         {/* 장점 + 메모를 좌우로 — 항목이 늘어도 메모와 겹치지 않는다 */}
         <div style={{ display: 'flex', gap: s(10), marginTop: s(11), alignItems: 'flex-start' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -355,21 +378,23 @@ export function HybridRenderer({
                     <path d="M6.7 10.5 10.8 3.4a1.9 1.9 0 0 1 2.9 1.9l-.9 4.6h4.9a1.9 1.9 0 0 1 1.9 2.3l-1.3 5.8a1.9 1.9 0 0 1-1.9 1.5H6.7z" />
                   </svg>
                   {/* 단지 카드(표가 있는 것)는 '장점', 뉴스 카드는 '핵심 포인트' */}
-                  <span style={{ fontSize: s(22), color: RED }}>{f.hasTable ? '장점' : '핵심 포인트'}</span>
+                  <span style={{ fontSize: s(22 * z), color: RED }}>{f.hasTable ? '장점' : '핵심 포인트'}</span>
                 </div>
                 {/* 물결 밑줄 — 참고 카드가 '장점' 아래에 긋는 그 선 */}
                 <svg viewBox="0 0 186 14" preserveAspectRatio="none" style={{ display: 'block', width: s(96), height: s(7), margin: `-${s(1)}px 0 0 ${s(2)}px` }}>
                   <path d="M3 8 Q 18 1, 33 8 T 63 8 T 93 8 T 123 8 T 153 8 T 183 8"
                         stroke={RED} strokeWidth="4" fill="none" strokeLinecap="round" />
                 </svg>
-                <div style={{ marginTop: s(5), display: 'flex', flexDirection: 'column', gap: s(3) }}>
+                <div style={{ marginTop: s(5 * z), display: 'flex', flexDirection: 'column', gap: s(3 * z) }}>
                   {points.map((it, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: s(8), fontSize: s(18) }}>
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: s(8), fontSize: s(18 * z) }}>
                       <svg width={s(18)} height={s(18)} viewBox="0 0 36 36" fill="none" style={{ flex: `0 0 ${s(18)}px`, marginTop: s(2) }}>
                         <rect x="3" y="5" width="29" height="28" rx="2" stroke={INK} strokeWidth="2.8" />
                         <path d="M8 19 L15 27 L31 4" stroke={RED} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
-                      <span style={{ wordBreak: 'keep-all', lineHeight: 1.25 }}>
+                      {/* '한강로르지오리버프론트'처럼 띄어쓰기 없는 긴 단지명은
+                          keep-all만으로는 줄바꿈이 안 돼 옆 메모를 뚫고 나간다 */}
+                      <span style={{ wordBreak: 'keep-all', overflowWrap: 'break-word', lineHeight: 1.25, minWidth: 0 }}>
                         <Mark s={s} flow>{it}</Mark>
                       </span>
                     </div>
@@ -425,44 +450,37 @@ export function HybridRenderer({
           )}
         </div>
 
-        {/* 펜 그림 — 남는 공간을 채운다. 내용이 길면 알아서 작아진다 */}
-        <div
-          style={{
-            position: 'relative',
-            flex: 1,
-            minHeight: s(70),
-            // 신문 쪽과 같은 이유 — 내용이 적은 장에서 그림이 지면을 먹는다
-            maxHeight: s(150),
-            marginTop: s(4),
-          }}
-        >
-          {/* next/image가 아니라 순수 img여야 한다 — html-to-image로 카드를 캡처한다 */}
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={sketch}
-            alt=""
-            crossOrigin="anonymous"
-            style={{
-              position: 'absolute',
-              // 스케치 PNG는 사방에 흰 여백이 있어 살짝 왼쪽으로 당겨야 제자리로 보인다.
-              // 다만 스프링까지 넘어가면 안 된다.
-              left: -s(5),
-              bottom: 0,
-              // 내용이 적은 장(표지 등)에서는 그림이 커져 아래 여백을 채운다.
-              // 빽빽한 장에서는 높이가 먼저 걸려 알아서 작아진다.
-              maxWidth: s(290),
-              // 아래로 넘치면 바로 밑의 출처 문구를 덮는다
-              maxHeight: '100%',
-              mixBlendMode: 'multiply',
-              filter: 'brightness(1.02) contrast(1.5) saturate(1.4)',
-            }}
-          />
-        </div>
+        <div style={{ flex: '1.3 1 0', minHeight: 0 }} />
 
         {source && (
           <div style={{ fontSize: s(10), color: '#8A8A7A', flexShrink: 0 }}>{source}</div>
         )}
       </div>
+
+      {/* 펜 그림 — 카드 왼쪽 아래 고정.
+          예전에는 흐름 안에서 '남는 공간'을 받게 해뒀더니, 내용이 길고 짧음에
+          따라 그림이 위아래로 뛰어다녀 카드를 넘길 때 어수선했다.
+          자리를 못 박고, 남는 공간은 글자 쪽을 키워 채운다. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={sketch}
+        alt=""
+        crossOrigin="anonymous"
+        style={{
+          position: 'absolute',
+          left: s(SPRING_W + 1),
+          bottom: s(SKETCH_BOTTOM),
+          width: s(SKETCH_W),
+          height: s(SKETCH_H),
+          objectFit: 'contain',
+          objectPosition: 'left bottom',
+          // PNG 사방에 흰 여백이 넓다. 조금 키워 여백을 상자 밖으로 밀어낸다
+          transform: `scale(${SKETCH_ZOOM})`,
+          transformOrigin: 'left bottom',
+          mixBlendMode: 'multiply',
+          filter: 'brightness(1.02) contrast(1.5) saturate(1.4)',
+        }}
+      />
 
       {/* 끈에 매단 크라프트 태그 */}
       {(noteLabel || noteNumber) && (
