@@ -218,10 +218,18 @@ export default function BlogGeneratorPage() {
           setTopic(parsed.content);
         }
         if (parsed.images && Array.isArray(parsed.images)) {
-          const urls = parsed.images;
-          setImages(prev => prev.map((img, idx) =>
-            urls[idx] ? { ...img, url: urls[idx], source: 'upload' } : img
-          ));
+          const urls: string[] = parsed.images;
+          // 슬롯 수를 카드 장수에 맞춘다. 예전에는 5칸 고정이라
+          // 10장짜리 카드뉴스를 가져와도 앞 5장만 들어가고 나머지는 사라졌다.
+          // 선택 가능한 범위는 3~10칸이다.
+          const count = Math.min(Math.max(urls.length, 3), 10);
+          setImageCount(count);
+          setImages(Array.from({ length: count }, (_, i) => ({
+            id: `img_${i + 1}`,
+            url: urls[i] || '',
+            source: (urls[i] ? 'upload' : '') as BlogImage['source'],
+            label: '',
+          })));
         }
       }
     } catch (e) {

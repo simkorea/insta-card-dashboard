@@ -3992,7 +3992,8 @@ export default function EditorPage() {
     setSelectedElementId(null);
   };
 
-  const handleConvertToBlog = () => {
+  const [convertingBlog, setConvertingBlog] = useState(false);
+  const handleConvertToBlog = async () => {
     const contentText = pagesData.map((p, idx) => {
       const parts = [`[${idx + 1}장 ${idx === 0 ? '표지' : '본문'}]`];
       if (p.title) parts.push(`제목: ${p.title}`);
@@ -4006,15 +4007,48 @@ export default function EditorPage() {
       alert('전환할 카드뉴스 내용이 없습니다.');
       return;
     }
-    const images = pagesData
-      .map(p => (typeof pageImages !== 'undefined' ? (pageImages[p.id] ?? p.bgImage) : p.bgImage))
-      .filter(url => url && url.trim() !== '');
+    // 카드 그림을 블로그 갤러리로 넘긴다.
+    //
+    // 예전에는 저장된 bgImage 주소만 넘겼는데, 하이브리드·노트 스타일은
+    // 그림 파일이 없다(브라우저가 그때그때 그린다). 그래서 갤러리가 통째로
+    // 비었다 — 넘길 주소가 하나도 없었기 때문이다.
+    // 파일이 없는 장은 화면을 그대로 캡처해서 넘긴다.
+    //
+    // 빈 칸도 자리를 지켜야 한다. 3장이 실패했다고 배열에서 빼버리면
+    // 4장 그림이 3번 슬롯으로 밀려 글과 그림이 어긋난다.
+    setConvertingBlog(true);
+    try {
+      const { toCanvas } = await import('html-to-image');
+      await document.fonts?.ready;
 
-    localStorage.setItem('convertSourceBlog', JSON.stringify({
-      content: contentText,
-      images: images,
-    }));
-    router.push('/blog-generator?from=cardnews');
+      const images: string[] = [];
+      for (const pg of pagesData) {
+        const stored = pageImages[pg.id] ?? pg.bgImage;
+        if (stored && stored.trim() !== '') { images.push(stored); continue; }
+        const el = captureRefs.current[pg.id];
+        if (!el) { images.push(''); continue; }
+        try {
+          const canvas = await toCanvas(el, { pixelRatio: 1, cacheBust: false, skipFonts: false });
+          // localStorage는 5MB 안팎이라 원본 PNG로는 몇 장 못 담는다.
+          // 갤러리 미리보기용이므로 JPEG로 충분하다.
+          images.push(canvas.toDataURL('image/jpeg', 0.75));
+        } catch {
+          images.push('');
+        }
+      }
+
+      const payload = JSON.stringify({ content: contentText, images });
+      try {
+        localStorage.setItem('convertSourceBlog', payload);
+      } catch {
+        // 용량을 넘기면 글이라도 넘긴다 — 전환 자체가 실패하는 것보다 낫다
+        localStorage.setItem('convertSourceBlog', JSON.stringify({ content: contentText, images: [] }));
+        alert('카드 그림이 많아 글만 넘겼습니다. 블로그 화면에서 이미지를 직접 넣어주세요.');
+      }
+      router.push('/blog-generator?from=cardnews');
+    } finally {
+      setConvertingBlog(false);
+    }
   };
 
   // 공유 링크 생성 (저장 → /view/[id] URL 복사)
@@ -4473,8 +4507,8 @@ export default function EditorPage() {
               <button onClick={() => setShowSnsModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-white bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg hover:from-purple-600 hover:to-pink-600 active:scale-[0.98] transition-all shadow-sm">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 2L11 13"/><path d="M22 2L15 22 11 13 2 9l20-7z"/></svg> SNS 업로드
               </button>
-              <button onClick={handleConvertToBlog} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors">
-                블로그로 전환 →
+              <button onClick={handleConvertToBlog} disabled={convertingBlog} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
+                {convertingBlog ? '카드 옮기는 중…' : '블로그로 전환 →'}
               </button>
               <button onClick={() => setShowDownloadMenu(true)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-semibold text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> 다운로드
@@ -4515,8 +4549,8 @@ export default function EditorPage() {
           <button onClick={() => setShowSaveModal(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 whitespace-nowrap shrink-0 active:bg-gray-100">
             <Save size={13} /> 디자인저장
           </button>
-          <button onClick={handleConvertToBlog} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 text-xs font-semibold text-blue-700 whitespace-nowrap shrink-0 active:bg-blue-100">
-            블로그로 전환
+          <button onClick={handleConvertToBlog} disabled={convertingBlog} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 text-xs font-semibold text-blue-700 whitespace-nowrap shrink-0 active:bg-blue-100 disabled:opacity-60">
+            {convertingBlog ? '옮기는 중…' : '블로그로 전환'}
           </button>
         </div>
       </div>
