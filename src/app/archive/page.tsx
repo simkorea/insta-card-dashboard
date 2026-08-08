@@ -26,6 +26,11 @@ interface CardDesign {
 
 export default function ArchivePage() {
   const [activeTab, setActiveTab] = useState<'blog' | 'cardnews'>('blog');
+  // 한 번에 보여줄 개수. 67개를 한꺼번에 그리면 스크롤이 끝없이 길고,
+  // 하이브리드 카드는 썸네일마다 렌더러가 도는 터라 눈에 띄게 느려진다.
+  const PAGE_SIZE = 15;
+  const [postLimit, setPostLimit] = useState(PAGE_SIZE);
+  const [designLimit, setDesignLimit] = useState(PAGE_SIZE);
   const [preview, setPreview] = useState<CardDesign | null>(null);
   const [previewPage, setPreviewPage] = useState(0);
   const [posts, setPosts] = useState<BlogPost[]>([]);
@@ -43,6 +48,7 @@ export default function ArchivePage() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setPosts(data.posts || []);
+      setPostLimit(PAGE_SIZE);
     } catch (e: any) {
       console.error('Failed to fetch blog posts:', e);
       setError('블로그 글 목록을 불러오는 중 오류가 발생했습니다.');
@@ -59,6 +65,7 @@ export default function ArchivePage() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setDesigns(data.designs || []);
+      setDesignLimit(PAGE_SIZE);
     } catch (e: any) {
       console.error('Failed to fetch designs:', e);
       setDesignsError('카드뉴스 목록을 불러오는 중 오류가 발생했습니다.');
@@ -217,7 +224,7 @@ export default function ArchivePage() {
 
             {!isLoading && !error && posts.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
-                {posts.map((post) => {
+                {posts.slice(0, postLimit).map((post) => {
                   const badge = getFormatBadge(post.format);
                   return (
                     <div
@@ -285,6 +292,17 @@ export default function ArchivePage() {
                 })}
               </div>
             )}
+
+            {!isLoading && !error && posts.length > postLimit && (
+              <div className="flex justify-center mt-8">
+                <button
+                  onClick={() => setPostLimit(n => n + PAGE_SIZE)}
+                  className="px-6 py-3 rounded-xl border-2 border-gray-200 bg-white text-sm font-bold text-gray-700 hover:border-primary-300 hover:text-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] transition-colors"
+                >
+                  더보기 ({posts.length - postLimit}개 남음)
+                </button>
+              </div>
+            )}
           </>
         ) : (
           /* 내 카드뉴스 탭 */
@@ -317,7 +335,7 @@ export default function ArchivePage() {
 
             {!isDesignsLoading && !designsError && designs.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
-                {designs.map((design) => {
+                {designs.slice(0, designLimit).map((design) => {
                   const pagesCount = design.pages_data?.length || 0;
                   const cover = design.pages_data?.[0];
                   const coverImage = pageImage(cover);
@@ -387,6 +405,17 @@ export default function ArchivePage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {!isDesignsLoading && !designsError && designs.length > designLimit && (
+              <div className="flex justify-center mt-8">
+                <button
+                  onClick={() => setDesignLimit(n => n + PAGE_SIZE)}
+                  className="px-6 py-3 rounded-xl border-2 border-gray-200 bg-white text-sm font-bold text-gray-700 hover:border-primary-300 hover:text-primary-600 focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] transition-colors"
+                >
+                  더보기 ({designs.length - designLimit}개 남음)
+                </button>
               </div>
             )}
           </>
