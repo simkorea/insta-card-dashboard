@@ -58,9 +58,15 @@ export function NewspaperRenderer({
   const dense = f.hasTable && f.points.length >= 3;
   const points = f.points.slice(0, dense ? 3 : 4);
 
+  // 담을 내용이 얼마나 되는지. 뉴스 카드는 기사에 따라 항목이 하나뿐인
+  // 장도 나온다 — 없는 내용을 지어낼 수는 없으니 지면 쪽에서 받아준다.
+  // 신문도 기사가 짧으면 제목을 키우고 컷을 조금 더 준다.
+  const bodyCount = f.rows.length + points.length + (f.sub ? 1 : 0);
+  const sparse = bodyCount <= 2;
+
   // 제목은 기사마다 길이가 제각각이라 고정 크기로는 잘리거나 남는다.
   const titleRef = useRef<HTMLDivElement>(null);
-  const MAX = 37;
+  const MAX = sparse ? 45 : 37;
   const LINE = 1.13;
   const [size, setSize] = useState(MAX);
   useLayoutEffect(() => {
@@ -73,7 +79,7 @@ export function NewspaperRenderer({
       el.style.fontSize = `${s(n)}px`;
     }
     setSize(n);
-  }, [f.headline, scale]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [f.headline, scale, sparse]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 삽화 컷은 남는 공간을 받는다. 카드마다 내용 길이가 달라 그 공간이
   // 얼마나 될지는 그려봐야 안다 — 실제 높이를 재서 컷과 캡션을 켠다.
@@ -307,7 +313,18 @@ export function NewspaperRenderer({
           흑백으로 돌려 썼는데, 정사각형이라 이 상자에서 우표만 하게 보였다. */}
       <div
         ref={cutRef}
-        style={{ flex: 1, minHeight: 0, marginTop: s(9), display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+        style={{
+          flex: '1 1 0',
+          minHeight: 0,
+          // 남는 공간을 전부 주면 안 된다. 항목이 하나뿐인 장에서 그림이
+          // 지면 절반을 차지해 "신문"이 아니라 그림책이 됐다.
+          // 신문 컷은 기사가 짧아도 작게 들어간다.
+          maxHeight: s(sparse ? 190 : 118),
+          marginTop: s(9),
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
       >
         {showCut && (
           <>
@@ -360,7 +377,9 @@ export function NewspaperRenderer({
       </div>
 
       {/* ── folio ── */}
-      <div style={{ ...rule(2), marginTop: s(7) }} />
+      {/* marginTop:auto — 삽화 상한 때문에 생긴 여백을 여기서 흡수해
+          folio가 늘 지면 맨 아래에 붙는다 */}
+      <div style={{ ...rule(2), marginTop: 'auto' }} />
       <div
         style={{
           display: 'flex',
