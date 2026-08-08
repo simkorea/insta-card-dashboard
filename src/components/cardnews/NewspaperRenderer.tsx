@@ -3,7 +3,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { readCardBlocks } from '@/lib/cardnews/readCardBlocks';
-import { pickPenSketch, penSketchUrl } from '@/lib/cardnews/penSketch';
+import { pickPaperCut, paperCutUrl } from '@/lib/cardnews/penSketch';
 
 // 신문 지면 스타일 카드 — 글자도 배경도 전부 CSS다. AI 호출 0회.
 //
@@ -45,7 +45,7 @@ export function NewspaperRenderer({
   const rule = (w: number) => ({ height: px(w), background: INK, flexShrink: 0 } as const);
 
   const f = readCardBlocks(blocks, index);
-  const sketch = penSketchUrl(pickPenSketch(f.sketchText, index));
+  const cut = paperCutUrl(pickPaperCut(f.sketchText, index));
   const section = f.bandText || noteLabel || '부동산';
 
   // 대표 수치는 표에서 꺼내 따로 상자에 앉힌다. 표 한 줄로 두면
@@ -303,8 +303,8 @@ export function NewspaperRenderer({
       )}
 
       {/* ── 삽화 컷: 남는 공간을 받아 지면을 채운다 ──
-          파란 볼펜 스케치를 흑백으로 돌려 신문 선화처럼 쓴다.
-          신문 지면에 파란 낙서가 있으면 인쇄물로 안 읽힌다. */}
+          신문 전용 가로형 판화 컷을 쓴다. 예전에는 노트용 파란 볼펜 스케치를
+          흑백으로 돌려 썼는데, 정사각형이라 이 상자에서 우표만 하게 보였다. */}
       <div
         ref={cutRef}
         style={{ flex: 1, minHeight: 0, marginTop: s(9), display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
@@ -325,18 +325,16 @@ export function NewspaperRenderer({
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={sketch}
+                src={cut}
                 alt=""
                 crossOrigin="anonymous"
                 style={{
                   width: '100%',
                   height: '100%',
                   objectFit: 'contain',
-                  // 스케치 PNG는 사방에 흰 여백이 넓다. 그대로 두면 컷 안에서
-                  // 그림이 우표만 하게 보인다 — 여백을 컷 밖으로 밀어낸다.
-                  transform: 'scale(1.7)',
+                  // 컷 자산은 이미 검은 잉크 판화라 색을 뺄 필요가 없다.
+                  // 곱하기만 걸어 종이 결이 비치게 한다.
                   mixBlendMode: 'multiply',
-                  filter: 'grayscale(1) brightness(1.04) contrast(1.8)',
                 }}
               />
             </div>

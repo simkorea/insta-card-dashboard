@@ -56,3 +56,56 @@ export function pickPenSketch(text: string, index = 0): string {
 export function penSketchUrl(name: string): string {
   return `/notebook-assets/pen/${name}.png`;
 }
+
+// ── 신문 삽화 컷 ──────────────────────────────────────────
+// 신문은 파란 볼펜 그림을 흑백으로 돌려 쓰다가 전용 자산으로 바꿨다.
+// 정사각형 스케치는 가로로 넓은 컷 상자에서 우표만 하게 보였고,
+// 선도 신문 인쇄물처럼 굵지 않았다.
+//
+// 컷은 15종뿐이라 펜 스케치 34종을 여기에 모아 보낸다.
+// 분류 규칙(RULES)은 하나만 두고 결과만 옮기는 방식이라,
+// 규칙을 고치면 노트와 신문이 같이 따라온다.
+const CUT_OF: Record<string, string> = {
+  'apt-tower': 'apt-single',
+  'apt-slab': 'apt-single',
+  'apt-tree': 'apt-single',
+  'apt-cluster': 'apt-skyline',
+  'house-small': 'apt-single',
+  'building-site': 'construction',
+  'money-stack': 'money',
+  'coins': 'money',
+  'piggy-bank': 'money',
+  'wallet': 'money',
+  'calculator': 'calculator-doc',
+  'stamp': 'document',
+  'contract': 'document',
+  'documents': 'document',
+  'folder': 'calculator-doc',
+  'clipboard': 'magnifier-doc',
+  'key': 'key-home',
+  'keyring': 'key-home',
+  'moving-box': 'moving',
+  'sofa': 'moving',
+  'chart-up': 'chart-up',
+  'chart-down': 'chart-down',
+  'chart-bar': 'chart-bar',
+  'handshake': 'handshake',
+  'person-think': 'magnifier-doc',
+  'family': 'family',
+  'calendar': 'calculator-doc',
+  'magnifier': 'magnifier-doc',
+  'map-pin': 'city-transit',
+  'subway': 'city-transit',
+  'school': 'family',
+  'bench': 'apt-skyline',
+  'coffee': 'city-transit',
+  'bulb': 'magnifier-doc',
+};
+
+export function pickPaperCut(text: string, index = 0): string {
+  return CUT_OF[pickPenSketch(text, index)] || 'apt-skyline';
+}
+
+export function paperCutUrl(name: string): string {
+  return `/notebook-assets/cut/${name}.png`;
+}
