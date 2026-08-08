@@ -56,6 +56,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 뉴스 수집이 실패한 브리핑으로는 글을 만들지 않는다.
+    //
+    // full_report는 '뉴스 + Meta 광고 성과' 두 부분으로 되어 있다. 뉴스 쪽이
+    // 실패해도 광고 섹션이 남아 본문이 비지 않으므로 위 검사를 통과한다.
+    // 2026-07-24에 실제로 이렇게 나갔다 — 뉴스가 "에러가 발생했습니다" 한 줄인
+    // 브리핑으로 광고 성과 분석 블로그가 만들어졌다. 부동산 계정에 올릴 글이 아니다.
+    const newsFailed =
+      /수집된 부동산 뉴스가 없습니다|브리핑 생성 과정에서 에러/.test(reportContent) ||
+      !Array.isArray(briefingData.news_items) ||
+      briefingData.news_items.length === 0;
+
+    if (newsFailed) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "이 브리핑은 뉴스 수집이 실패해 광고 성과만 남아 있습니다. " +
+            "그대로 글을 만들면 부동산 소식이 아니라 광고 리포트가 됩니다. " +
+            "브리핑을 다시 생성한 뒤 시도해주세요.",
+        },
+        { status: 422 }
+      );
+    }
+
     // 2. blog_posts에 briefing_id가 같은 행이 이미 있는지 확인
     const { data: existingPost, error: existingError } = await supabase
       .from("blog_posts")
