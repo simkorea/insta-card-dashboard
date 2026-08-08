@@ -343,6 +343,14 @@ export function HybridRenderer({
                   }}
                 >
                   <RowIcon kind={kind} size={strong ? s(24 * z) : s(21 * z)} />
+                  {/* 아이콘이 붙는 줄(위치·평형·가격…)은 라벨이 없어도 뜻이 통하지만,
+                      statGrid의 '건물 수'나 timeline의 '8월 중'은 라벨이 곧 정보다.
+                      아이콘이 없는 줄에만 라벨을 앞에 세운다 */}
+                  {!strong && !kind && r.label && (
+                    <span style={{ fontSize: s(13 * z), color: '#6b6b60', flexShrink: 0, wordBreak: 'keep-all' }}>
+                      {r.label}
+                    </span>
+                  )}
                   {strong ? (
                     <Mark s={s}><span style={{ color: RED }}>{r.value}</span></Mark>
                   ) : (

@@ -29,12 +29,22 @@ export function readCardBlocks(blocks: SlideBlock[], index = 0): CardFacts {
   const headline = [headlineBlock?.text, headlineBlock?.accentText].filter(Boolean).join(' ').trim();
   const sub = find('sub')?.text?.trim() || '';
   const table = find('compareTable');
+  const stats = find('statGrid');
+  const timeline = find('timeline');
   const big = find('bigNumber');
   const checklist = find('checklist')?.items || [];
   const badges = find('badgeRow')?.badges?.map(b => b.text) || [];
   const source = find('sourceNote')?.text?.trim() || '';
 
-  const rawRows = table?.rows
+  // 표로 그릴 수 있는 블록은 compareTable 하나가 아니다.
+  // statGrid(수치+라벨)와 timeline(날짜+제목)도 같은 모양으로 보여준다.
+  //
+  // 예전에는 이 둘을 읽지 않아, 내용이 statGrid로만 들어온 카드가 제목만
+  // 남고 통째로 비어 보였다. 편집 패널에는 글이 다 있는데 카드에는 안 나왔다.
+  const rawRows: { label: string; value: string; highlight?: boolean }[] =
+    table?.rows
+    ?? stats?.items?.map((it, i) => ({ label: it.label, value: it.value, highlight: i === 0 }))
+    ?? timeline?.items?.map(it => ({ label: it.date, value: it.title }))
     ?? (big ? [{ label: big.caption || '', value: big.value, highlight: true }] : []);
 
   // 연식과 계약일을 한 줄로 합친다.
@@ -62,7 +72,7 @@ export function readCardBlocks(blocks: SlideBlock[], index = 0): CardFacts {
     rows,
     points,
     source,
-    hasTable: Boolean(table?.rows?.length),
+    hasTable: Boolean(table?.rows?.length || stats?.items?.length || timeline?.items?.length),
     sketchText: `${eyebrow} ${headline} ${sub} ${points.join(' ')}`,
   };
 }
