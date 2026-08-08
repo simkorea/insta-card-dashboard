@@ -6,6 +6,7 @@ import { uploadNotebookImage } from '@/lib/notebookImage/upload';
 import { mapWithLimit, budget } from '@/lib/notebookImage/pool';
 import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
 import { notebookFactsFromBlocks } from '@/lib/notebookImage/factsFromBlocks';
+import { readCardBlocks } from '@/lib/cardnews/readCardBlocks';
 
 // 아침 브리핑 본문 → 카드뉴스 "초안"을 만들어 내 보관함(card_designs)에 저장한다.
 // 장수는 그날 쓸 만한 기사 수를 따라간다 (3~10장).
@@ -34,6 +35,13 @@ const MIN_SLIDES = 3;   // 이보다 적으면 기사 배정 없이 요약본으
 // 안 그러면 캐러셀 한도(10장)를 넘겨 발행에서 잘린다.
 const EDGE_SLIDES = 2;
 const FALLBACK_SLIDE_COUNT = 5; // 원본 기사가 없어 요약본으로 만들 때
+// 얇은 카드를 버릴 것을 감안해 더 고를 기사 수
+const OVERPICK = 2;
+// 카드 한 장에 이만큼은 담겨야 내보낸다 (표 항목 + 핵심 항목 + 리드).
+// 기사에 사실이 적으면 지어내지 말라는 규칙 때문에 항목이 하나뿐인 장이
+// 나오는데, 지면을 아무리 잘 짜도 채울 내용이 없다.
+// 빈약한 10장보다 탄탄한 7장이 낫다.
+const MIN_BODY = 2;
 
 type NewsItem = { title: string; link?: string; description?: string };
 
@@ -168,7 +176,9 @@ export async function generateNewsCardnewsDraft(opts?: {
   const totalCap = Math.min(Math.max(Number(opts?.maxSlides) || MAX_SLIDES, MIN_SLIDES), MAX_SLIDES);
   // 표지·마무리가 2장을 차지하므로 기사에 쓸 수 있는 장수는 그만큼 줄어든다
   const cap = Math.max(totalCap - EDGE_SLIDES, 1);
-  const picked = pickRelevantNews(rawItems, cap);
+  // 내용이 얇은 카드는 아래에서 버린다. 그만큼 미리 더 골라두지 않으면
+  // 장수가 줄어든다 — 쓸 만한 기사가 있는 날은 채워서 나가게 한다.
+  const picked = pickRelevantNews(rawItems, cap + OVERPICK);
   const hasItems = picked.length >= MIN_SLIDES;
   console.log(`[NewsCardnews] 수집 ${rawItems.length}건 → 사용 ${picked.length}건 (기사 최대 ${cap}장 + 표지·마무리)`);
 
@@ -278,11 +288,31 @@ ${sourceBlock}`;
     return { ok: false, error: 'AI 응답 형식이 올바르지 않습니다. 다시 시도해주세요.', status: 502 };
   }
 
-  const cards = (parsed.cards || [])
+  const made = (parsed.cards || [])
     .filter(c => Array.isArray(c.blocks) && c.blocks.length > 0)
-    .slice(0, hasItems ? picked.length : FALLBACK_SLIDE_COUNT)
     // 강조어가 제목에 이미 들어 있으면 카드에 두 번 찍힌다 — 저장 전에 정리
     .map(c => ({ ...c, blocks: normalizeHeadlines(c.blocks) }));
+
+  // 담긴 사실이 너무 적은 장은 버린다. 렌더러와 같은 함수로 세어
+  // 화면에 실제로 그려지는 것과 기준이 어긋나지 않게 한다.
+  const bodyCount = (c: GeneratedCard) => {
+    const f = readCardBlocks(c.blocks);
+    return f.rows.length + f.points.length + (f.sub ? 1 : 0);
+  };
+  const thin = made.filter(c => bodyCount(c) < MIN_BODY);
+  const kept = made.filter(c => bodyCount(c) >= MIN_BODY);
+
+  // 전부 얇으면 버리지 않는다 — 아무것도 안 나오는 것보다는 낫다
+  const usable = kept.length > 0 ? kept : made;
+  const cards = usable.slice(0, hasItems ? Math.max(picked.length - OVERPICK, 1) : FALLBACK_SLIDE_COUNT);
+
+  if (thin.length) {
+    // 조용히 줄이면 "원래 그만큼만 나왔다"로 읽힌다 — 무엇을 왜 뺐는지 남긴다
+    console.log(
+      `[NewsCardnews] 내용이 얇아 ${thin.length}장 제외: ` +
+      thin.map(c => readCardBlocks(c.blocks).headline || '(제목 없음)').join(' / ')
+    );
+  }
   if (cards.length === 0) return { ok: false, error: '생성된 슬라이드가 없습니다.', status: 502 };
 
   // 손글씨 노트 스타일. 단지 카드와 같은 룩으로 통일하고,
