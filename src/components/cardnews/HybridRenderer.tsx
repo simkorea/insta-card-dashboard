@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { readCardBlocks } from '@/lib/cardnews/readCardBlocks';
 import { pickPenSketch, penSketchUrl } from '@/lib/cardnews/penSketch';
@@ -30,11 +30,14 @@ const SPRING_W = 71;
 
 // 펜 그림은 카드 왼쪽 아래 같은 자리에 같은 크기로 놓는다.
 // 크기까지 고정해야 여러 장을 넘길 때 그림이 커졌다 작아졌다 하지 않는다.
-const SKETCH_W = 168;
-const SKETCH_H = 96;
-const SKETCH_BOTTOM = 14;
+// AI가 그리던 카드는 아래를 가로로 꽉 채우는 풍경으로 마무리했다. 그만한
+// 가로 자산이 아직 없어(생성 대기) 정사각형 그림을 쓰는데, 예전 크기로는
+// 지면 아래가 허전했다. 쓸 수 있는 만큼 키워 둔다.
+const SKETCH_W = 196;
+const SKETCH_H = 112;
+const SKETCH_BOTTOM = 12;
 // PNG 사방에 흰 여백이 넓어 상자 크기만큼 안 보인다. 조금 키워 밀어낸다.
-const SKETCH_ZOOM = 1.2;
+const SKETCH_ZOOM = 1.15;
 // 본문이 그림 위로 내려오지 않게 비워둘 높이.
 // 확대 배율만큼 그림이 위로 더 뻗는다 — 이걸 빼먹어 글자와 겹쳤다.
 const SKETCH_BAND = Math.round(SKETCH_BOTTOM + SKETCH_H * SKETCH_ZOOM) + 6;
@@ -46,9 +49,9 @@ const SKETCH_BAND = Math.round(SKETCH_BOTTOM + SKETCH_H * SKETCH_ZOOM) + 6;
  * 박스 하나를 통째로 칠하므로, 줄바꿈되면 첫 줄 뒤 빈 공간까지 노랗게 찬다.
  * flow 쪽은 배경 그라디언트라 줄을 따라 자연스럽게 끊긴다.
  */
-function Mark({ children, s, flow }: { children: React.ReactNode; s: (v: number) => number; flow?: boolean }) {
+function Mark({ children, s, flow, color }: { children: React.ReactNode; s: (v: number) => number; flow?: boolean; color?: string }) {
   if (flow) {
-    const c = 'rgba(255,230,74,0.85)';
+    const c = color || 'rgba(255,230,74,0.85)';
     return (
       <span style={{ background: `linear-gradient(to top, ${c} 0%, ${c} 78%, transparent 79%)`, padding: `0 ${s(2)}px` }}>
         {children}
@@ -72,16 +75,6 @@ function Mark({ children, s, flow }: { children: React.ReactNode; s: (v: number)
       />
       <span style={{ position: 'relative' }}>{children}</span>
     </span>
-  );
-}
-
-/** 손으로 그린 빨간 별. 노트 카드의 여백을 채우는 장식 */
-function Star({ s, size = 14 }: { s: (v: number) => number; size?: number }) {
-  return (
-    <svg width={s(size)} height={s(size)} viewBox="0 0 24 24" fill={RED} stroke={RED}
-         strokeWidth="2" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-      <path d="M12 3.5 L14.6 9.4 L21 10.1 L16.2 14.3 L17.6 20.5 L12 17.3 L6.4 20.5 L7.8 14.3 L3 10.1 L9.4 9.4 Z" />
-    </svg>
   );
 }
 
@@ -214,6 +207,17 @@ export function HybridRenderer({
   //
   // '양주옥정신도시대방노블랜드더시그니처'처럼 띄어쓰기가 없는 단지명은
   // keep-all이면 줄바꿈이 아예 안 돼 그대로 잘려나간다 — anywhere여야 한다.
+  // useLayoutEffect는 웹폰트가 오기 전에 돈다. 폴백 글꼴(맑은 고딕)은 Jua보다
+  // 넓어서, 두 줄에 들어갈 제목이 세 줄로 재어지고 그만큼 글씨가 줄어든 채
+  // 굳었다 — 8/4 카드보다 제목이 확연히 작아 보이던 게 이것 때문이다.
+  // 폰트가 오면 한 번 더 재도록 신호를 준다.
+  const [fontsReady, setFontsReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    document.fonts?.ready.then(() => { if (alive) setFontsReady(true); });
+    return () => { alive = false; };
+  }, []);
+
   const titleRef = useRef<HTMLDivElement>(null);
   const MAX_TITLE = Math.round(29 * z);
   const LINE = 1.08;
@@ -228,7 +232,7 @@ export function HybridRenderer({
       el.style.fontSize = `${s(size)}px`;
     }
     setTitleSize(size);
-  }, [headline, scale, z]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [headline, scale, z, fontsReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 줄 수만 세는 어림 배수(z)로는 넘침을 못 막는다 — '광교중앙역 도보 10분'처럼
   // 한 줄이 두 줄로 접히면 같은 줄 수라도 높이가 달라진다. 실제 높이를 재서
@@ -259,7 +263,7 @@ export function HybridRenderer({
     el.style.width = keep.w;
     el.style.height = keep.h;
     setFit(need > avail && avail > 0 ? Math.max(0.7, avail / need) : 1);
-  }, [bodyKey, scale, z, titleSize]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bodyKey, scale, z, titleSize, fontsReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
@@ -324,12 +328,14 @@ export function HybridRenderer({
             >
               {ribbon}
             </span>
+            {/* 분야명은 분홍 형광펜. 본문 체크리스트가 전부 노랑이라 같은 색이면
+                머리와 본문이 한 덩어리로 붙어 보인다. AI가 그리던 카드도
+                여기만 색을 달리 썼다. 별표는 그 카드에 없던 장식이라 뺐다. */}
             {bandText && (
-              <span style={{ fontSize: s(23) }}>
-                <Mark s={s} flow>{bandText}</Mark>
+              <span style={{ fontSize: s(24) }}>
+                <Mark s={s} flow color="rgba(255,150,196,0.7)">{bandText}</Mark>
               </span>
             )}
-            <Star s={s} size={15} />
           </div>
         )}
         {/* 제목 + 손으로 그은 빨간 밑줄 */}
@@ -357,6 +363,27 @@ export function HybridRenderer({
               <path d="M4 8 C 180 2, 340 13, 696 6" stroke={RED} strokeWidth="7" fill="none" strokeLinecap="round" />
               <path d="M12 13 C 200 8, 360 16, 668 11" stroke={RED} strokeWidth="3" fill="none" strokeLinecap="round" opacity=".45" />
             </svg>
+          </div>
+        )}
+
+        {/* 리드 문장 — 제목 바로 아래, 지면 폭을 그대로 쓴다.
+            예전에는 오른쪽 구석의 작은 노란 쪽지에 넣었는데, 그러느라 본문이
+            쓸 수 있는 폭이 3분의 2로 줄어 체크리스트 글씨까지 잘게 쪼개졌다.
+            AI가 그리던 카드는 이 문장을 제목 아래 한 단락으로 흘린다. */}
+        {sub && (
+          <div
+            style={{
+              flexShrink: 0,
+              marginTop: s(11),
+              // 이 문장뿐인 장은 지면이 비므로 더 키운다
+              fontSize: onlySub ? s(23) : s(16 * z),
+              lineHeight: 1.45,
+              color: '#3b3b33',
+              wordBreak: 'keep-all',
+              overflowWrap: 'break-word',
+            }}
+          >
+            {sub}
           </div>
         )}
 
@@ -443,9 +470,9 @@ export function HybridRenderer({
             빽빽한 장에서는 남는 공간이 0이라 아무 일도 일어나지 않는다. */}
         {!growBox && <div style={{ flex: '1 1 0', minHeight: 0 }} />}
 
-        {/* 장점 + 메모를 좌우로 — 항목이 늘어도 메모와 겹치지 않는다 */}
-        <div style={{ display: 'flex', gap: s(10), marginTop: s(11), alignItems: 'flex-start' }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
+        {/* 핵심 포인트 — 지면 폭을 그대로 쓴다 */}
+        <div style={{ marginTop: s(13), flexShrink: 0 }}>
+          <div>
             {points.length > 0 && (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: s(5) }}>
@@ -461,10 +488,12 @@ export function HybridRenderer({
                   <path d="M3 8 Q 18 1, 33 8 T 63 8 T 93 8 T 123 8 T 153 8 T 183 8"
                         stroke={RED} strokeWidth="4" fill="none" strokeLinecap="round" />
                 </svg>
-                <div style={{ marginTop: s(5 * z), display: 'flex', flexDirection: 'column', gap: s(3 * z) }}>
+                {/* 폭을 온전히 쓰게 되면서 글씨를 키울 수 있게 됐다.
+                    AI가 그리던 카드의 체크리스트가 이만한 크기였다. */}
+                <div style={{ marginTop: s(7 * z), display: 'flex', flexDirection: 'column', gap: s(5 * z) }}>
                   {points.map((it, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: s(8), fontSize: s(18 * z) }}>
-                      <svg width={s(18)} height={s(18)} viewBox="0 0 36 36" fill="none" style={{ flex: `0 0 ${s(18)}px`, marginTop: s(2) }}>
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: s(9), fontSize: s(20.5 * z) }}>
+                      <svg width={s(20)} height={s(20)} viewBox="0 0 36 36" fill="none" style={{ flex: `0 0 ${s(20)}px`, marginTop: s(3) }}>
                         <rect x="3" y="5" width="29" height="28" rx="2" stroke={INK} strokeWidth="2.8" />
                         <path d="M8 19 L15 27 L31 4" stroke={RED} strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
                       </svg>
@@ -480,51 +509,6 @@ export function HybridRenderer({
             )}
           </div>
 
-          {/* 포스트잇 — 테이프로 붙인 메모 */}
-          {sub && (
-            <div
-              style={{
-                position: 'relative',
-                flex: onlySub ? '1 1 auto' : `0 0 ${s(133)}px`,
-                padding: onlySub ? `${s(18)}px ${s(20)}px ${s(20)}px` : `${s(13)}px ${s(10)}px ${s(12)}px`,
-                background: 'linear-gradient(165deg, #fff4a3, #ffec78)',
-                transform: 'rotate(1.6deg)',
-                boxShadow: `${s(2)}px ${s(3.5)}px ${s(8)}px rgba(0,0,0,.22)`,
-                marginTop: s(4),
-              }}
-            >
-              <div
-                style={{
-                  position: 'absolute',
-                  top: -s(8),
-                  right: s(13),
-                  width: s(56),
-                  height: s(17),
-                  background: 'rgba(226,214,178,.85)',
-                  transform: 'rotate(-7deg)',
-                  boxShadow: `0 ${s(0.5)}px ${s(1.5)}px rgba(0,0,0,.16)`,
-                }}
-              />
-              {/* 오른쪽 아래 태그에 이미 noteLabel이 있다 — 여기까지 같은 말을 쓰면 두 번 찍힌다 */}
-              <div style={{ fontSize: s(17), textAlign: 'center' }}>메모</div>
-              <div style={{ height: s(2), background: INK, margin: `${s(1)}px ${s(17)}px ${s(6)}px` }} />
-              {/* 오른쪽 아래 태그가 고정 위치라, 메모가 길면 그 밑으로 들어가 잘린다.
-                  네 줄에서 끊는다 */}
-              <div
-                style={{
-                  fontSize: onlySub ? s(21) : s(13.5),
-                  lineHeight: 1.42,
-                  textAlign: 'center',
-                  wordBreak: 'keep-all',
-                  // 넓게 편 메모는 줄 수를 제한하지 않는다 — 태그와 겹칠 자리가 없다
-                  maxHeight: onlySub ? undefined : s(13.5) * 1.42 * 4 + s(4),
-                  overflow: 'hidden',
-                }}
-              >
-                {sub}
-              </div>
-            </div>
-          )}
         </div>
 
         {!growBox && <div style={{ flex: '1.3 1 0', minHeight: 0 }} />}
