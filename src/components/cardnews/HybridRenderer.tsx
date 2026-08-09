@@ -196,7 +196,18 @@ export function HybridRenderer({
   // 없는 내용을 지어낼 수는 없으니, 있는 글을 크게 써서 채우는 쪽이 맞다.
   // 배수는 세 단계뿐이다 — 카드마다 크기가 제각각이면 넘길 때 어수선하다.
   const bodyCount = rows.length + points.length + (sub ? 1 : 0);
-  const z = bodyCount <= 3 ? 1.18 : bodyCount <= 5 ? 1.08 : 1;
+  // 8줄이 넘으면 반대로 줄여야 한다 — 표와 장점이 둘 다 긴 단지 카드는
+  // 기본 크기로는 글이 아래로 넘쳐 출처 문구가 그림 위로 밀려났다.
+  const z = bodyCount <= 2 ? 1.3 : bodyCount <= 3 ? 1.18 : bodyCount <= 5 ? 1.08
+          : bodyCount <= 7 ? 1 : bodyCount <= 9 ? 0.93 : 0.87;
+
+  // 표만 있고 장점 목록이 없는 장(statGrid·timeline이 그렇다)은 글씨를 키워도
+  // 아래 절반이 텅 빈다. 이럴 때는 정보 상자가 남는 높이를 먹고 줄 간격을
+  // 벌리게 한다 — 테두리가 늘어나는 SVG라 상자만 키워도 모양이 유지된다.
+  const growBox = rows.length > 0 && points.length === 0;
+
+  // 메모 하나뿐인 장은 오른쪽 구석의 작은 쪽지로는 지면이 안 찬다. 넓게 편다.
+  const onlySub = rows.length === 0 && points.length === 0 && Boolean(sub);
 
   // 제목은 단지명 길이가 제각각이라 고정 크기로는 잘리거나 남는다.
   // 두 줄 안에 들어갈 때까지 줄인다.
@@ -218,6 +229,37 @@ export function HybridRenderer({
     }
     setTitleSize(size);
   }, [headline, scale, z]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 줄 수만 세는 어림 배수(z)로는 넘침을 못 막는다 — '광교중앙역 도보 10분'처럼
+  // 한 줄이 두 줄로 접히면 같은 줄 수라도 높이가 달라진다. 실제 높이를 재서
+  // 넘치는 만큼만 통째로 줄인다.
+  //
+  // 무한루프가 안 나는 이유: 이 훅은 blocks/scale이 바뀔 때만 돈다. setFit으로
+  // 다시 그려져도 훅이 재실행되지 않으므로 측정 → 반영에서 멈춘다.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(1);
+  const bodyKey = JSON.stringify([rows, points, sub, headline, bandText, source]);
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    const parent = el?.parentElement;
+    if (!el || !parent) return;
+    // 이전 배율을 걷어내고 자연 높이를 잰다.
+    // 재던 값을 반드시 되돌려 놓아야 한다 — 배율이 그대로면 setFit이 같은 값을
+    // 내놓아 다시 그리지 않고, 재느라 넣은 height:auto가 DOM에 남아
+    // 상자가 남는 높이를 못 먹는다.
+    const keep = { t: el.style.transform, w: el.style.width, h: el.style.height };
+    el.style.transform = 'none';
+    el.style.width = '100%';
+    el.style.height = 'auto';
+    // clientHeight는 padding을 포함하지만 height:100%는 content 높이 기준이다.
+    // 이 차이를 빼지 않으면 출처 자리만큼 넘침을 놓쳐 글이 그 위로 내려앉는다.
+    const avail = parent.clientHeight - (source ? s(15) : 0);
+    const need = el.scrollHeight;
+    el.style.transform = keep.t;
+    el.style.width = keep.w;
+    el.style.height = keep.h;
+    setFit(need > avail && avail > 0 ? Math.max(0.7, avail / need) : 1);
+  }, [bodyKey, scale, z, titleSize]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
@@ -241,10 +283,24 @@ export function HybridRenderer({
           top: s(13),
           // 아래쪽은 고정된 그림 자리로 비워둔다
           bottom: s(SKETCH_BAND),
-          display: 'flex',
-          flexDirection: 'column',
+          // 출처 문구 자리를 미리 떼어 둔다. 이게 없으면 내용이 많은 장에서
+          // 장점 목록이 바닥까지 내려와 출처와 맞붙는다.
+          paddingBottom: source ? s(15) : 0,
         }}
       >
+        {/* 넘칠 때만 통째로 줄이는 자리. 줄이는 만큼 폭·높이를 키워 두어야
+            축소 후의 겉보기 크기가 원래 칸에 딱 맞는다. */}
+        <div
+          ref={bodyRef}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            width: `${100 / fit}%`,
+            height: `${100 / fit}%`,
+            transform: `scale(${fit})`,
+            transformOrigin: 'top left',
+          }}
+        >
         {/* 번호 동그라미 + 동네명 + 별.
             예전에는 남색 띠였는데, 참고한 노트 카드들은 손으로 그린 동그라미에
             번호를 넣고 동네명에 형광펜을 긋는다. 띠보다 노트에 가깝다. */}
@@ -306,7 +362,19 @@ export function HybridRenderer({
 
         {/* 정보 상자 — 자로 잰 사각형이 아니라 손으로 그린 듯 흔들리는 테두리 */}
         {rows.length > 0 && (
-          <div style={{ position: 'relative', flexShrink: 0, marginTop: s(7), padding: `${s(6)}px ${s(13)}px ${s(5)}px` }}>
+          <div
+            style={{
+              position: 'relative',
+              flex: growBox ? '1 1 0' : '0 0 auto',
+              minHeight: 0,
+              marginTop: s(7),
+              padding: `${s(6)}px ${s(13)}px ${s(5)}px`,
+              // 상자가 커진 만큼 줄을 고르게 벌린다 (평소에는 붙여 쓴다)
+              display: growBox ? 'flex' : undefined,
+              flexDirection: growBox ? 'column' : undefined,
+              justifyContent: growBox ? 'space-evenly' : undefined,
+            }}
+          >
             <svg
               viewBox="0 0 690 250"
               preserveAspectRatio="none"
@@ -373,7 +441,7 @@ export function HybridRenderer({
         {/* 남는 높이를 위아래로 나눠 본문을 가운데 아래쪽으로 내린다.
             내용이 적은 장에서 위쪽만 빽빽하고 아래가 텅 비어 보이던 것을 없앤다.
             빽빽한 장에서는 남는 공간이 0이라 아무 일도 일어나지 않는다. */}
-        <div style={{ flex: '1 1 0', minHeight: 0 }} />
+        {!growBox && <div style={{ flex: '1 1 0', minHeight: 0 }} />}
 
         {/* 장점 + 메모를 좌우로 — 항목이 늘어도 메모와 겹치지 않는다 */}
         <div style={{ display: 'flex', gap: s(10), marginTop: s(11), alignItems: 'flex-start' }}>
@@ -417,8 +485,8 @@ export function HybridRenderer({
             <div
               style={{
                 position: 'relative',
-                flex: `0 0 ${s(133)}px`,
-                padding: `${s(13)}px ${s(10)}px ${s(12)}px`,
+                flex: onlySub ? '1 1 auto' : `0 0 ${s(133)}px`,
+                padding: onlySub ? `${s(18)}px ${s(20)}px ${s(20)}px` : `${s(13)}px ${s(10)}px ${s(12)}px`,
                 background: 'linear-gradient(165deg, #fff4a3, #ffec78)',
                 transform: 'rotate(1.6deg)',
                 boxShadow: `${s(2)}px ${s(3.5)}px ${s(8)}px rgba(0,0,0,.22)`,
@@ -444,11 +512,12 @@ export function HybridRenderer({
                   네 줄에서 끊는다 */}
               <div
                 style={{
-                  fontSize: s(13.5),
+                  fontSize: onlySub ? s(21) : s(13.5),
                   lineHeight: 1.42,
                   textAlign: 'center',
                   wordBreak: 'keep-all',
-                  maxHeight: s(13.5) * 1.42 * 4 + s(4),
+                  // 넓게 편 메모는 줄 수를 제한하지 않는다 — 태그와 겹칠 자리가 없다
+                  maxHeight: onlySub ? undefined : s(13.5) * 1.42 * 4 + s(4),
                   overflow: 'hidden',
                 }}
               >
@@ -458,10 +527,23 @@ export function HybridRenderer({
           )}
         </div>
 
-        <div style={{ flex: '1.3 1 0', minHeight: 0 }} />
+        {!growBox && <div style={{ flex: '1.3 1 0', minHeight: 0 }} />}
 
+        </div>
+
+        {/* 흐름에서 빼서 바닥에 고정한다 — 위 내용이 길어져도 밀리지 않는다 */}
         {source && (
-          <div style={{ fontSize: s(10), color: '#8A8A7A', flexShrink: 0 }}>{source}</div>
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              bottom: 0,
+              fontSize: s(10),
+              color: '#8A8A7A',
+            }}
+          >
+            {source}
+          </div>
         )}
       </div>
 

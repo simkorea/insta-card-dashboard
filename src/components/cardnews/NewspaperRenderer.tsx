@@ -318,8 +318,11 @@ export function NewspaperRenderer({
           minHeight: 0,
           // 남는 공간을 전부 주면 안 된다. 항목이 하나뿐인 장에서 그림이
           // 지면 절반을 차지해 "신문"이 아니라 그림책이 됐다.
-          // 신문 컷은 기사가 짧아도 작게 들어간다.
-          maxHeight: s(sparse ? 190 : 118),
+          //
+          // 그렇다고 늘 작게 두면 표만 있는 장(statGrid·timeline)은 컷 아래가
+          // 통째로 빈다. 기사가 짧을수록 컷을 키우되 상한은 지면의 40% 선.
+          // 본문이 다섯 줄 넘게 있는 장은 예전 크기 그대로 둔다.
+          maxHeight: s(sparse ? 210 : bodyCount <= 4 ? 175 : 118),
           marginTop: s(9),
           display: 'flex',
           flexDirection: 'column',
