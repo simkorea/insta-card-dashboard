@@ -30,17 +30,15 @@ const SPRING_W = 71;
 
 // 펜 그림은 카드 왼쪽 아래 같은 자리에 같은 크기로 놓는다.
 // 크기까지 고정해야 여러 장을 넘길 때 그림이 커졌다 작아졌다 하지 않는다.
-// AI가 그리던 카드는 아래를 가로로 꽉 채우는 풍경으로 마무리했다. 그만한
-// 가로 자산이 아직 없어(생성 대기) 정사각형 그림을 쓰는데, 예전 크기로는
-// 지면 아래가 허전했다. 쓸 수 있는 만큼 키워 둔다.
-const SKETCH_W = 196;
-const SKETCH_H = 112;
-const SKETCH_BOTTOM = 12;
+const SKETCH_W = 134;
+const SKETCH_H = 88;
+const SKETCH_BOTTOM = 10;
 // PNG 사방에 흰 여백이 넓어 상자 크기만큼 안 보인다. 조금 키워 밀어낸다.
 const SKETCH_ZOOM = 1.15;
-// 본문이 그림 위로 내려오지 않게 비워둘 높이.
-// 확대 배율만큼 그림이 위로 더 뻗는다 — 이걸 빼먹어 글자와 겹쳤다.
-const SKETCH_BAND = Math.round(SKETCH_BOTTOM + SKETCH_H * SKETCH_ZOOM) + 6;
+
+// 지면 아래를 가로로 채우는 도시 풍경이 차지하는 높이.
+// 본문은 여기까지만 내려온다.
+const BAND_H = 124;
 
 /**
  * 노란 형광펜. 곱하기로 얹어야 종이 결이 비쳐 진짜 마커처럼 보인다.
@@ -75,6 +73,96 @@ function Mark({ children, s, flow, color }: { children: React.ReactNode; s: (v: 
       />
       <span style={{ position: 'relative' }}>{children}</span>
     </span>
+  );
+}
+
+/**
+ * 지면 아래를 가로로 채우는 도시 풍경.
+ *
+ * AI가 통째로 그리던 카드(7/31~8/4)는 아래를 이런 스카이라인으로 마무리했고,
+ * 그게 카드 인상의 큰 부분이었다. 같은 그림을 AI 자산으로 뽑으려 했지만
+ * ① 월 한도에 걸려 못 뽑고 ② 뽑아도 간판에 글자가 섞여 나오는 사고가 반복됐다.
+ *
+ * 건물과 나무는 직선과 원이라 코드로 그리는 편이 낫다 — 돈이 안 들고,
+ * 글자가 섞일 일이 없고, 어떤 배율에서도 선이 깨지지 않는다.
+ * (주제별 띠그림 자산은 gen-notebook-assets.mjs 의 band: 로 따로 준비해 뒀다.)
+ */
+const TOWERS: [number, number, number][] = [
+  // [왼쪽 x, 폭, 높이] — 높이를 일부러 들쭉날쭉하게 둔다
+  [10, 54, 58], [70, 38, 86], [114, 62, 44], [182, 44, 102], [232, 56, 68],
+  [294, 40, 50], [340, 64, 90], [410, 46, 60], [462, 54, 78], [522, 42, 48],
+  [570, 58, 72], [634, 52, 56],
+];
+const TREES: [number, number][] = [[62, 15], [178, 13], [304, 14], [455, 12], [628, 15]];
+
+function SkylineBand({ s }: { s: (v: number) => number }) {
+  const BLUE = '#4a5eae';
+  const GROUND = 140;
+  return (
+    <svg
+      viewBox="0 0 700 150"
+      preserveAspectRatio="none"
+      fill="none"
+      stroke={BLUE}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{
+        position: 'absolute',
+        left: s(SPRING_W),
+        right: 0,
+        bottom: 0,
+        height: s(BAND_H),
+        width: `calc(100% - ${s(SPRING_W)}px)`,
+        // 배경이지 주인공이 아니다. 본문 글씨보다 앞으로 나오면 안 된다
+        opacity: 0.62,
+        mixBlendMode: 'multiply',
+      }}
+    >
+      {TOWERS.map(([x, w, h], i) => {
+        const y = GROUND - h;
+        // 창문 격자 — 층과 칸 수를 건물 크기에서 뽑는다
+        const cols = Math.max(2, Math.round(w / 16));
+        const rowsN = Math.max(2, Math.round(h / 18));
+        const cw = w / (cols * 2 + 1);
+        const ch = h / (rowsN * 2 + 1);
+        const win = [];
+        for (let r = 0; r < rowsN; r++) {
+          for (let c = 0; c < cols; c++) {
+            win.push(
+              <rect
+                key={`${r}-${c}`}
+                x={x + cw * (c * 2 + 1)}
+                y={y + ch * (r * 2 + 1)}
+                width={cw}
+                height={ch}
+                strokeWidth="1.4"
+              />
+            );
+          }
+        }
+        return (
+          <g key={i}>
+            <path d={`M${x} ${GROUND} V${y} H${x + w} V${GROUND}`} />
+            {win}
+          </g>
+        );
+      })}
+
+      {TREES.map(([x, r], i) => (
+        <g key={`t${i}`}>
+          <path d={`M${x} ${GROUND} V${GROUND - r * 1.5}`} />
+          <circle cx={x} cy={GROUND - r * 2.1} r={r} />
+        </g>
+      ))}
+
+      {/* 구름 — 위쪽 여백이 허전하지 않게 몇 점만 */}
+      <path d="M96 34 a11 11 0 0 1 21 -4 a9 9 0 0 1 15 4 z" strokeWidth="1.8" />
+      <path d="M392 24 a10 10 0 0 1 19 -3 a8 8 0 0 1 13 3 z" strokeWidth="1.8" />
+      <path d="M560 40 a9 9 0 0 1 17 -3 a7 7 0 0 1 12 3 z" strokeWidth="1.8" />
+
+      <path d={`M0 ${GROUND} H700`} strokeWidth="2.4" />
+    </svg>
   );
 }
 
@@ -211,11 +299,21 @@ export function HybridRenderer({
   // 넓어서, 두 줄에 들어갈 제목이 세 줄로 재어지고 그만큼 글씨가 줄어든 채
   // 굳었다 — 8/4 카드보다 제목이 확연히 작아 보이던 게 이것 때문이다.
   // 폰트가 오면 한 번 더 재도록 신호를 준다.
-  const [fontsReady, setFontsReady] = useState(false);
+  //
+  // document.fonts.ready 하나로는 부족하다. 그 약속은 "지금 걸려 있는 폰트
+  // 로드가 끝나면" 풀리는데, 폰트 <link>를 넣는 쪽도 effect라서 우리가 물어보는
+  // 시점에는 걸려 있는 게 없어 곧바로 풀린다. 그래서 폴백 글꼴로 잰 값이
+  // 그대로 굳었다 — 새로 연 화면에서 제목이 20px로 나왔다(8/4 카드의 절반).
+  // 실제로 폰트가 도착할 때마다 오는 loadingdone까지 같이 듣는다.
+  const [fontTick, setFontTick] = useState(0);
   useEffect(() => {
+    const fs = document.fonts;
+    if (!fs) return;
     let alive = true;
-    document.fonts?.ready.then(() => { if (alive) setFontsReady(true); });
-    return () => { alive = false; };
+    const bump = () => { if (alive) setFontTick(t => t + 1); };
+    fs.addEventListener('loadingdone', bump);
+    fs.ready.then(bump).catch(() => {});
+    return () => { alive = false; fs.removeEventListener('loadingdone', bump); };
   }, []);
 
   const titleRef = useRef<HTMLDivElement>(null);
@@ -232,7 +330,7 @@ export function HybridRenderer({
       el.style.fontSize = `${s(size)}px`;
     }
     setTitleSize(size);
-  }, [headline, scale, z, fontsReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [headline, scale, z, fontTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 줄 수만 세는 어림 배수(z)로는 넘침을 못 막는다 — '광교중앙역 도보 10분'처럼
   // 한 줄이 두 줄로 접히면 같은 줄 수라도 높이가 달라진다. 실제 높이를 재서
@@ -263,7 +361,7 @@ export function HybridRenderer({
     el.style.width = keep.w;
     el.style.height = keep.h;
     setFit(need > avail && avail > 0 ? Math.max(0.7, avail / need) : 1);
-  }, [bodyKey, scale, z, titleSize, fontsReady]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bodyKey, scale, z, titleSize, fontTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div
@@ -286,7 +384,7 @@ export function HybridRenderer({
           right: s(14),
           top: s(13),
           // 아래쪽은 고정된 그림 자리로 비워둔다
-          bottom: s(SKETCH_BAND),
+          bottom: s(BAND_H),
           // 출처 문구 자리를 미리 떼어 둔다. 이게 없으면 내용이 많은 장에서
           // 장점 목록이 바닥까지 내려와 출처와 맞붙는다.
           paddingBottom: source ? s(15) : 0,
@@ -535,6 +633,11 @@ export function HybridRenderer({
           예전에는 흐름 안에서 '남는 공간'을 받게 해뒀더니, 내용이 길고 짧음에
           따라 그림이 위아래로 뛰어다녀 카드를 넘길 때 어수선했다.
           자리를 못 박고, 남는 공간은 글자 쪽을 키워 채운다. */}
+      <SkylineBand s={s} />
+
+      {/* 주제별 펜 그림 — 도시 풍경 왼쪽에 겹쳐 놓는다.
+          띠그림만 있으면 카드마다 아래가 똑같아 보인다. 계약서·열쇠·돈처럼
+          그 장의 내용을 가리키는 그림 하나가 앞에 서 있어야 장이 구분된다. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={sketch}
@@ -542,7 +645,7 @@ export function HybridRenderer({
         crossOrigin="anonymous"
         style={{
           position: 'absolute',
-          left: s(SPRING_W + 1),
+          left: s(SPRING_W + 4),
           bottom: s(SKETCH_BOTTOM),
           width: s(SKETCH_W),
           height: s(SKETCH_H),
