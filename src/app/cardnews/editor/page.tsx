@@ -21,6 +21,8 @@ import { HybridThumb } from '@/components/cardnews/HybridThumb';
 import { BlockRenderer } from '@/components/cardnews/BlockRenderer';
 import { SlideFrame } from '@/components/cardnews/SlideFrame';
 import { FONTS, GOOGLE_FONTS_URL } from '@/lib/cardnews/fonts';
+import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
+import { saveCaption, currentDesignId } from '@/lib/cardnews/captionStore';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface TextStyle {
@@ -3994,14 +3996,9 @@ export default function EditorPage() {
 
   const [convertingBlog, setConvertingBlog] = useState(false);
   const handleConvertToBlog = async () => {
-    const contentText = pagesData.map((p, idx) => {
-      const parts = [`[${idx + 1}장 ${idx === 0 ? '표지' : '본문'}]`];
-      if (p.title) parts.push(`제목: ${p.title}`);
-      if (p.subtitle) parts.push(`소제목: ${p.subtitle}`);
-      if (p.bullets && p.bullets.length > 0)
-        parts.push(`상세:\n${p.bullets.map(b => `- ${b}`).join('\n')}`);
-      return parts.join('\n');
-    }).join('\n\n');
+    // 카드 내용은 blocks 안에 있다 — title만 긁으면 제목 목록만 넘어간다.
+    // (자세한 사정은 pagesToBlogSource 주석 참고)
+    const contentText = pagesToBlogSource(pagesData);
 
     if (!contentText.trim()) {
       alert('전환할 카드뉴스 내용이 없습니다.');
@@ -4327,7 +4324,13 @@ export default function EditorPage() {
         <CaptionModal
           pagesData={pagesData}
           brandKit={brandKit}
-          onCaptionGenerated={(cap, tags) => { setLastCaption(cap); setLastHashtags(tags); }}
+          onCaptionGenerated={(cap, tags) => {
+            setLastCaption(cap);
+            setLastHashtags(tags);
+            // 영상으로 만들어 올릴 때 이 캡션을 다시 쓰게 기억해 둔다
+            const full = tags.length ? `${cap}\n\n${tags.map(t => `#${t.replace(/^#/, '')}`).join(' ')}` : cap;
+            saveCaption(currentDesignId(), full);
+          }}
           onClose={() => setShowCaptionModal(false)}
         />
       )}

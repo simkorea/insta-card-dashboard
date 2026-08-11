@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle, Wand2, Copy, Upload, Plus, Trash2, Send } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
+import { loadCaption } from '@/lib/cardnews/captionStore';
 
 /**
  * 녹화 형식을 고른다. MP4(H.264)를 먼저 시도하는 이유:
@@ -299,16 +300,14 @@ export default function VideoGeneratorPage() {
       recorder.stop();
       await recordingDone;
 
-      // 4. 다운로드 + 바로 올리기용으로 들고 있는다
+      // 4. 만든 영상을 들고만 있는다.
+      //
+      // 예전에는 여기서 곧바로 내려받기를 실행했다. 올리기만 하려는데도
+      // 파일이 매번 받아져 폴더에 쌓이고, 그 파일을 다시 골라 올려야 했다.
+      // 내려받기는 버튼으로 뺐다 — 필요한 사람만 누르면 된다.
       setExportProgress('파일 저장 중...');
       const blob = new Blob(chunks, { type: mimeType || `video/${ext}` });
       const fileName = `${selectedDesign.name || 'cardnews'}_video.${ext}`;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName;
-      a.click();
-      URL.revokeObjectURL(url);
       setExportedBlob(blob);
       setExportedName(fileName);
       setExportedExt(ext);
@@ -326,6 +325,17 @@ export default function VideoGeneratorPage() {
    * 파일은 Vercel을 거치지 않고 브라우저에서 Supabase로 바로 간다 —
    * 라우트는 본문이 약 4.5MB로 제한돼 영상을 통과시킬 수 없다.
    */
+  /** 만든 영상을 파일로 받는다 (자동으로 받지 않으므로 누를 때만) */
+  const handleDownload = () => {
+    if (!exportedBlob) return;
+    const url = URL.createObjectURL(exportedBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = exportedName || `cardnews_video.${exportedExt}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleUploadToPublish = async () => {
     if (!exportedBlob) return;
     setUploading(true);
@@ -351,9 +361,12 @@ export default function VideoGeneratorPage() {
         });
       if (error) throw new Error(`업로드 실패: ${error.message}`);
 
-      router.push(
-        `/reels?video=${encodeURIComponent(sign.publicUrl)}&name=${encodeURIComponent(exportedName)}`
-      );
+      // 카드뉴스에서 만들어 둔 캡션이 있으면 같이 넘긴다 — 같은 내용을
+      // 두 번 쓰지 않게 한다. 없으면 발행 화면에서 그냥 비워 둔다.
+      const caption = loadCaption(selectedDesign?.id);
+      const q = new URLSearchParams({ video: sign.publicUrl, name: exportedName });
+      if (caption) q.set('caption', caption);
+      router.push(`/reels?${q.toString()}`);
     } catch (e: any) {
       setExportError(e?.message || '업로드 중 오류가 발생했습니다.');
       setUploading(false);
@@ -789,9 +802,9 @@ export default function VideoGeneratorPage() {
                 {isExporting ? (
                   <><Loader2 size={16} className="animate-spin" /> {exportProgress || '영상 생성 중...'}</>
                 ) : exportDone ? (
-                  <><Check size={16} /> 다운로드 완료!</>
+                  <><Check size={16} /> 영상 완성!</>
                 ) : (
-                  <><Download size={16} /> 영상 생성 및 다운로드</>
+                  <><Film size={16} /> 영상 만들기</>
                 )}
               </button>
 
@@ -805,6 +818,15 @@ export default function VideoGeneratorPage() {
                   {uploading
                     ? <><Loader2 size={16} className="animate-spin" /> 올리는 중...</>
                     : <><Send size={16} /> 이 영상 바로 발행하기</>}
+                </button>
+              )}
+              {/* 파일이 필요한 사람만 받는다 — 예전처럼 자동으로 받아지지 않는다 */}
+              {exportedBlob && (
+                <button
+                  onClick={handleDownload}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-xs border border-gray-200 text-gray-600 hover:bg-gray-50 active:scale-[0.99] transition-colors"
+                >
+                  <Download size={14} /> 파일로 내려받기
                 </button>
               )}
               {exportedBlob && exportedExt === 'webm' && (

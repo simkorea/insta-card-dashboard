@@ -5,7 +5,12 @@ import {
   FileText, Sparkles, Copy, CheckCheck, Loader2, ChevronDown,
   ChevronUp, Plus, X, Link2, Target, AlignLeft, Hash,
   MessageSquare, Wand2, Image as ImageIcon, Trash2, RefreshCw, Upload, Search, Crop, Download,
+  LayoutGrid,
 } from 'lucide-react';
+import type { SlideBlock } from '@/lib/cardnews/blocks';
+import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
+import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
+import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
 
 const FORMATS = [
   { id: 'naver', label: '네이버 블로그', icon: '🟢', desc: '이모지+가독성 중심, 해시태그' },
@@ -53,6 +58,25 @@ interface BlogImage {
   label: string;
 }
 
+// 보관함에 저장된 카드뉴스 한 벌
+type SavedDesign = {
+  id: string;
+  name: string;
+  created_at: string;
+  pages_data: DesignPage[];
+};
+type DesignPage = {
+  id?: string | number;
+  title?: string;
+  subtitle?: string;
+  bullets?: string[];
+  blocks?: SlideBlock[];
+  bgImage?: string;
+  styleVariant?: string;
+  noteLabel?: string;
+  noteNumber?: string;
+};
+
 export default function BlogGeneratorPage() {
   const [topic, setTopic] = useState('');
   const [format, setFormat] = useState('naver');
@@ -84,7 +108,18 @@ export default function BlogGeneratorPage() {
   const [currentPostId, setCurrentPostId] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState('');
 
-  const [inputMode, setInputMode] = useState<'topic' | 'url' | 'trend' | 'smart'>('topic');
+  const [inputMode, setInputMode] = useState<'topic' | 'url' | 'trend' | 'smart' | 'cardnews'>('topic');
+
+  // ── 보관함 카드뉴스로 바로 만들기 ─────────────────────────────
+  // 예전에는 편집기에 들어가서 '블로그로 전환'을 눌러야 했다. 글만 쓰려는데
+  // 편집기를 거치는 게 번거로워, 여기서 바로 고르게 한다.
+  const [designs, setDesigns] = useState<SavedDesign[]>([]);
+  const [designsLoading, setDesignsLoading] = useState(false);
+  const [pickedDesignId, setPickedDesignId] = useState('');
+  const [pickingBusy, setPickingBusy] = useState(false);
+  // 하이브리드 카드는 그림 파일이 없어 그때그때 그려서 캡처해야 한다
+  const [captureDesign, setCaptureDesign] = useState<SavedDesign | null>(null);
+  const captureRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const [trendRecommendations, setTrendRecommendations] = useState<string[]>([]);
   const [isFetchingTrends, setIsFetchingTrends] = useState(false);
   const [smartCategory, setSmartCategory] = useState('부동산');
@@ -238,6 +273,65 @@ export default function BlogGeneratorPage() {
       localStorage.removeItem('convertSourceBlog');
     }
   }, []);
+
+  // 탭을 처음 열 때만 목록을 가져온다
+  useEffect(() => {
+    if (inputMode !== 'cardnews' || designs.length > 0 || designsLoading) return;
+    setDesignsLoading(true);
+    fetch('/api/designs')
+      .then(r => r.json())
+      .then(d => setDesigns(Array.isArray(d.designs) ? d.designs : []))
+      .catch(() => setDesigns([]))
+      .finally(() => setDesignsLoading(false));
+  }, [inputMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 고른 카드뉴스를 주제 글 + 그림으로 옮긴다.
+  //
+  // 그림이 두 갈래다. 사진 배경 카드는 bgImage 주소가 그대로 있지만,
+  // 노트·신문 카드는 브라우저가 그때그때 그리므로 저장된 파일이 없다.
+  // 후자는 화면 밖에 한 번 그려서 캡처한다.
+  const applyDesign = async (d: SavedDesign) => {
+    setPickedDesignId(d.id);
+    setPickingBusy(true);
+    try {
+      const pages = Array.isArray(d.pages_data) ? d.pages_data : [];
+      setTopic(pagesToBlogSource(pages));
+
+      const needsCapture = pages.some(p => !p.bgImage?.trim());
+      if (needsCapture) {
+        setCaptureDesign(d);
+        // 화면 밖 카드가 실제로 그려질 때까지 기다린다 (폰트·종이 이미지 포함)
+        await new Promise(r => setTimeout(r, 400));
+        await document.fonts?.ready;
+        await new Promise(r => setTimeout(r, 400));
+      }
+
+      const { toCanvas } = await import('html-to-image');
+      const urls: string[] = [];
+      for (let i = 0; i < pages.length; i++) {
+        const stored = pages[i].bgImage;
+        if (stored && stored.trim() !== '') { urls.push(stored); continue; }
+        const el = captureRefs.current[i];
+        if (!el) { urls.push(''); continue; }
+        try {
+          const canvas = await toCanvas(el, { pixelRatio: 1, cacheBust: false, skipFonts: false });
+          urls.push(canvas.toDataURL('image/jpeg', 0.75));
+        } catch { urls.push(''); }
+      }
+
+      const count = Math.min(Math.max(urls.length, 3), 10);
+      setImageCount(count);
+      setImages(Array.from({ length: count }, (_, i) => ({
+        id: `img_${i + 1}`,
+        url: urls[i] || '',
+        source: (urls[i] ? 'upload' : '') as BlogImage['source'],
+        label: '',
+      })));
+    } finally {
+      setCaptureDesign(null);
+      setPickingBusy(false);
+    }
+  };
 
   useEffect(() => {
     fetch('/api/brand-persona')
@@ -685,6 +779,14 @@ ${result.body}
               >
                 ⚡ 자동 생성
               </button>
+              <button
+                onClick={() => setInputMode('cardnews')}
+                className={`pb-2.5 text-xs font-bold border-b-2 transition-all whitespace-nowrap ${
+                  inputMode === 'cardnews' ? 'border-primary-600 text-primary-600 font-extrabold' : 'border-transparent text-gray-400 hover:text-gray-600 font-medium'
+                }`}
+              >
+                🗂️ 카드뉴스로
+              </button>
             </div>
 
             {/* 브랜드 페르소나 공통 선택 */}
@@ -742,6 +844,74 @@ ${result.body}
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {inputMode === 'cardnews' && (
+              <div className="space-y-3">
+                <div className="flex items-start gap-2.5 bg-primary-50 border border-primary-100 rounded-2xl p-4">
+                  <LayoutGrid size={18} className="text-primary-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-black text-base text-gray-900">보관함 카드뉴스로 블로그 만들기</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      만들어 둔 카드뉴스를 고르면 내용과 카드 그림을 그대로 가져옵니다. 편집기를 거치지 않아도 됩니다.
+                    </p>
+                  </div>
+                </div>
+
+                {designsLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-400 p-4">
+                    <Loader2 size={15} className="animate-spin" /> 보관함을 불러오는 중…
+                  </div>
+                ) : designs.length === 0 ? (
+                  <div className="text-xs text-gray-400 bg-gray-50 rounded-xl p-4 border border-gray-200 flex items-center justify-between">
+                    <span>저장된 카드뉴스가 없습니다.</span>
+                    <a href="/cardnews" className="text-primary-600 hover:text-primary-700 font-bold ml-2 underline shrink-0">
+                      카드뉴스 만들기
+                    </a>
+                  </div>
+                ) : (
+                  <div className="max-h-[340px] overflow-y-auto space-y-1.5 pr-1">
+                    {designs.map(d => {
+                      const n = Array.isArray(d.pages_data) ? d.pages_data.length : 0;
+                      const picked = pickedDesignId === d.id;
+                      return (
+                        <button
+                          key={d.id}
+                          onClick={() => applyDesign(d)}
+                          disabled={pickingBusy}
+                          className={`w-full text-left px-3.5 py-2.5 rounded-xl border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                            picked
+                              ? 'border-primary-400 bg-primary-50'
+                              : 'border-gray-200 bg-white hover:border-primary-300 hover:bg-primary-50/40'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-bold text-gray-800 truncate">{d.name}</span>
+                            <span className="text-[11px] text-gray-400 shrink-0">{n}장</span>
+                          </div>
+                          <div className="text-[11px] text-gray-400 mt-0.5">
+                            {new Date(d.created_at).toLocaleDateString('ko-KR')}
+                            {picked && pickingBusy && ' · 가져오는 중…'}
+                            {picked && !pickingBusy && ' · 가져왔습니다'}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {topic && pickedDesignId && !pickingBusy && (
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1.5">가져온 내용 (고쳐도 됩니다)</label>
+                    <textarea
+                      value={topic}
+                      onChange={e => setTopic(e.target.value)}
+                      rows={7}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-xs leading-relaxed focus:ring-2 focus:ring-primary-300 focus:border-primary-400 outline-none resize-none"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
@@ -1512,6 +1682,39 @@ ${result.body}
           )}
         </div>
       </div>
+
+      {/* 캡처용 화면 밖 영역.
+          노트·신문 카드는 저장된 그림 파일이 없어 여기서 한 번 그려 캡처한다.
+          420px는 렌더러들이 쓰는 기준 폭이고, 4:5 비율이라 높이는 525px. */}
+      {captureDesign && (
+        <div style={{ position: 'fixed', left: -99999, top: 0, pointerEvents: 'none', zIndex: -1 }}>
+          {(captureDesign.pages_data || []).map((pg, i) => (
+            <div
+              key={i}
+              ref={el => { captureRefs.current[i] = el; }}
+              style={{ width: 420, height: 525, position: 'relative', overflow: 'hidden' }}
+            >
+              {pg.styleVariant === 'hybridPaper' ? (
+                <NewspaperRenderer
+                  blocks={pg.blocks || []}
+                  scale={1}
+                  index={i}
+                  noteLabel={pg.noteLabel}
+                  noteNumber={pg.noteNumber}
+                />
+              ) : (
+                <HybridRenderer
+                  blocks={pg.blocks || []}
+                  scale={1}
+                  index={i}
+                  noteLabel={pg.noteLabel}
+                  noteNumber={pg.noteNumber}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

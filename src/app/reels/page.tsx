@@ -55,6 +55,9 @@ export default function ReelsPage() {
     if (!v) return;
     setUploadedUrl(v);
     setHandedOverName(q.get('name') || '영상 생성에서 만든 영상');
+    // 카드뉴스에서 만들어 둔 캡션을 같이 넘겨받는다 — 같은 글을 두 번 쓰지 않게
+    const c = q.get('caption');
+    if (c) setCaption(c);
   }, []);
 
   const busy = phase === 'signing' || phase === 'uploading' || phase === 'publishing';
