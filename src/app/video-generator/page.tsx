@@ -4,6 +4,9 @@ import { useRouter } from 'next/navigation';
 import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle, Wand2, Copy, Upload, Plus, Trash2, Send } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { loadCaption } from '@/lib/cardnews/captionStore';
+import { buildNarration } from '@/lib/cardnews/narration';
+import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
+import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
 
 /**
  * 녹화 형식을 고른다. MP4(H.264)를 먼저 시도하는 이유:
@@ -32,7 +35,37 @@ function SlideFrame({ page, width, height }: { page: any; width: number; height:
   // 손글씨 노트·신문 카드는 그림 한 장이 카드 전체다.
   // 이런 장은 (1) 잘리면 안 되고 (2) 어둡게 덮으면 글씨가 안 보이고
   // (3) 위에 텍스트를 또 얹으면 같은 말이 두 번 나온다.
-  const isWholeImage = page.styleVariant === 'image' && Boolean(page.bgImage);
+  //
+  // notebook(AI가 통째로 그린 카드)도 그림이 곧 카드다. 예전에는 image만
+  // 봐서 이 장들이 아래 어두운 갈래로 떨어졌다.
+  const isWholeImage = Boolean(page.bgImage)
+    && (page.styleVariant === 'image' || page.styleVariant === 'notebook');
+
+  // 노트·신문 하이브리드 카드는 저장된 그림이 없다 — 글자를 그때그때 조판한다.
+  // 이 갈래가 없어서 bgImage가 빈 채로 아래 어두운 갈래에 떨어졌고,
+  // 영상이 까만 화면에 제목만 뜨는 채로 만들어졌다.
+  const isHybrid = page.styleVariant === 'hybrid' || page.styleVariant === 'hybridPaper';
+  if (isHybrid) {
+    // 카드 기준 캔버스는 420×525(4:5). 고른 비율에 맞춰 통째로 줄이고
+    // 남는 자리는 종이색으로 둔다 — 잘라내면 글이 날아간다.
+    const CARD_W = 420;
+    const CARD_H = 525;
+    const k = Math.min(width / CARD_W, height / CARD_H);
+    return (
+      <div
+        data-hybrid="1"
+        style={{ width, height, position: 'relative', overflow: 'hidden', flexShrink: 0, background: '#F3F1EA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <div style={{ width: CARD_W * k, height: CARD_H * k, position: 'relative', overflow: 'hidden' }}>
+          {page.styleVariant === 'hybridPaper' ? (
+            <NewspaperRenderer blocks={page.blocks || []} scale={k} index={0} noteLabel={page.noteLabel} noteNumber={page.noteNumber} />
+          ) : (
+            <HybridRenderer blocks={page.blocks || []} scale={k} index={0} noteLabel={page.noteLabel} noteNumber={page.noteNumber} />
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (isWholeImage) {
     // 고른 비율과 카드 비율이 다르면 잘라내지 않고 여백을 둔다(레터박스).
@@ -123,6 +156,18 @@ export default function VideoGeneratorPage() {
   const [burnProgress, setBurnProgress] = useState('');
   const [burnError, setBurnError] = useState('');
 
+  // ── 슬라이드쇼 내레이션(음성 + 자막) ────────────────────────────
+  // 카드 내용에서 대본을 뽑아 음성으로 만들고, 그 음성을 영상에 같이 녹음한다.
+  // 자막은 원하면 화면에 태워 넣는다. 대본은 화면에서 고칠 수 있다.
+  const [narration, setNarration] = useState<string[]>([]);
+  const [narrationVoice, setNarrationVoice] = useState('ko-KR-InJoonNeural');
+  const [narrationOn, setNarrationOn] = useState(false);
+  const [subtitleOn, setSubtitleOn] = useState(true);
+  const [voiceBusy, setVoiceBusy] = useState('');
+  const [voiceError, setVoiceError] = useState('');
+  // 슬라이드별 음성 (base64 mp3). 길이는 슬라이드 유지 시간을 정하는 데 쓴다.
+  const [voiceClips, setVoiceClips] = useState<{ b64: string; sec: number }[]>([]);
+
   // 모드2 TTS 테스트 상태
   const [ttsText, setTtsText] = useState('');
   const [ttsVoice, setTtsVoice] = useState('ko-KR-InJoonNeural');
@@ -187,6 +232,16 @@ export default function VideoGeneratorPage() {
   const proxyUrl = (url: string) => `/api/proxy-image?url=${encodeURIComponent(url)}`;
 
   const captureEl = async (el: HTMLDivElement): Promise<HTMLCanvasElement> => {
+    // 하이브리드 카드는 html2canvas로 뜨면 안 된다.
+    // 형광펜과 펜 그림이 mix-blend-mode(곱하기)로 얹혀 있는데 html2canvas는
+    // 이걸 무시해서, 노란 칠이 글자를 덮고 그림이 불투명한 덩어리로 찍힌다.
+    // html-to-image는 이 합성을 그대로 살린다(편집기·블로그 전환도 이걸 쓴다).
+    if (el.dataset.hybrid === '1') {
+      const { toCanvas } = await import('html-to-image');
+      await document.fonts?.ready;
+      return toCanvas(el, { pixelRatio: 2, cacheBust: false, skipFonts: false });
+    }
+
     const h2c = (await import('html2canvas')).default;
     const imgs = el.querySelectorAll<HTMLImageElement>('img');
     const origSrcs: string[] = [];
@@ -243,6 +298,28 @@ export default function VideoGeneratorPage() {
       // 3. MediaRecorder 셋업
       const { mimeType, ext } = pickRecorderType();
       const stream = canvas.captureStream(30);
+
+      // 내레이션이 있으면 소리 트랙을 같이 녹음한다.
+      // 오디오는 별도 파일로 합치지 않고 MediaRecorder에 트랙으로 물린다 —
+      // 브라우저 안에서 끝나므로 서버에 ffmpeg 같은 걸 두지 않아도 된다.
+      const useVoice = narrationOn && voiceClips.length === slideCanvases.length;
+      let audioCtx: AudioContext | null = null;
+      let buffers: (AudioBuffer | null)[] = [];
+      if (useVoice) {
+        setExportProgress('음성 준비 중...');
+        audioCtx = new AudioContext();
+        const dest = audioCtx.createMediaStreamDestination();
+        stream.addTrack(dest.stream.getAudioTracks()[0]);
+        buffers = await Promise.all(voiceClips.map(async c => {
+          if (!c.b64) return null;
+          const bin = atob(c.b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          try { return await audioCtx!.decodeAudioData(bytes.buffer); } catch { return null; }
+        }));
+        (stream as any).__dest = dest;
+      }
+
       const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
       const chunks: Blob[] = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
@@ -259,15 +336,60 @@ export default function VideoGeneratorPage() {
 
       const drawFrame = () => new Promise<void>(r => requestAnimationFrame(() => { r(); }));
 
+      // 자막을 화면 아래에 태운다. 카드 위에 얹히므로 검은 띠를 깔아 읽히게 한다.
+      const drawSubtitle = (text: string) => {
+        if (!subtitleOn || !text) return;
+        const pad = Math.round(EXPORT_W * 0.06);
+        const size = Math.round(EXPORT_W * 0.042);
+        ctx.font = `700 ${size}px "Noto Sans KR", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        // 폭에 맞춰 줄바꿈 (한국어라 글자 단위로 끊는다)
+        const maxW = EXPORT_W - pad * 2;
+        const lines: string[] = [];
+        let line = '';
+        for (const ch of text) {
+          if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ch; }
+          else line += ch;
+        }
+        if (line) lines.push(line);
+        const shown = lines.slice(-3);
+        const lh = Math.round(size * 1.35);
+        const boxH = lh * shown.length + Math.round(size * 0.8);
+        const boxY = EXPORT_H - boxH - Math.round(EXPORT_H * 0.045);
+        ctx.fillStyle = 'rgba(0,0,0,0.62)';
+        ctx.fillRect(0, boxY, EXPORT_W, boxH);
+        ctx.fillStyle = '#fff';
+        shown.forEach((l, i) => {
+          ctx.fillText(l, EXPORT_W / 2, boxY + Math.round(size * 0.4) + lh * i + lh / 2);
+        });
+      };
+
       for (let i = 0; i < slideCanvases.length; i++) {
         setExportProgress(`영상 인코딩 중... (${i + 1}/${slideCanvases.length}장)`);
         const curr = slideCanvases[i];
         const next = slideCanvases[(i + 1) % slideCanvases.length];
+        const line = narrationOn ? (narration[i] || '') : '';
+
+        // 이 장의 음성을 틀고, 말이 끝날 때까지 화면을 붙잡는다.
+        // 설정한 초보다 음성이 길면 음성에 맞춘다 — 짧게 두면 말이 잘린다.
+        let holdSec = duration;
+        if (useVoice && audioCtx) {
+          const buf = buffers[i];
+          if (buf) {
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect((stream as any).__dest);
+            src.start();
+            holdSec = Math.max(duration, buf.duration + 0.35);
+          }
+        }
 
         // 슬라이드 유지
-        const holdFrames = Math.round(duration * FPS) - FADE_FRAMES - SLIDE_FRAMES;
+        const holdFrames = Math.round(holdSec * FPS) - FADE_FRAMES - SLIDE_FRAMES;
         for (let f = 0; f < holdFrames; f++) {
           ctx.drawImage(curr, 0, 0, EXPORT_W, EXPORT_H);
+          drawSubtitle(line);
           await drawFrame();
           await sleep(FRAME_MS);
         }
@@ -299,6 +421,7 @@ export default function VideoGeneratorPage() {
 
       recorder.stop();
       await recordingDone;
+      if (audioCtx) await audioCtx.close().catch(() => {});
 
       // 4. 만든 영상을 들고만 있는다.
       //
@@ -318,13 +441,59 @@ export default function VideoGeneratorPage() {
       setIsExporting(false);
       setExportProgress('');
     }
-  }, [selectedDesign, pages, duration, transition, ratio, ratioInfo]);
+    // 내레이션 관련 값을 빠뜨리면 이 함수가 옛 값(대본 없음·음성 없음)을 붙잡은 채
+    // 굳어, 음성을 만들어 두고 눌러도 소리 없는 20초짜리가 나온다. 실제로 겪었다.
+  }, [selectedDesign, pages, duration, transition, ratio, ratioInfo,
+      narration, narrationOn, subtitleOn, voiceClips]);
 
   /**
    * 방금 만든 영상을 저장소에 올리고 발행 화면으로 넘긴다.
    * 파일은 Vercel을 거치지 않고 브라우저에서 Supabase로 바로 간다 —
    * 라우트는 본문이 약 4.5MB로 제한돼 영상을 통과시킬 수 없다.
    */
+  /** 고른 카드뉴스에서 대본을 뽑는다. 뽑은 뒤 화면에서 고칠 수 있다. */
+  const handleBuildNarration = () => {
+    if (pages.length === 0) return;
+    setNarration(buildNarration(pages));
+    setVoiceClips([]);
+    setVoiceError('');
+    setNarrationOn(true);
+  };
+
+  /** 대본을 슬라이드별 음성으로 만든다 (Edge-TTS, 무료) */
+  const handleMakeVoices = async () => {
+    if (narration.length === 0) return;
+    setVoiceError('');
+    setVoiceClips([]);
+    try {
+      const clips: { b64: string; sec: number }[] = [];
+      for (let i = 0; i < narration.length; i++) {
+        setVoiceBusy(`음성 만드는 중… (${i + 1}/${narration.length})`);
+        const text = narration[i].trim();
+        if (!text) { clips.push({ b64: '', sec: 0 }); continue; }
+        const res = await fetch('/api/generate/tts-test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, voice: narrationVoice }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.audio) throw new Error(data.error || '음성 합성에 실패했습니다.');
+        // 길이를 재둔다 — 슬라이드를 음성보다 짧게 두면 말이 잘린다
+        const sec = await new Promise<number>(resolve => {
+          const a = new Audio(`data:audio/mp3;base64,${data.audio}`);
+          a.addEventListener('loadedmetadata', () => resolve(a.duration || 0));
+          a.addEventListener('error', () => resolve(0));
+        });
+        clips.push({ b64: data.audio, sec });
+      }
+      setVoiceClips(clips);
+    } catch (e: any) {
+      setVoiceError(e?.message || '음성 생성 중 오류가 발생했습니다.');
+    } finally {
+      setVoiceBusy('');
+    }
+  };
+
   /** 만든 영상을 파일로 받는다 (자동으로 받지 않으므로 누를 때만) */
   const handleDownload = () => {
     if (!exportedBlob) return;
@@ -787,6 +956,91 @@ export default function VideoGeneratorPage() {
                     : '디자인을 선택하면 영상 길이가 표시됩니다'}
                 </p>
                 <p className="text-[10px] text-gray-400 mt-1">출력 형식: MP4 (지원하지 않는 브라우저에서는 WebM)</p>
+              </div>
+
+              {/* 내레이션 — 카드 내용을 읽어주는 음성과 자막 */}
+              <div className="bg-white rounded-xl p-4 border border-gray-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-gray-700">🎙 음성 내레이션 · 자막</p>
+                  <button
+                    onClick={handleBuildNarration}
+                    disabled={!selectedDesign || pages.length === 0}
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-gray-700 transition-colors"
+                  >
+                    카드에서 대본 만들기
+                  </button>
+                </div>
+
+                {narration.length === 0 ? (
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    고른 카드뉴스의 제목·요약·핵심을 읽어주는 대본을 만듭니다. 만든 뒤 문장을 고칠 수 있습니다.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600">
+                        <input type="checkbox" checked={narrationOn} onChange={e => setNarrationOn(e.target.checked)} />
+                        음성 넣기
+                      </label>
+                      <label className="flex items-center gap-1.5 text-[11px] font-bold text-gray-600">
+                        <input type="checkbox" checked={subtitleOn} onChange={e => setSubtitleOn(e.target.checked)} />
+                        자막 태우기
+                      </label>
+                      <select
+                        value={narrationVoice}
+                        onChange={e => { setNarrationVoice(e.target.value); setVoiceClips([]); }}
+                        className="text-[11px] border border-gray-200 rounded-lg px-2 py-1 outline-none"
+                      >
+                        <option value="ko-KR-InJoonNeural">남성 (인준)</option>
+                        <option value="ko-KR-SunHiNeural">여성 (선히)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                      {narration.map((line, i) => (
+                        <div key={i} className="flex gap-2 items-start">
+                          <span className="text-[10px] font-black text-gray-400 mt-2 w-4 shrink-0">{i + 1}</span>
+                          <textarea
+                            value={line}
+                            onChange={e => {
+                              const next = [...narration];
+                              next[i] = e.target.value;
+                              setNarration(next);
+                              setVoiceClips([]);
+                            }}
+                            rows={2}
+                            className="flex-1 border border-gray-200 rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed outline-none focus:ring-2 focus:ring-primary-200 resize-none"
+                          />
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      onClick={handleMakeVoices}
+                      disabled={Boolean(voiceBusy)}
+                      className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-bold text-xs border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                    >
+                      {voiceBusy
+                        ? <><Loader2 size={13} className="animate-spin" /> {voiceBusy}</>
+                        : <>🔊 음성 만들기 ({narration.length}장)</>}
+                    </button>
+
+                    {voiceClips.length > 0 && (
+                      <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
+                        음성 {voiceClips.filter(c => c.b64).length}장 준비됨 · 약 {Math.round(voiceClips.reduce((s, c) => s + c.sec, 0))}초.
+                        영상 길이는 말이 끝날 때까지 자동으로 늘어납니다.
+                      </p>
+                    )}
+                    {narrationOn && voiceClips.length === 0 && (
+                      <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        아직 음성을 만들지 않았습니다. 이대로 만들면 자막만 들어갑니다.
+                      </p>
+                    )}
+                    {voiceError && (
+                      <p className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{voiceError}</p>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Export Button */}
