@@ -5,6 +5,7 @@ import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Load
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { loadCaption } from '@/lib/cardnews/captionStore';
 import { buildNarration, type NarrationLength } from '@/lib/cardnews/narration';
+import { buildVideoTitle, buildVideoCaption } from '@/lib/cardnews/videoMeta';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
 import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
 
@@ -557,11 +558,17 @@ export default function VideoGeneratorPage() {
           : `업로드 실패: ${error.message}`);
       }
 
-      // 카드뉴스에서 만들어 둔 캡션이 있으면 같이 넘긴다 — 같은 내용을
-      // 두 번 쓰지 않게 한다. 없으면 발행 화면에서 그냥 비워 둔다.
-      const caption = loadCaption(selectedDesign?.id);
+      // 제목과 캡션을 카드뉴스에서 뽑아 같이 넘긴다.
+      // 유튜브는 제목이 필수라 발행 화면에서 매번 다시 타이핑하고 있었다.
+      //
+      // 캡션은 편집기에서 만들어 둔 것이 있으면 그걸 쓰고(사람이 다듬은
+      // 문구가 더 낫다), 없으면 카드 제목들로 목차를 세운다.
       const q = new URLSearchParams({ video: sign.publicUrl, name: exportedName });
+      const caption = loadCaption(selectedDesign?.id)
+        || buildVideoCaption(pages, selectedDesign?.name || '');
       if (caption) q.set('caption', caption);
+      const title = buildVideoTitle(pages, selectedDesign?.name || '');
+      if (title) q.set('title', title);
       router.push(`/reels?${q.toString()}`);
     } catch (e: any) {
       setExportError(e?.message || '업로드 중 오류가 발생했습니다.');

@@ -55,9 +55,12 @@ export default function ReelsPage() {
     if (!v) return;
     setUploadedUrl(v);
     setHandedOverName(q.get('name') || '영상 생성에서 만든 영상');
-    // 카드뉴스에서 만들어 둔 캡션을 같이 넘겨받는다 — 같은 글을 두 번 쓰지 않게
+    // 카드뉴스에서 만들어 둔 제목·캡션을 같이 넘겨받는다 — 같은 글을 두 번 쓰지 않게.
+    // 특히 유튜브는 제목이 필수라 매번 다시 타이핑하고 있었다.
     const c = q.get('caption');
     if (c) setCaption(c);
+    const t = q.get('title');
+    if (t) setTitle(t.slice(0, 100));
   }, []);
 
   const busy = phase === 'signing' || phase === 'uploading' || phase === 'publishing';
