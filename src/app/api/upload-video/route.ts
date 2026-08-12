@@ -11,7 +11,12 @@ import { createClient } from '@supabase/supabase-js';
 export const maxDuration = 30;
 
 const BUCKET = 'card-images';           // 기존 공개 버킷을 그대로 쓴다 (videos/ 하위)
-const MAX_BYTES = 300 * 1024 * 1024;    // 300MB. 인스타 릴스 자체 한도가 1GB지만 실용선
+
+// Supabase 무료 요금제는 파일 하나당 50MB까지만 받는다(프로젝트 전역 설정이라
+// 버킷에서 올릴 수 없다). 예전에는 여기서 300MB까지 통과시켰는데, 그러면
+// 검사를 지나놓고 정작 업로드에서 영어 오류로 거부됐다 —
+// "The object exceeded the maximum allowed size". 실제 한도에 맞춰 미리 막는다.
+const MAX_BYTES = 50 * 1024 * 1024;
 
 // webm은 영상 생성 화면이 브라우저에서 녹화할 때 나올 수 있다. 유튜브·틱톡은
 // 받지만 인스타는 받지 않는다 — 그 판단은 발행 화면에서 한다.
@@ -33,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
     if (size && Number(size) > MAX_BYTES) {
       return NextResponse.json(
-        { error: `파일이 너무 큽니다 (${Math.round(Number(size) / 1024 / 1024)}MB). 300MB 이하로 올려주세요.` },
+        { error: `영상이 너무 큽니다 (${Math.round(Number(size) / 1024 / 1024)}MB). 저장소가 한 파일에 50MB까지만 받습니다. 내레이션을 짧게 줄이거나 슬라이드 시간을 낮춰 다시 만들어 주세요.` },
         { status: 400 }
       );
     }

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle, Wand2, Copy, Upload, Plus, Trash2, Send } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { loadCaption } from '@/lib/cardnews/captionStore';
-import { buildNarration } from '@/lib/cardnews/narration';
+import { buildNarration, type NarrationLength } from '@/lib/cardnews/narration';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
 import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
 
@@ -163,6 +163,10 @@ export default function VideoGeneratorPage() {
   const [narrationVoice, setNarrationVoice] = useState('ko-KR-InJoonNeural');
   const [narrationOn, setNarrationOn] = useState(false);
   const [subtitleOn, setSubtitleOn] = useState(true);
+  // 영상이 길면 파일이 커져 저장소 한도(무료 50MB)에 걸린다.
+  // 길이와 속도를 줄이는 게 화질을 낮추는 것보다 먼저다 — 글씨가 안 뭉개진다.
+  const [narrationLen, setNarrationLen] = useState<NarrationLength>('normal');
+  const [narrationRate, setNarrationRate] = useState(1);
   const [voiceBusy, setVoiceBusy] = useState('');
   const [voiceError, setVoiceError] = useState('');
   // 슬라이드별 음성 (base64 mp3). 길이는 슬라이드 유지 시간을 정하는 데 쓴다.
@@ -320,7 +324,27 @@ export default function VideoGeneratorPage() {
         (stream as any).__dest = dest;
       }
 
-      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
+      // 화질을 길이에 맞춰 정한다.
+      //
+      // 저장소(Supabase 무료 요금제)가 파일 하나당 50MB까지만 받는다. 4Mbps로
+      // 고정해 두면 2분짜리가 57MB가 되어 다 만들고 올릴 때 거부당한다 —
+      // 실제로 겪었다. 슬라이드는 거의 정지 화면이라 비트레이트를 낮춰도
+      // 눈에 띄게 나빠지지 않는다.
+      const FPS = 30;
+      const FADE_FRAMES = transition === 'fade' ? 15 : 0;
+      const SLIDE_FRAMES = transition === 'slide' ? 20 : 0;
+      const holdSecOf = (i: number) =>
+        useVoice ? Math.max(duration, (voiceClips[i]?.sec || 0) + 0.35) : duration;
+      const totalSec = slideCanvases.reduce((s, _, i) => s + holdSecOf(i), 0)
+        + (slideCanvases.length * (FADE_FRAMES + SLIDE_FRAMES)) / 30;
+      const TARGET_BYTES = 42 * 1024 * 1024;   // 50MB 한도 아래로 여유를 둔다
+      const audioBits = useVoice ? 64_000 : 0;
+      const videoBitsPerSecond = Math.max(
+        800_000,
+        Math.min(4_000_000, Math.floor((TARGET_BYTES * 8) / Math.max(1, totalSec)) - audioBits),
+      );
+
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond });
       const chunks: Blob[] = [];
       recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
@@ -329,10 +353,7 @@ export default function VideoGeneratorPage() {
       });
       recorder.start(100);
 
-      const FPS = 30;
       const FRAME_MS = 1000 / FPS;
-      const FADE_FRAMES = transition === 'fade' ? 15 : 0;
-      const SLIDE_FRAMES = transition === 'slide' ? 20 : 0;
 
       const drawFrame = () => new Promise<void>(r => requestAnimationFrame(() => { r(); }));
 
@@ -454,7 +475,7 @@ export default function VideoGeneratorPage() {
   /** 고른 카드뉴스에서 대본을 뽑는다. 뽑은 뒤 화면에서 고칠 수 있다. */
   const handleBuildNarration = () => {
     if (pages.length === 0) return;
-    setNarration(buildNarration(pages));
+    setNarration(buildNarration(pages, narrationLen));
     setVoiceClips([]);
     setVoiceError('');
     setNarrationOn(true);
@@ -474,7 +495,7 @@ export default function VideoGeneratorPage() {
         const res = await fetch('/api/generate/tts-test', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, voice: narrationVoice }),
+          body: JSON.stringify({ text, voice: narrationVoice, rate: narrationRate }),
         });
         const data = await res.json();
         if (!res.ok || !data.audio) throw new Error(data.error || '음성 합성에 실패했습니다.');
@@ -528,7 +549,13 @@ export default function VideoGeneratorPage() {
         .uploadToSignedUrl(sign.path, sign.token, exportedBlob, {
           contentType: exportedBlob.type.split(';')[0] || `video/${exportedExt}`,
         });
-      if (error) throw new Error(`업로드 실패: ${error.message}`);
+      if (error) {
+        // 저장소가 크기 때문에 막은 경우는 영어로 오니 한국어로 바꿔 준다
+        const tooBig = /maximum allowed size|exceeded/i.test(error.message);
+        throw new Error(tooBig
+          ? `영상이 저장소 한도(50MB)를 넘었습니다 (${(exportedBlob.size / 1048576).toFixed(1)}MB). 내레이션을 짧게 줄이거나 슬라이드 시간을 낮춰 다시 만들어 주세요.`
+          : `업로드 실패: ${error.message}`);
+      }
 
       // 카드뉴스에서 만들어 둔 캡션이 있으면 같이 넘긴다 — 같은 내용을
       // 두 번 쓰지 않게 한다. 없으면 발행 화면에서 그냥 비워 둔다.
@@ -994,6 +1021,30 @@ export default function VideoGeneratorPage() {
                         <option value="ko-KR-InJoonNeural">남성 (인준)</option>
                         <option value="ko-KR-SunHiNeural">여성 (선히)</option>
                       </select>
+                      {/* 길이와 속도 — 영상을 짧게 만들어 용량을 줄이는 두 손잡이 */}
+                      <select
+                        value={narrationLen}
+                        onChange={e => {
+                          const v = e.target.value as NarrationLength;
+                          setNarrationLen(v);
+                          setNarration(buildNarration(pages, v));
+                          setVoiceClips([]);
+                        }}
+                        className="text-[11px] border border-gray-200 rounded-lg px-2 py-1 outline-none"
+                      >
+                        <option value="normal">대본 보통</option>
+                        <option value="short">대본 짧게</option>
+                      </select>
+                      <select
+                        value={narrationRate}
+                        onChange={e => { setNarrationRate(Number(e.target.value)); setVoiceClips([]); }}
+                        className="text-[11px] border border-gray-200 rounded-lg px-2 py-1 outline-none"
+                      >
+                        <option value={0.9}>0.9배 (천천히)</option>
+                        <option value={1}>1.0배</option>
+                        <option value={1.15}>1.15배</option>
+                        <option value={1.3}>1.3배 (빠르게)</option>
+                      </select>
                     </div>
 
                     <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
@@ -1029,6 +1080,14 @@ export default function VideoGeneratorPage() {
                       <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
                         음성 {voiceClips.filter(c => c.b64).length}장 준비됨 · 약 {Math.round(voiceClips.reduce((s, c) => s + c.sec, 0))}초.
                         영상 길이는 말이 끝날 때까지 자동으로 늘어납니다.
+                        {(() => {
+                          // 길수록 화질을 낮춰 50MB 한도 안에 맞춘다 — 얼마나 낮아지는지 미리 알린다
+                          const sec = voiceClips.reduce((s, c, i) => s + Math.max(duration, (c.sec || 0) + 0.35), 0);
+                          const mbps = Math.max(0.8, Math.min(4, (42 * 8) / Math.max(1, sec)));
+                          return mbps < 3.9
+                            ? ` 길이가 길어 화질을 ${mbps.toFixed(1)}Mbps로 낮춰 만듭니다(저장소 한도 50MB).`
+                            : '';
+                        })()}
                       </p>
                     )}
                     {narrationOn && voiceClips.length === 0 && (
