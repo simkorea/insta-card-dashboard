@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { FileText, Loader2, Calendar, Hash, FolderOpen, Archive, Layout, Trash2, X, ChevronLeft, ChevronRight, Pencil, ImageOff } from 'lucide-react';
 import { HybridThumb } from '@/components/cardnews/HybridThumb';
+import { PublishButton } from '@/components/cardnews/PublishButton';
 
 interface BlogPost {
   id: string;
@@ -392,14 +393,25 @@ export default function ArchivePage() {
                         )}
                       </div>
 
-                      <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-50 text-xs text-gray-500 font-semibold">
-                        <span>슬라이드 개수: {pagesCount}장</span>
-                        <button
-                          onClick={e => { e.stopPropagation(); handleCardNewsClick(design); }}
-                          className="flex items-center gap-1 text-primary-600 hover:text-primary-700 focus:outline-none focus:underline font-bold"
-                        >
-                          <Pencil size={12} /> 편집
-                        </button>
+                      <div className="mt-4 pt-4 border-t border-gray-50 space-y-2">
+                        <div className="flex items-center justify-between text-xs text-gray-500 font-semibold">
+                          <span>슬라이드 개수: {pagesCount}장</span>
+                          <button
+                            onClick={e => { e.stopPropagation(); handleCardNewsClick(design); }}
+                            className="flex items-center gap-1 text-primary-600 hover:text-primary-700 focus:outline-none focus:underline font-bold"
+                          >
+                            <Pencil size={12} /> 편집
+                          </button>
+                        </div>
+                        {/* 여기서 바로 올린다.
+                            예전에는 편집기를 열어 캡처하고 업로드해야 해서, 만든 것의
+                            5%만 발행되고 나머지가 보관함에 쌓였다. */}
+                        <PublishButton
+                          designId={String(design.id)}
+                          designName={design.name}
+                          pages={design.pages_data || []}
+                          className="w-full py-2 bg-primary-600 text-white hover:bg-primary-700 active:scale-[0.99]"
+                        />
                       </div>
                       </div>
                     </div>
