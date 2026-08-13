@@ -192,6 +192,22 @@ export default function CardNewsPage() {
   const [visibleTemplateCount, setVisibleTemplateCount] = useState(8);
   const [activeCategory, setActiveCategory] = useState<string>('전체');
   const [prompt, setPrompt] = useState('');
+
+  // 대시보드의 '오늘의 소재'에서 넘어온 주제를 받아 채운다.
+  //
+  // 링크는 예전부터 ?trend=... 를 달고 왔는데 이 값을 읽는 코드가 없었다.
+  // 그래서 눌러도 빈 화면으로 넘어와 주제를 다시 타이핑해야 했다.
+  //
+  // 키워드 트렌드 탭이 아니라 텍스트 탭에 넣는다 — 넘어오는 값은 '금리'
+  // 같은 낱말이 아니라 기사 제목 한 문장이라 그대로 주제로 쓰는 게 맞다.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const q = new URLSearchParams(window.location.search);
+    const topic = q.get('topic') || q.get('trend');
+    if (!topic) return;
+    setPrompt(topic);
+    setInputMode('text');
+  }, []);
   
   // 브랜드 페르소나 관련 상태 정의
   interface PersonaShort {
