@@ -18,7 +18,6 @@ const QUICK_ACTIONS = [
   { href: '/brand-kit', icon: <Palette size={18} />, label: '브랜드 키트', desc: '색상·폰트 설정', color: 'from-rose-500 to-pink-500' },
 ];
 
-const TREND_KEYWORDS = ['AI 업무 자동화', '퍼스널 브랜딩', 'MZ 소비 트렌드', '건강한 식습관', '인스타 알고리즘', '2026 트렌드'];
 
 function MiniCardPreview({ page }: { page: any }) {
   if (!page) return <div className="w-full h-full bg-gradient-to-br from-gray-700 to-gray-900" />;
@@ -65,7 +64,6 @@ function MiniCardPreview({ page }: { page: any }) {
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [trendIdx, setTrendIdx] = useState(0);
   const [userEmail, setUserEmail] = useState('');
   const [greeting, setGreeting] = useState('안녕하세요');
   const [isGeneratingBriefing, setIsGeneratingBriefing] = useState(false);
@@ -174,6 +172,57 @@ export default function DashboardPage() {
   const upcomingPosts: any[] = data?.upcomingPosts ?? [];
   const briefing = data?.briefing;
   const newsDraft = data?.newsDraft;
+  const todo = data?.todo ?? {};
+  const topics: any[] = data?.topics ?? [];
+
+  // 오늘 할 일 네 칸. 막혀 있는 것은 빨간 점으로 표시한다.
+  const nextAt = todo.nextScheduledAt ? new Date(todo.nextScheduledAt) : null;
+  const TODO_CARDS = [
+    {
+      icon: '📰',
+      value: todo.hasDraft ? `${todo.draftSlides}장` : '없음',
+      label: '오늘 아침 초안',
+      hint: todo.hasDraft ? '확인하고 다듬기' : '아직 만들어지지 않았습니다',
+      href: '/archive',
+      urgent: !todo.hasDraft,
+      tone: todo.hasDraft
+        ? 'bg-amber-50 border-amber-100 focus:ring-amber-300'
+        : 'bg-gray-50 border-gray-100 focus:ring-gray-300',
+    },
+    {
+      icon: '📤',
+      value: `${todo.unpublishedCount ?? 0}개`,
+      label: '발행 안 한 카드뉴스',
+      hint: todo.unpublishedCount ? '최근 2주에 만들고 안 올린 것' : '밀린 것이 없습니다',
+      href: '/archive',
+      urgent: (todo.unpublishedCount ?? 0) > 0,
+      tone: (todo.unpublishedCount ?? 0) > 0
+        ? 'bg-rose-50 border-rose-100 focus:ring-rose-300'
+        : 'bg-emerald-50 border-emerald-100 focus:ring-emerald-300',
+    },
+    {
+      icon: '📅',
+      value: `${todo.pendingCount ?? 0}건`,
+      label: '예약 발행 대기',
+      hint: nextAt
+        ? `다음 ${nextAt.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })} ${nextAt.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}`
+        : '예약된 발행이 없습니다',
+      href: '/calendar',
+      urgent: false,
+      tone: 'bg-blue-50 border-blue-100 focus:ring-blue-300',
+    },
+    {
+      icon: '✍️',
+      value: isBriefingSaved ? '완료' : '대기',
+      label: '오늘 브리핑 → 블로그',
+      hint: isBriefingSaved ? '블로그로 저장했습니다' : '아직 글로 옮기지 않았습니다',
+      href: '/blog-generator',
+      urgent: !isBriefingSaved && Boolean(briefing),
+      tone: isBriefingSaved
+        ? 'bg-emerald-50 border-emerald-100 focus:ring-emerald-300'
+        : 'bg-violet-50 border-violet-100 focus:ring-violet-300',
+    },
+  ];
   // 오늘 아침 뉴스로 만들어진 초안인지 (KST 기준 24시간 이내)
   const isFreshDraft = newsDraft?.created_at
     ? Date.now() - new Date(newsDraft.created_at).getTime() < 36 * 60 * 60 * 1000
@@ -258,24 +307,74 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* ── 통계 ──────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: '저장된 디자인', value: stats.totalDesigns ?? 0, icon: '🎨', color: 'bg-violet-50 border-violet-100' },
-          { label: '이번 주 생성', value: stats.weeklyCreated ?? 0, icon: '⚡', color: 'bg-pink-50 border-pink-100' },
-          { label: '예약 발행 대기', value: stats.pendingPosts ?? 0, icon: '📅', color: 'bg-blue-50 border-blue-100' },
-          { label: '댓글 템플릿', value: stats.commentTemplates ?? 0, icon: '💬', color: 'bg-emerald-50 border-emerald-100' },
-        ].map(s => (
-          <div key={s.label} className={`${s.color} border rounded-2xl p-4 shadow-sm`}>
-            <div className="text-xl mb-2">{s.icon}</div>
-            {isLoading
-              ? <div className="h-7 w-10 bg-gray-200 rounded-lg animate-pulse mb-1" />
-              : <div className="text-2xl font-black text-gray-900 mb-0.5">{s.value}</div>
-            }
-            <div className="text-[11px] text-gray-500 font-medium leading-tight">{s.label}</div>
-          </div>
-        ))}
+      {/* ── 오늘 할 일 ─────────────────────────────────────────────────────
+          예전에는 '저장된 디자인 81 / 댓글 템플릿 67' 같은 누적 숫자를 띄웠다.
+          계속 쌓이기만 하는 값이라 매일 봐도 무엇을 해야 하는지 알 수 없었다.
+          하루 흐름(아침 초안 → 다듬기 → 발행 → 블로그·영상)에서 막힌 것만 센다. */}
+      <div>
+        <div className="flex items-baseline justify-between mb-3">
+          <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider">오늘 할 일</h2>
+          {!isLoading && (
+            <span className="text-[11px] text-gray-400">
+              누적 {stats.totalDesigns ?? 0}개 · 이번 주 {stats.weeklyCreated ?? 0}개
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {isLoading
+            ? [...Array(4)].map((_, i) => <div key={i} className="h-[104px] bg-gray-100 rounded-2xl animate-pulse" />)
+            : TODO_CARDS.map(c => (
+              <Link
+                key={c.label}
+                href={c.href}
+                className={`relative flex flex-col justify-between rounded-2xl border p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-offset-1 ${c.tone}`}
+              >
+                <div className="flex items-start justify-between">
+                  <span className="text-lg leading-none">{c.icon}</span>
+                  {c.urgent && (
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" aria-hidden />
+                  )}
+                </div>
+                <div>
+                  <div className="text-[19px] font-black text-gray-900 leading-tight">{c.value}</div>
+                  <div className="text-[11px] font-bold text-gray-600 mt-0.5">{c.label}</div>
+                  <div className="text-[10px] text-gray-400 mt-1 leading-tight">{c.hint}</div>
+                </div>
+              </Link>
+            ))}
+        </div>
       </div>
+
+      {/* ── 오늘의 소재 ────────────────────────────────────────────────────
+          예전에는 'AI 업무 자동화', '건강한 식습관' 같은 고정 문자열 6개였다.
+          부동산 계정에 아무 상관 없는 키워드라 누를 이유가 없었다.
+          오늘 아침 브리핑이 실제로 모아 온 기사 제목을 그대로 쓴다. */}
+      {topics.length > 0 && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <TrendingUp size={15} className="text-primary-500" />
+              <h2 className="text-sm font-bold text-gray-900">오늘의 소재</h2>
+              <span className="text-[10px] text-gray-400">오늘 아침 수집한 뉴스 {topics.length}건</span>
+            </div>
+            <Link href="/cardnews" className="text-[11px] text-primary-600 hover:text-primary-700 font-bold">
+              직접 입력 →
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {topics.map((t: any, i: number) => (
+              <Link
+                key={i}
+                href={`/cardnews?trend=${encodeURIComponent(t.title)}`}
+                title={t.title}
+                className="max-w-full truncate text-[12px] px-3 py-1.5 bg-gray-50 hover:bg-primary-50 hover:text-primary-700 border border-gray-100 hover:border-primary-200 text-gray-700 rounded-full transition-colors font-medium"
+              >
+                {t.title}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── 빠른 시작 ────────────────────────────────────────────────────── */}
       <div>
@@ -507,30 +606,26 @@ export default function DashboardPage() {
         {/* 우측 패널 */}
         <div className="space-y-4">
 
-          {/* 트렌드 빠른 생성 */}
-          <div className="bg-gradient-to-br from-violet-600 to-purple-700 rounded-2xl p-4 text-white shadow-sm">
-            <div className="flex items-center gap-1.5 mb-3">
-              <TrendingUp size={13} />
-              <span className="text-xs font-bold">트렌드 키워드로 바로 생성</span>
+          {/* 밀린 카드뉴스 — 만들어 놓고 안 올린 것부터 처리하도록 이름을 보여준다 */}
+          {(todo.unpublished?.length ?? 0) > 0 && (
+            <div className="bg-gradient-to-br from-rose-500 to-pink-600 rounded-2xl p-4 text-white shadow-sm">
+              <div className="flex items-center gap-1.5 mb-2">
+                <Clock size={13} />
+                <span className="text-xs font-bold">아직 안 올린 카드뉴스 {todo.unpublishedCount}개</span>
+              </div>
+              <div className="space-y-1 mb-3">
+                {todo.unpublished.map((d: any) => (
+                  <p key={d.id} className="text-[11px] text-white/90 truncate">· {d.name}</p>
+                ))}
+              </div>
+              <Link
+                href="/archive"
+                className="flex items-center justify-center gap-1.5 w-full py-2.5 bg-white text-rose-600 font-bold text-xs rounded-xl hover:bg-rose-50 transition-colors"
+              >
+                <ArrowRight size={12} /> 보관함에서 발행하기
+              </Link>
             </div>
-            <div className="flex flex-wrap gap-1.5 mb-3">
-              {TREND_KEYWORDS.map((kw, i) => (
-                <button
-                  key={kw}
-                  onClick={() => setTrendIdx(i)}
-                  className={`text-[10px] px-2 py-1 rounded-full font-semibold transition-all ${trendIdx === i ? 'bg-white text-violet-700' : 'bg-white/20 text-white hover:bg-white/30'}`}
-                >
-                  {kw}
-                </button>
-              ))}
-            </div>
-            <Link
-              href={`/cardnews?trend=${encodeURIComponent(TREND_KEYWORDS[trendIdx])}`}
-              className="flex items-center justify-center gap-1.5 w-full py-2.5 bg-white text-violet-700 font-bold text-xs rounded-xl hover:bg-violet-50 transition-colors"
-            >
-              <Sparkles size={12} /> 바로 만들기
-            </Link>
-          </div>
+          )}
 
           {/* 예약 발행 */}
           <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
