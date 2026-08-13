@@ -386,8 +386,17 @@ ${sourceBlock}`;
   // ── 표지 · 마무리 ──────────────────────────────────────────────────────────
   // 예전에는 1장부터 바로 기사로 시작해 기사로 끝났다. 캐러셀은 첫 장에서
   // 넘길지 말지가 갈리고 마지막 장이 저장·팔로우를 부르는 자리라 둘 다 필요하다.
-  const coverHeadline = parsed.title || `${label} 부동산 뉴스`;
-  const coverBadges = ['오늘의 핵심', `${articlePages.length}가지`, '저장 추천'];
+  // 제목에 박힌 개수를 실제 장수에 맞춘다.
+  //
+  // 제목은 기사를 고르기 전에 AI가 쓴다. 그런데 그 뒤에 내용이 얇은 기사를
+  // 걸러내므로(OVERPICK/MIN_BODY) 최종 장수가 줄어든다. 그래서 "핫이슈 9선"인데
+  // 카드는 7장인 상태가 나왔다 — 같은 카드의 배지는 7가지로 맞아 더 이상해 보였다.
+  // '선'과 '가지'만 바꾼다. '2천451세대'처럼 기사 안의 수치는 건드리지 않는다.
+  const articleCount = articlePages.length;
+  const coverHeadline = (parsed.title || `${label} 부동산 뉴스`)
+    .replace(/(\d+)\s*(선|가지)(?![가-힣])/g, (m, num, unit) =>
+      Number(num) === articleCount ? m : `${articleCount}${unit}`);
+  const coverBadges = ['오늘의 핵심', `${articleCount}가지`, '저장 추천'];
   const closingPoints = ['오늘의 핵심만 정리', '분양·청약 일정 체크', '매일 아침 업데이트'];
   const closingHeadline = '저장해두고 매일 아침 확인하세요';
 
