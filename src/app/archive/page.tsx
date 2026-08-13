@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { FileText, Loader2, Calendar, Hash, FolderOpen, Archive, Layout, Trash2, X, ChevronLeft, ChevronRight, Pencil, ImageOff } from 'lucide-react';
 import { HybridThumb } from '@/components/cardnews/HybridThumb';
 import { PublishButton } from '@/components/cardnews/PublishButton';
+import { BulkScheduleBar, MAX_BULK } from '@/components/cardnews/BulkScheduleBar';
 
 interface BlogPost {
   id: string;
@@ -40,6 +41,19 @@ export default function ArchivePage() {
   const [isDesignsLoading, setIsDesignsLoading] = useState(true);
   const [error, setError] = useState('');
   const [designsError, setDesignsError] = useState('');
+  // 여러 개를 골라 한꺼번에 예약하기 위한 선택 상태.
+  // 예약은 그림을 미리 올려둬야 해서 한 번에 다섯 개까지만 받는다(BulkScheduleBar 주석 참고).
+  const [selected, setSelected] = useState<string[]>([]);
+  const toggleSelect = (id: string) => {
+    setSelected(prev => {
+      if (prev.includes(id)) return prev.filter(x => x !== id);
+      if (prev.length >= MAX_BULK) {
+        alert(`한 번에 ${MAX_BULK}개까지 고를 수 있습니다.`);
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
 
   const fetchPosts = async () => {
     setIsLoading(true);
@@ -369,6 +383,18 @@ export default function ArchivePage() {
                         <span className="absolute bottom-2 right-2 text-[10px] font-bold text-white bg-black/55 px-2 py-0.5 rounded-full">
                           {pagesCount}장
                         </span>
+                        {/* 예약용 선택. 카드 클릭(미리보기)과 겹치지 않게 이벤트를 끊는다 */}
+                        <button
+                          onClick={e => { e.stopPropagation(); toggleSelect(String(design.id)); }}
+                          aria-label={selected.includes(String(design.id)) ? '선택 해제' : '예약 대상으로 선택'}
+                          className={`absolute top-2 left-2 w-6 h-6 rounded-lg border-2 flex items-center justify-center text-[11px] font-black transition-colors ${
+                            selected.includes(String(design.id))
+                              ? 'bg-primary-600 border-primary-600 text-white'
+                              : 'bg-white/85 border-white/90 text-transparent hover:border-primary-400'
+                          }`}
+                        >
+                          ✓
+                        </button>
                       </div>
 
                       <div className="p-5 space-y-3 flex-1 flex flex-col justify-between">
@@ -537,6 +563,17 @@ export default function ArchivePage() {
           </div>
         );
       })()}
+
+      {/* 여러 개를 골랐을 때만 뜨는 예약 막대 */}
+      {activeTab === 'cardnews' && selected.length > 0 && (
+        <BulkScheduleBar
+          designs={designs.filter(d => selected.includes(String(d.id))).map(d => ({
+            id: String(d.id), name: d.name, pages_data: d.pages_data || [],
+          }))}
+          onClear={() => setSelected([])}
+          onDone={() => { setSelected([]); fetchDesigns(); }}
+        />
+      )}
     </div>
   );
 }
