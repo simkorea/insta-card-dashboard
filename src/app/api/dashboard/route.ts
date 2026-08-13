@@ -31,8 +31,16 @@ export async function GET() {
       .limit(1)
       .maybeSingle();
 
+    // 목록에 보여줄 대기 건 (가장 이른 5건)
     const pendingPosts = (postsRes.data ?? []).filter((p: any) => p.status !== 'published');
-    const publishedCount = (postsRes.data ?? []).filter((p: any) => p.status === 'published').length;
+
+    // 개수는 따로 센다.
+    // 위 목록은 limit(5)로 5건만 가져오므로 그걸 세면 아무리 밀려 있어도
+    // 최대 5로 보인다. 대기가 20건인데 5라고 뜨면 볼 이유가 없는 숫자가 된다.
+    const { count: pendingCount } = await supabase
+      .from('scheduled_posts')
+      .select('id', { count: 'exact', head: true })
+      .neq('status', 'published');
 
     // 이번주 생성 수
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -54,7 +62,7 @@ export async function GET() {
     return NextResponse.json({
       stats: {
         totalDesigns: templatesRes.count ?? 0,
-        pendingPosts: pendingPosts.length,
+        pendingPosts: pendingCount ?? pendingPosts.length,
         commentTemplates: commentsRes.count ?? 0,
         weeklyCreated: weeklyCount ?? 0,
       },

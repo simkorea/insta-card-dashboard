@@ -7,6 +7,7 @@ import {
   Plus, Sparkles, Clock, RefreshCw, Palette, ArrowRight,
 } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
+import { HybridThumb } from '@/components/cardnews/HybridThumb';
 
 const QUICK_ACTIONS = [
   { href: '/cardnews', icon: <PenTool size={18} />, label: '카드뉴스', desc: 'AI 슬라이드 제작', color: 'from-violet-500 to-purple-600' },
@@ -21,6 +22,28 @@ const TREND_KEYWORDS = ['AI 업무 자동화', '퍼스널 브랜딩', 'MZ 소비
 
 function MiniCardPreview({ page }: { page: any }) {
   if (!page) return <div className="w-full h-full bg-gradient-to-br from-gray-700 to-gray-900" />;
+
+  // 노트·신문 카드는 저장된 그림이 없다 — 글자를 그때그때 조판한다.
+  // 이 갈래가 없어서 bgImage가 빈 채로 아래 어두운 갈래에 떨어졌고,
+  // 최근 만든 카드가 전부 하이브리드라 '최근 작업'이 통째로 검은 타일이었다.
+  // 보관함·편집기가 쓰는 미리보기를 그대로 쓴다.
+  if (page.styleVariant === 'hybrid' || page.styleVariant === 'hybridPaper') {
+    return <HybridThumb page={page} index={0} />;
+  }
+
+  // AI가 통째로 그린 카드(notebook)와 그림 카드(image)는 그림이 곧 카드다.
+  // 어둡게 덮으면 글씨가 안 보이고, 잘라내면 가장자리가 날아간다.
+  const isWholeImage = Boolean(page.bgImage)
+    && (page.styleVariant === 'image' || page.styleVariant === 'notebook');
+  if (isWholeImage) {
+    return (
+      <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden', background: '#F3F1EA' }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={page.bgImage} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} loading="lazy" />
+      </div>
+    );
+  }
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', overflow: 'hidden' }}>
       {page.bgImage && (
@@ -442,6 +465,11 @@ export default function DashboardPage() {
                     className="bg-white border border-gray-100 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all group cursor-pointer"
                     onClick={() => {
                       localStorage.setItem('editingDesign', JSON.stringify(design.pages_data));
+                      // id를 같이 넘겨야 편집기가 '이 디자인을 고치는 중'으로 안다.
+                      // 빠뜨리면 저장할 때 원본을 덮지 않고 새 디자인이 하나 더 생기고,
+                      // 캡션도 이 카드뉴스와 이어지지 않는다.
+                      // (보관함·카드뉴스 목록은 원래 둘 다 넘기고 있었다)
+                      localStorage.setItem('editingDesignId', String(design.id));
                       localStorage.removeItem('cardNewsData');
                       window.location.href = '/cardnews/editor';
                     }}
