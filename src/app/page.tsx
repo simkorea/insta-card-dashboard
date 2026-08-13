@@ -139,6 +139,37 @@ export default function DashboardPage() {
     }
   };
 
+  // 카드뉴스 한 벌 → 블로그 글까지 서버에서 한 번에.
+  // 영상은 브라우저가 실시간으로 녹화해야 해서 여기서 끝낼 수 없다.
+  // 대신 제목·캡션·대본을 받아 두었다가 영상 화면에서 바로 쓰게 한다.
+  const [isMakingAll, setIsMakingAll] = useState(false);
+  const makeAllFromDraft = async (designId: string) => {
+    setIsMakingAll(true);
+    try {
+      const res = await fetch('/api/generate/from-cardnews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ designId }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) {
+        alert('블로그 생성 실패: ' + (json.error || '알 수 없는 오류'));
+        return;
+      }
+      try {
+        localStorage.setItem(`video_meta_${designId}`, JSON.stringify(json.video));
+      } catch { /* 용량 초과는 무시 — 영상 재료는 없어도 영상은 만들 수 있다 */ }
+      fetchDashboard();
+      if (confirm('블로그 글을 만들어 보관함에 저장했습니다. 지금 확인할까요?')) {
+        window.location.href = json.blogPostId ? `/blog-generator?postId=${json.blogPostId}` : '/archive';
+      }
+    } catch (err: any) {
+      alert('에러가 발생했습니다: ' + err.message);
+    } finally {
+      setIsMakingAll(false);
+    }
+  };
+
   const saveToBlog = async () => {
     if (!briefing || !briefing.id) return;
     setIsSavingToBlog(true);
@@ -275,6 +306,15 @@ export default function DashboardPage() {
                     >
                       확인하고 다듬기 <ArrowRight size={13} />
                     </Link>
+                    {/* 카드 내용을 근거로 블로그 글까지 서버에서 한 번에 만든다.
+                        예전에는 블로그 화면으로 옮겨가 다시 고르고 눌러야 했다. */}
+                    <button
+                      onClick={() => makeAllFromDraft(newsDraft.id)}
+                      disabled={isMakingAll}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-300 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {isMakingAll ? '블로그 쓰는 중...' : <><Sparkles size={13} /> 블로그까지 한 번에</>}
+                    </button>
                     <button
                       onClick={() => generateNewsDraft(true)}
                       disabled={isGeneratingDraft}
