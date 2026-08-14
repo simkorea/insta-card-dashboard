@@ -208,6 +208,13 @@ export default function DashboardPage() {
   const topics: any[] = data?.topics ?? [];
   // 날짜로 돌려 고른다 — 같은 날 새로고침해도 목록이 바뀌지 않는다
   const evergreen = pickEvergreen(6);
+  const health = data?.health ?? {};
+  // 오늘은 아직 돌 시간이 아닐 수 있으니 빠진 날 계산에서 뺀다
+  const missedDays = (health.days ?? []).filter((d: any, i: number, arr: any[]) => {
+    const isToday = i === arr.length - 1;
+    if (isToday && (health.kstHour ?? 24) < 9) return false;
+    return !(d.briefing && d.draft);
+  }).length;
 
   // 오늘 할 일 네 칸. 막혀 있는 것은 빨간 점으로 표시한다.
   const nextAt = todo.nextScheduledAt ? new Date(todo.nextScheduledAt) : null;
@@ -416,6 +423,64 @@ export default function DashboardPage() {
               </Link>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── 자동 작업 상태 ─────────────────────────────────────────────────
+          8/6~8/7에 아침 크론이 조용히 죽었는데 며칠 뒤에야 알았다.
+          알림을 보낼 수단이 없으니, 최근 7일을 늘어놓아 빠진 날이 눈에
+          띄게 한다. 브리핑이 있으면 수집이 돌았고, 초안이 있으면 끝까지 갔다. */}
+      {health.days?.length > 0 && (
+        <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Clock size={15} className="text-gray-400" />
+              <h2 className="text-sm font-bold text-gray-900">자동 작업 상태</h2>
+              <span className="text-[10px] text-gray-400">매일 아침 뉴스 수집 → 카드뉴스 초안</span>
+            </div>
+            {missedDays > 0 && (
+              <span className="text-[11px] font-bold text-rose-600 bg-rose-50 border border-rose-100 px-2 py-0.5 rounded-full">
+                최근 7일 중 {missedDays}일 빠짐
+              </span>
+            )}
+          </div>
+
+          <div className="flex gap-1.5">
+            {health.days.map((d: any) => {
+              // 오늘 아침 8시 30분 전이면 아직 돌 시간이 아니다 — 실패로 보지 않는다
+              const pending = d.date === health.days[health.days.length - 1].date && health.kstHour < 9;
+              const ok = d.briefing && d.draft;
+              const partial = d.briefing !== d.draft;
+              return (
+                <div key={d.date} className="flex-1 min-w-0">
+                  <div
+                    title={`${d.label} · 브리핑 ${d.briefing ? '있음' : '없음'} · 초안 ${d.draft ? '있음' : '없음'}`}
+                    className={`h-8 rounded-lg border ${
+                      pending ? 'bg-gray-50 border-gray-100'
+                        : ok ? 'bg-emerald-100 border-emerald-200'
+                        : partial ? 'bg-amber-100 border-amber-200'
+                        : 'bg-rose-100 border-rose-200'
+                    }`}
+                  />
+                  <p className="text-[9px] text-gray-400 text-center mt-1 truncate">{d.label}</p>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-gray-400 mt-2">
+            초록: 초안까지 완료 · 노랑: 수집만 됨 · 빨강: 그날 아무것도 안 만들어짐
+          </p>
+
+          {health.failedPosts?.length > 0 && (
+            <div className="mt-3 bg-rose-50 border border-rose-100 rounded-xl p-3">
+              <p className="text-[11px] font-bold text-rose-700 mb-1">발행에 실패한 예약 {health.failedPosts.length}건</p>
+              {health.failedPosts.map((p: any) => (
+                <p key={p.id} className="text-[10px] text-rose-600/90 truncate">
+                  · {p.design_name || '이름 없음'} — {p.error_message || '원인 미상'}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

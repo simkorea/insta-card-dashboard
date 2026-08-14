@@ -78,6 +78,42 @@ export async function GET() {
       .filter((n: any) => n.title)
       .slice(0, 8);
 
+    // ── 자동 작업 상태 ────────────────────────────────────────────────────
+    // 8/6~8/7에 아침 크론이 조용히 죽었는데 며칠 뒤에야 알았다. 알림을 보낼
+    // 수단(이메일·슬랙)이 없고 크론 로그 테이블도 없다.
+    //
+    // 그래서 남은 흔적으로 되짚는다. 브리핑이 있으면 수집이 돌았고, '자동 뉴스'
+    // 카드뉴스가 있으면 초안까지 갔다. 최근 7일을 늘어놓으면 빠진 날이 한눈에
+    // 보인다 — 표를 새로 만들지 않아도 되고, 지난 사고도 이 화면이었으면
+    // 그날 바로 눈에 띄었을 것이다.
+    const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const [briefWeekRes, draftWeekRes, failedRes] = await Promise.all([
+      // briefings 는 RLS가 걸려 있어 anon 키로는 0건이 온다.
+      // 위 briefingRes 가 supabaseService 를 쓰는 이유와 같다 — 여기서 그걸
+      // 놓쳐서 '7일 중 7일 빠짐'이라고 잘못 표시됐다.
+      (supabaseService || supabase).from('briefings').select('created_at').gte('created_at', since7),
+      supabase.from('card_designs').select('created_at').eq('category', '자동 뉴스').gte('created_at', since7),
+      supabase.from('scheduled_posts').select('id, design_name, error_message, scheduled_at')
+        .eq('status', 'failed').order('scheduled_at', { ascending: false }).limit(3),
+    ]);
+
+    // 한국 날짜로 묶는다 (크론은 한국 시간 아침에 돈다)
+    const kstDay = (iso: string) =>
+      new Date(new Date(iso).getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+    const briefDays = new Set((briefWeekRes.data ?? []).map((b: any) => kstDay(b.created_at)));
+    const draftDays = new Set((draftWeekRes.data ?? []).map((d: any) => kstDay(d.created_at)));
+
+    const days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(Date.now() + 9 * 3600 * 1000 - (6 - i) * 24 * 3600 * 1000);
+      const key = d.toISOString().slice(0, 10);
+      return {
+        date: key,
+        label: `${d.getUTCMonth() + 1}/${d.getUTCDate()}`,
+        briefing: briefDays.has(key),
+        draft: draftDays.has(key),
+      };
+    });
+
     let isBriefingSaved = false;
     if (briefingRes.data) {
       const dbClient = supabaseService || supabase;
@@ -108,6 +144,13 @@ export async function GET() {
         nextScheduledName: nextPostRes.data?.design_name ?? null,
       },
       topics,
+      health: {
+        days,
+        // 오늘 것이 빠졌는지 (한국 시간 기준). 크론은 아침에 도는데, 이른
+        // 아침에 아직 안 돈 것과 죽은 것을 구분하려고 시각도 같이 보낸다.
+        kstHour: Number(new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(11, 13)),
+        failedPosts: failedRes.data ?? [],
+      },
       recentDesigns: designsRes.data ?? [],
       upcomingPosts: pendingPosts.slice(0, 5),
       briefing: briefingRes.data || null,
