@@ -125,6 +125,53 @@ function serviceClient() {
   );
 }
 
+// ── 브랜드 톤 ────────────────────────────────────────────────────────────
+// 뉴스 카드와 에버그린 카드가 서로 다른 문체로 나오면 한 계정으로 안 보인다.
+// 페르소나는 진작 저장돼 있었는데 뉴스 생성 경로에 물려 있지 않았다.
+//
+// 블록 구조에는 손대지 않는다. 프롬프트에 문단 하나만 얹는다 — 이 파이프라인은
+// 예전에 구조를 건드렸다가 blocks가 깨져 크게 고생한 이력이 있다.
+const TONE_WORDS: Record<string, string> = {
+  professional: '전문적이고 신뢰감 있게',
+  friendly: '친근하고 편안하게, 말 걸듯이',
+  trendy: '트렌디하고 감각적으로, 짧고 리듬감 있게',
+  emotional: '감성적이고 따뜻하게',
+  informative: '정보 전달 위주로, 군더더기 없이',
+  persuasive: '설득력 있게, 행동을 부르는 어조로',
+};
+const EMOJI_WORDS: Record<string, string> = {
+  none: '이모지는 쓰지 마세요.',
+  minimal: '이모지는 꼭 필요할 때만 아주 드물게 쓰세요.',
+  moderate: '이모지는 장당 한두 개까지만 쓰세요.',
+  heavy: '이모지를 적극적으로 쓰세요.',
+};
+
+async function brandToneBlock(): Promise<string> {
+  try {
+    const { data } = await serviceClient()
+      .from('brand_personas')
+      .select('brand_name, tone, target_audience, industry, emoji_style')
+      .order('updated_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+    if (!data) return '';
+
+    const lines = ['[말투]'];
+    if (data.tone) lines.push(`- ${TONE_WORDS[data.tone] || data.tone} 씁니다.`);
+    if (data.target_audience) lines.push(`- 읽는 사람: ${data.target_audience}`);
+    if (data.emoji_style) lines.push(`- ${EMOJI_WORDS[data.emoji_style] || ''}`);
+    // 이 계정이 쓰던 종결어미를 고정한다.
+    // 톤을 물릴 때 '문어체로'를 넣었더니 '-습니다'가 '-한다'로 바뀌어,
+    // 일관성을 맞추려다 오히려 계정 목소리가 달라졌다. 목표는 통일이지 교체가 아니다.
+    lines.push('- 문장은 -습니다체로 끝맺습니다.');
+    lines.push('- 말투만 맞추세요. 브리핑에 없는 내용을 말투 때문에 덧붙이지 마세요.');
+    return lines.filter(Boolean).join('\n');
+  } catch {
+    // 톤은 있으면 좋은 것이지 없으면 못 만드는 것이 아니다
+    return '';
+  }
+}
+
 async function searchBackground(keyword: string): Promise<string> {
   const key = process.env.UNSPLASH_ACCESS_KEY;
   if (!key || !keyword) return '';
@@ -215,10 +262,15 @@ export async function generateNewsCardnewsDraft(opts?: {
 - 브리핑에 없는 수치·지역·단지명·일정·가격을 지어내지 마세요.
 - 정확히 5장을 만드세요.`;
 
+  const toneBlock = await brandToneBlock();
+
   const prompt = `아래는 오늘자 부동산 뉴스입니다.
 부동산 분양 정보 인스타그램 계정(@aptshowhome)에 올릴 카드뉴스를 만들어주세요.
 
 ${mappingRule}
+${toneBlock ? `
+${toneBlock}
+` : ''}
 
 반드시 아래 JSON 구조로만 응답하세요 (코드블록 없이):
 {
