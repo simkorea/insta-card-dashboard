@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { HybridThumb } from '@/components/cardnews/HybridThumb';
+import { pickEvergreen } from '@/lib/cardnews/evergreenTopics';
 
 const QUICK_ACTIONS = [
   { href: '/cardnews', icon: <PenTool size={18} />, label: '카드뉴스', desc: 'AI 슬라이드 제작', color: 'from-violet-500 to-purple-600' },
@@ -205,6 +206,8 @@ export default function DashboardPage() {
   const newsDraft = data?.newsDraft;
   const todo = data?.todo ?? {};
   const topics: any[] = data?.topics ?? [];
+  // 날짜로 돌려 고른다 — 같은 날 새로고침해도 목록이 바뀌지 않는다
+  const evergreen = pickEvergreen(6);
 
   // 오늘 할 일 네 칸. 막혀 있는 것은 빨간 점으로 표시한다.
   const nextAt = todo.nextScheduledAt ? new Date(todo.nextScheduledAt) : null;
@@ -405,7 +408,7 @@ export default function DashboardPage() {
             {topics.map((t: any, i: number) => (
               <Link
                 key={i}
-                href={`/cardnews?trend=${encodeURIComponent(t.title)}`}
+                href={`/cardnews?topic=${encodeURIComponent(t.title)}`}
                 title={t.title}
                 className="max-w-full truncate text-[12px] px-3 py-1.5 bg-gray-50 hover:bg-primary-50 hover:text-primary-700 border border-gray-100 hover:border-primary-200 text-gray-700 rounded-full transition-colors font-medium"
               >
@@ -415,6 +418,35 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* ── 언제 올려도 되는 주제 ──────────────────────────────────────────
+          위의 '오늘의 소재'는 오늘 기사라 며칠 지나면 올릴 이유가 사라진다.
+          만든 81개 중 4개만 발행된 채 37개가 쌓인 것이 그 결과다.
+          이 주제들은 안 낡아서, 밀려도 손해가 없고 저장·공유로 남는다. */}
+      <div className="bg-white border border-gray-100 rounded-2xl p-5 shadow-sm">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Sparkles size={15} className="text-emerald-500" />
+            <h2 className="text-sm font-bold text-gray-900">언제 올려도 되는 주제</h2>
+            <span className="text-[10px] text-gray-400">뉴스가 없는 날에도 만들 수 있습니다</span>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {evergreen.map((t, i) => (
+            <Link
+              key={i}
+              href={`/cardnews?topic=${encodeURIComponent(t.title)}`}
+              title={t.title}
+              className="group max-w-full inline-flex items-center gap-1.5 text-[12px] pl-2 pr-3 py-1.5 bg-emerald-50/60 hover:bg-emerald-100 border border-emerald-100 hover:border-emerald-300 text-gray-700 rounded-full transition-colors font-medium"
+            >
+              <span className="text-[10px] font-black text-emerald-700 bg-white/80 border border-emerald-200 rounded-full px-1.5 py-0.5 shrink-0">
+                {t.axis}
+              </span>
+              <span className="truncate">{t.title}</span>
+            </Link>
+          ))}
+        </div>
+      </div>
 
       {/* ── 빠른 시작 ────────────────────────────────────────────────────── */}
       <div>
