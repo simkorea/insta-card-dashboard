@@ -63,6 +63,18 @@ export async function GET() {
         .neq('status', 'published').order('scheduled_at', { ascending: true }).limit(1).maybeSingle(),
     ]);
 
+    // 오늘(한국 시간) 쓴 블로그 글이 있는지.
+    // 예전에는 '오늘 브리핑 → 블로그' 칸이 briefing_id 가 붙은 글만 셌는데,
+    // 실제로 쓰는 경로는 카드뉴스 → 블로그라 briefing_id 가 늘 비어 있었다.
+    // 그래서 글을 몇 개를 써도 칸은 영원히 '대기'였다.
+    const kstMidnightUtc = new Date(
+      new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10) + 'T00:00:00.000Z'
+    ).getTime() - 9 * 3600 * 1000;
+    const { count: blogToday } = await supabase
+      .from('blog_posts')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', new Date(kstMidnightUtc).toISOString());
+
     const publishedIds = new Set(
       (publishedRes.data ?? []).map((p: any) => String(p.design_id)).filter(Boolean)
     );
@@ -134,7 +146,10 @@ export async function GET() {
       todo: {
         // 오늘 아침 초안이 있는지 (있으면 확인·다듬기가 첫 일이다)
         hasDraft: Boolean(newsDraft),
+        draftId: (newsDraft as any)?.id ?? null,
         draftSlides: Array.isArray((newsDraft as any)?.pages_data) ? (newsDraft as any).pages_data.length : 0,
+        // 오늘 쓴 블로그 글 수 (한국 날짜 기준)
+        blogToday: blogToday ?? 0,
         // 만들어 놓고 아직 인스타에 안 올린 카드뉴스 (최근 2주)
         unpublishedCount: unpublished.length,
         unpublished: unpublished.slice(0, 3).map((d: any) => ({ id: d.id, name: d.name, created_at: d.created_at })),

@@ -200,13 +200,33 @@ export default function CardNewsPage() {
   //
   // 키워드 트렌드 탭이 아니라 텍스트 탭에 넣는다 — 넘어오는 값은 '금리'
   // 같은 낱말이 아니라 기사 제목 한 문장이라 그대로 주제로 쓰는 게 맞다.
+  //
+  // 탭도 마찬가지였다. 대시보드의 '전체 보기'(?tab=history)와 '성과 분석'
+  // (?tab=analytics), 사이드바의 #analytics 가 전부 이 값을 읽는 코드 없이
+  // 링크만 달려 있어, 눌러도 늘 '만들기' 탭이 열렸다.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const q = new URLSearchParams(window.location.search);
+
+    const TABS = ['create', 'learn', 'history', 'schedule', 'analytics'] as const;
+    const applyHash = () => {
+      const wanted = q.get('tab') || window.location.hash.replace('#', '');
+      if (wanted && (TABS as readonly string[]).includes(wanted)) {
+        setActiveTab(wanted as typeof TABS[number]);
+      }
+    };
+    applyHash();
+    // 이미 이 화면에 있을 때 사이드바의 #analytics 를 누르면 다시 그려지지
+    // 않아 아무 일도 일어나지 않는다. 주소의 해시 변화도 같이 듣는다.
+    const onHash = () => applyHash();
+    window.addEventListener('hashchange', onHash);
+
     const topic = q.get('topic') || q.get('trend');
-    if (!topic) return;
-    setPrompt(topic);
-    setInputMode('text');
+    if (topic) {
+      setPrompt(topic);
+      setInputMode('text');
+    }
+    return () => window.removeEventListener('hashchange', onHash);
   }, []);
   
   // 브랜드 페르소나 관련 상태 정의

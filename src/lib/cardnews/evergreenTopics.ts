@@ -67,15 +67,42 @@ const POOL: EvergreenTopic[] = [
  * 날짜로 시작점을 돌려 매일 다른 묶음이 보이게 한다. 무작위가 아니라
  * 날짜 기반이라, 같은 날 새로고침해도 목록이 바뀌지 않는다 — 눌러보려던
  * 주제가 사라지면 성가시다.
+ *
+ * 분류를 번갈아 가며 뽑는다. 예전에는 목록에서 연달아 6개를 잘라 왔는데,
+ * 목록이 분류끼리 붙어 있어서 어떤 날은 6개 중 5개가 '계약'이었다.
+ * 골라 쓰라고 늘어놓은 자리인데 다 같은 종류면 고를 게 없다.
  */
 export function pickEvergreen(count = 6, seed = new Date()): EvergreenTopic[] {
   const dayIndex = Math.floor(
     Date.UTC(seed.getFullYear(), seed.getMonth(), seed.getDate()) / 86400000
   );
-  const start = ((dayIndex % POOL.length) + POOL.length) % POOL.length;
+
+  // 분류별로 묶되, 목록에 나온 순서는 그대로 둔다
+  const axes: string[] = [];
+  const byAxis = new Map<string, EvergreenTopic[]>();
+  for (const t of POOL) {
+    if (!byAxis.has(t.axis)) { byAxis.set(t.axis, []); axes.push(t.axis); }
+    byAxis.get(t.axis)!.push(t);
+  }
+
+  const mod = (n: number, m: number) => ((n % m) + m) % m;
   const out: EvergreenTopic[] = [];
-  for (let i = 0; i < Math.min(count, POOL.length); i++) {
-    out.push(POOL[(start + i) % POOL.length]);
+  const want = Math.min(count, POOL.length);
+
+  // 분류를 한 바퀴씩 돌며 하나씩 집는다. 날짜에 따라 시작 분류와
+  // 각 분류 안에서의 시작 위치가 같이 밀린다.
+  for (let round = 0; out.length < want; round++) {
+    let addedThisRound = false;
+    for (let a = 0; a < axes.length && out.length < want; a++) {
+      const list = byAxis.get(axes[mod(dayIndex + a, axes.length)])!;
+      const idx = mod(dayIndex + round, list.length);
+      const pick = list[idx];
+      if (round < list.length && !out.includes(pick)) {
+        out.push(pick);
+        addedThisRound = true;
+      }
+    }
+    if (!addedThisRound) break; // 더 뽑을 게 없다
   }
   return out;
 }

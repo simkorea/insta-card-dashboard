@@ -202,6 +202,18 @@ export default function BlogGeneratorPage() {
     }
   };
 
+  // 어느 탭으로 열지 주소로 지정할 수 있게 한다.
+  // 대시보드에서 '카드뉴스 → 블로그'로 들어오면 주제 칸이 빈 화면이 아니라
+  // 카드뉴스를 고르는 화면이 바로 보여야 한다.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mode = new URLSearchParams(window.location.search).get('mode');
+    const allowed = ['topic', 'url', 'trend', 'smart', 'cardnews'] as const;
+    if (mode && (allowed as readonly string[]).includes(mode)) {
+      setInputMode(mode as typeof allowed[number]);
+    }
+  }, []);
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const searchParams = new URLSearchParams(window.location.search);

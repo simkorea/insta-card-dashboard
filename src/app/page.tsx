@@ -212,13 +212,27 @@ export default function DashboardPage() {
   // 오늘은 아직 돌 시간이 아닐 수 있으니 빠진 날 계산에서 뺀다
   const missedDays = (health.days ?? []).filter((d: any, i: number, arr: any[]) => {
     const isToday = i === arr.length - 1;
-    if (isToday && (health.kstHour ?? 24) < 9) return false;
+    // 실제 초안 완료 시각은 08:13~08:57 사이로 들쭉날쭉하다. 9시로 자르면
+    // 조금 늦은 날 멀쩡한데도 빨간불이 켜진다. 상태판이 괜히 울면 안 본다.
+    if (isToday && (health.kstHour ?? 24) < 10) return false;
     return !(d.briefing && d.draft);
   }).length;
 
   // 오늘 할 일 네 칸. 막혀 있는 것은 빨간 점으로 표시한다.
   const nextAt = todo.nextScheduledAt ? new Date(todo.nextScheduledAt) : null;
-  const TODO_CARDS = [
+  const blogToday: number = todo.blogToday ?? 0;
+  // 오늘 아침 뉴스로 만들어진 초안인지 (KST 기준 24시간 이내)
+  // '자동 뉴스' 초안 조회에는 날짜 조건이 없어서, 크론이 며칠 죽어 있으면
+  // 지난 초안이 그대로 잡힌다. 오래된 뉴스로 글이 나가지 않도록 여기서 막는다.
+  const isFreshDraft = newsDraft?.created_at
+    ? Date.now() - new Date(newsDraft.created_at).getTime() < 36 * 60 * 60 * 1000
+    : false;
+  // onClick 이 있으면 그 자리에서 실행하는 칸, 없으면 이동하는 칸이다.
+  type TodoCard = {
+    icon: string; value: string; label: string; hint: string; href: string;
+    urgent: boolean; tone: string; onClick?: () => void; busy?: boolean;
+  };
+  const TODO_CARDS: TodoCard[] = [
     {
       icon: '📰',
       value: todo.hasDraft ? `${todo.draftSlides}장` : '없음',
@@ -252,22 +266,27 @@ export default function DashboardPage() {
       urgent: false,
       tone: 'bg-blue-50 border-blue-100 focus:ring-blue-300',
     },
+    // 이 칸은 예전에 빈 블로그 화면으로만 보냈다. 주제 칸도 비어 있어서
+    // 눌러 봐야 아무 일도 일어나지 않았다. 재료(오늘 초안)가 있으면 여기서
+    // 바로 글까지 만들고, 없으면 최소한 카드뉴스를 고르는 화면으로 보낸다.
     {
       icon: '✍️',
-      value: isBriefingSaved ? '완료' : '대기',
-      label: '오늘 브리핑 → 블로그',
-      hint: isBriefingSaved ? '블로그로 저장했습니다' : '아직 글로 옮기지 않았습니다',
-      href: '/blog-generator',
-      urgent: !isBriefingSaved && Boolean(briefing),
-      tone: isBriefingSaved
+      value: blogToday > 0 ? '완료' : '대기',
+      label: '카드뉴스 → 블로그',
+      hint: blogToday > 0
+        ? `오늘 ${blogToday}개 썼습니다`
+        : isFreshDraft ? '오늘 초안으로 글까지 한 번에' : '보관함에서 골라 글로 옮기기',
+      href: '/blog-generator?mode=cardnews',
+      onClick: isFreshDraft && todo.draftId && blogToday === 0
+        ? () => makeAllFromDraft(todo.draftId)
+        : undefined,
+      busy: isMakingAll,
+      urgent: blogToday === 0 && isFreshDraft,
+      tone: blogToday > 0
         ? 'bg-emerald-50 border-emerald-100 focus:ring-emerald-300'
         : 'bg-violet-50 border-violet-100 focus:ring-violet-300',
     },
   ];
-  // 오늘 아침 뉴스로 만들어진 초안인지 (KST 기준 24시간 이내)
-  const isFreshDraft = newsDraft?.created_at
-    ? Date.now() - new Date(newsDraft.created_at).getTime() < 36 * 60 * 60 * 1000
-    : false;
 
   return (
     <div className="max-w-5xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-7 pb-20 md:pb-8">
@@ -373,25 +392,39 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {isLoading
             ? [...Array(4)].map((_, i) => <div key={i} className="h-[104px] bg-gray-100 rounded-2xl animate-pulse" />)
-            : TODO_CARDS.map(c => (
-              <Link
-                key={c.label}
-                href={c.href}
-                className={`relative flex flex-col justify-between rounded-2xl border p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-offset-1 ${c.tone}`}
-              >
-                <div className="flex items-start justify-between">
-                  <span className="text-lg leading-none">{c.icon}</span>
-                  {c.urgent && (
-                    <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" aria-hidden />
-                  )}
-                </div>
-                <div>
-                  <div className="text-[19px] font-black text-gray-900 leading-tight">{c.value}</div>
-                  <div className="text-[11px] font-bold text-gray-600 mt-0.5">{c.label}</div>
-                  <div className="text-[10px] text-gray-400 mt-1 leading-tight">{c.hint}</div>
-                </div>
-              </Link>
-            ))}
+            : TODO_CARDS.map(c => {
+              const cls = `relative flex flex-col justify-between text-left w-full rounded-2xl border p-4 shadow-sm transition-all hover:shadow-md hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-60 disabled:cursor-wait ${c.tone}`;
+              const inner = (
+                <>
+                  <div className="flex items-start justify-between">
+                    <span className="text-lg leading-none">{c.icon}</span>
+                    {c.urgent && (
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" aria-hidden />
+                    )}
+                  </div>
+                  <div>
+                    <div className="text-[19px] font-black text-gray-900 leading-tight">
+                      {c.busy && c.onClick ? '만드는 중...' : c.value}
+                    </div>
+                    <div className="text-[11px] font-bold text-gray-600 mt-0.5">{c.label}</div>
+                    <div className="text-[10px] text-gray-400 mt-1 leading-tight">{c.hint}</div>
+                  </div>
+                </>
+              );
+              // 재료가 있어 여기서 바로 만들 수 있는 칸은 버튼, 나머지는 링크.
+              return c.onClick ? (
+                <button
+                  key={c.label}
+                  onClick={c.onClick}
+                  disabled={c.busy}
+                  className={cls}
+                >
+                  {inner}
+                </button>
+              ) : (
+                <Link key={c.label} href={c.href} className={cls}>{inner}</Link>
+              );
+            })}
         </div>
       </div>
 
@@ -447,8 +480,8 @@ export default function DashboardPage() {
 
           <div className="flex gap-1.5">
             {health.days.map((d: any) => {
-              // 오늘 아침 8시 30분 전이면 아직 돌 시간이 아니다 — 실패로 보지 않는다
-              const pending = d.date === health.days[health.days.length - 1].date && health.kstHour < 9;
+              // 오늘 오전 10시 전이면 아직 돌 시간이다 — 실패로 보지 않는다
+              const pending = d.date === health.days[health.days.length - 1].date && health.kstHour < 10;
               const ok = d.briefing && d.draft;
               const partial = d.briefing !== d.draft;
               return (
