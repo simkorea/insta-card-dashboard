@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
 import { buildNarration } from '@/lib/cardnews/narration';
 import { buildVideoTitle, buildVideoCaption } from '@/lib/cardnews/videoMeta';
+import { withTagLine } from '@/lib/blog/tagLine';
 
 // 카드뉴스 한 벌로 블로그 글까지 한 번에 만든다.
 //
@@ -76,7 +77,8 @@ export async function POST(request: NextRequest) {
       .from('blog_posts')
       .insert({
         title: blog.title || design.name,
-        body: blog.body || '',
+        // 화면에서 저장할 때와 같게 — 붙여넣으면 태그도 같이 간다
+        body: withTagLine(blog.body || '', blog.tags),
         meta_description: blog.metaDescription || null,
         tags: blog.tags || null,
         topic: design.name,

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
+import { withTagLine } from '@/lib/blog/tagLine';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
 import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
 
@@ -531,7 +532,7 @@ ${result.metaDescription}
 ${result.tags.map(t => `#${t}`).join(', ')}
 
 [본문]
-${result.body}
+${withTagLine(result.body, result.tags)}
 `;
 
       zip.file(`${baseFileName}.txt`, txtContent);
@@ -589,7 +590,7 @@ ${result.body}
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: result.title?.trim() || topic?.trim() || '제목 없는 블로그 글',
-          body: result.body,
+          body: withTagLine(result.body, result.tags),
           metaDescription: result.metaDescription,
           tags: result.tags,
           images: images,
@@ -637,8 +638,12 @@ ${result.body}
     setIsGenerating(true);
     setResult(null);
 
+    // 제한이 서버와 화면 양쪽에 있다. 서버 쪽(50초)만 늘렸더니 이번엔
+    // 여기서 70초에 끊겨 '응답이 지연되고 있습니다'로 바뀌었을 뿐이었다.
+    // 서버가 240초까지 기다리므로 화면도 그보다 조금 뒤에 포기해야
+    // 서버가 만든 진짜 이유를 받아 보여줄 수 있다.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 70000);
+    const timeoutId = setTimeout(() => controller.abort(), 250000);
 
     try {
       if (isSmartMode) {
@@ -708,7 +713,7 @@ ${result.body}
 
   const copyAll = () => {
     if (!result) return;
-    const full = `[제목]\n${result.title}\n\n[본문]\n${result.body}\n\n[메타설명]\n${result.metaDescription}\n\n[태그]\n${result.tags.join(', ')}`;
+    const full = `[제목]\n${result.title}\n\n[본문]\n${withTagLine(result.body, result.tags)}\n\n[메타설명]\n${result.metaDescription}\n\n[태그]\n${result.tags.join(', ')}`;
     copy('all', full);
   };
 
@@ -1299,7 +1304,9 @@ ${result.body}
               className="w-full flex items-center justify-center gap-2 py-3.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded-xl text-sm font-bold transition-all shadow-sm"
             >
               {isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-              {isGenerating ? '생성 중... (15-30초)' : '글 생성 시작'}
+              {/* 예전 '15-30초'는 Gemini가 쓰던 시절 숫자다. 지금은 OpenRouter가
+                  쓰고 3천자에 60초 넘게 걸려, 그 표시를 보면 멈춘 줄 안다. */}
+              {isGenerating ? '생성 중... (1~2분)' : '글 생성 시작'}
             </button>
             {(inputMode === 'smart' ? !smartKeyword.trim() : inputMode === 'url' ? !urlInput.trim() : !topic.trim()) && (
               <p className="text-center text-xs text-gray-400 mt-2">주제를 입력해주세요</p>
@@ -1457,7 +1464,7 @@ ${result.body}
                     <button onClick={() => setShowRaw(v => !v)} className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 px-2 py-1 rounded-lg hover:bg-gray-100">
                       {showRaw ? '미리보기' : '원문 보기'} <ChevronDown size={11} />
                     </button>
-                    <button onClick={() => copy('body', result.body)}
+                    <button onClick={() => copy('body', withTagLine(result.body, result.tags))}
                       className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg ${copiedPart === 'body' ? 'text-green-600' : 'text-gray-400 hover:text-gray-600'}`}>
                       {copiedPart === 'body' ? <CheckCheck size={11} /> : <Copy size={11} />} 복사
                     </button>
