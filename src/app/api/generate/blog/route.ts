@@ -1,4 +1,5 @@
 import { generateWithRetry, toKoreanError } from '@/lib/gemini';
+import { callOpenRouter } from '@/lib/ai/openrouter';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -178,7 +179,16 @@ export async function POST(request: Request) {
       ? `\n[특별 추가 지시사항]\n- 다음 지시사항을 반드시 따르십시오: ${instructions}`
       : '';
 
-    const prompt = `당신은 SEO 전문가이자 블로그 작가입니다.
+    // 소제목 수와 소제목당 분량을 목표 분량에서 뽑는다. 예전처럼 '6개 ×
+    // 500자'로 고정하면 1천자를 시켜도 3천자가 나온다.
+    const sectionCount = Math.min(8, Math.max(3, Math.round(wordCount / 500)));
+    const perSection = Math.round(wordCount / sectionCount);
+
+    // 주제·페르소나·톤·형식 등 '어떤 글인가'를 정하는 부분.
+    // 나눠 쓰기에서 뼈대와 각 소제목 요청이 이 부분만 공유한다 — 아래
+    // [목표 분량]과 [응답 형식]까지 같이 넘기면 소제목 하나를 쓰라고
+    // 해 놓고 전체 분량과 [TITLE] 형식을 요구하는 꼴이 된다.
+    const contextBlock = `당신은 SEO 전문가이자 블로그 작가입니다.
 ${langInstruction[language] || langInstruction.auto}
 
 ${personaSection}
@@ -198,11 +208,13 @@ ${persona ? `- 글의 전반적인 말투와 분위기는 브랜드 페르소나
 - 포스팅 목적(${persona.posting_goal || '정보 제공'})이 잘 달성되도록 유용한 내용 위주로 깊이 있게 글을 구성하세요.` : `- 글의 전반적인 말투와 분위기는 지정된 톤(${toneLabel[tone] || '전문적인'})에 맞게 구성하세요.
 - 브랜드 언급이나 특정 페르소나 색채 없이 깔끔하고 객관적인 일반 글(정보성 콘텐츠) 형태로 작성하세요.`}
 ${ctaInstruction}
-${markdownAndEmojiInstruction}${instructionsInstruction}
+${markdownAndEmojiInstruction}${instructionsInstruction}`;
+
+    const prompt = `${contextBlock}
 
 [목표 분량]
-- 본문 분량: ${wordCount}자 내외
-
+- 본문 분량: 공백 포함 ${wordCount}자. ${Math.round(wordCount * 0.9)}자~${Math.round(wordCount * 1.15)}자 사이로 맞추세요.
+- 소제목 ${sectionCount}개로 나누고, 소제목 하나당 ${perSection}자 내외로 서술하세요.
 
 [응답 형식]
 반드시 JSON 구조나 마크다운 코드블록 없이, 정확히 아래 지정된 대괄호 구분자 포맷으로만 작성하십시오:
@@ -218,6 +230,90 @@ SEO 최적화 제목
 
 [TAGS]
 태그1, 태그2, 태그3, 태그4, 태그5`;
+
+    // ── 긴 글은 나눠서 쓴다 ────────────────────────────────────────────────
+    //
+    // 한 번에 3천자를 시키면 두 가지가 같이 어긋났다. 그냥 '3000자 내외'라고
+    // 하면 2400자쯤에서 끝내고, 분량을 강하게 밀어붙이면 이번엔 224초가
+    // 걸렸다 (재본 값이다). 길이를 맞추면 시간이 터지고, 시간을 맞추면
+    // 길이가 모자랐다.
+    //
+    // 뼈대를 먼저 잡고 소제목별로 나눠 쓰면 둘 다 풀린다. 소제목 하나는
+    // 500자짜리 짧은 요청이라 빠르고, 동시에 보내므로 제일 느린 하나만
+    // 기다리면 된다. 목표 3000자 기준 재본 값:
+    //
+    //   단일 호출(deepseek)  2910자  224초
+    //   나눠 쓰기(deepseek)  3356자   88초
+    //   나눠 쓰기(haiku)     2951자   33초   ← 이걸 쓴다
+    //
+    // 뼈대가 깨지면(JSON 파싱 실패 등) 기존 단일 호출로 돌아간다.
+    const SPLIT_MIN_CHARS = 1500;
+    const SECTION_MODEL = 'anthropic/claude-haiku-4.5';
+
+    const headingRule = format === 'tistory'
+      ? '첫 줄에 "## 소제목" 형태로 소제목을 쓰고 줄바꿈 후 본문을 이어가세요.'
+      : '첫 줄에 소제목을 그대로 쓰고(기호 없이) 줄바꿈 후 본문을 이어가세요.';
+
+    const generateBySections = async () => {
+      const outlineRaw = await callOpenRouter({
+        model: SECTION_MODEL,
+        maxTokens: 4000,
+        prompt: `${contextBlock}
+
+[지금 할 일]
+위 조건에 맞는 글의 '뼈대'만 짭니다. 본문은 쓰지 마세요.
+마크다운 코드블록 없이 순수 JSON 객체만 답하세요.
+
+{
+  "title": "제목",
+  "metaDescription": "120자 이내 요약",
+  "tags": ["태그", "... 8개"],
+  "sections": [{ "heading": "소제목", "points": ["이 부분에서 다룰 내용 3가지"] }]
+}
+
+소제목은 정확히 ${sectionCount}개이고, 서로 내용이 겹치지 않아야 합니다.`,
+      });
+
+      const outline = JSON.parse(
+        outlineRaw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+      );
+      const sections: { heading?: string; points?: string[] }[] =
+        Array.isArray(outline?.sections) ? outline.sections : [];
+      if (sections.length === 0) throw new Error('뼈대에 소제목이 없습니다');
+
+      const map = sections.map((s, i) => `${i + 1}. ${s.heading || ''}`).join('\n');
+
+      // 소제목별로 동시에 보낸다. 순서대로 보내면 이 방식의 이점이 사라진다.
+      const written = await Promise.all(
+        sections.map((s, i) =>
+          callOpenRouter({
+            model: SECTION_MODEL,
+            maxTokens: 4000,
+            prompt: `${contextBlock}
+
+[지금 할 일]
+글 전체 구성은 이렇습니다:
+${map}
+
+당신은 ${i + 1}번 "${s.heading}" 부분만 씁니다. 다른 번호에 해당하는 내용은 쓰지 마세요.
+이 부분에서 다룰 것: ${(s.points || []).join(', ') || s.heading}
+
+- 공백 포함 ${perSection}자 내외로 쓰세요.
+- ${headingRule}
+- 이 부분의 내용만 쓰고, 글 전체의 인사말이나 맺음말은 넣지 마세요.
+${i === sections.length - 1 ? '- 다만 마지막 부분이므로 위 지침에 있는 마무리 문구/CTA는 여기에 넣으세요.' : ''}
+- [TITLE] 같은 구분자 없이 본문 텍스트만 답하세요.`,
+          }).then(t => t.trim())
+        )
+      );
+
+      return {
+        title: String(outline?.title || '').trim(),
+        body: written.filter(Boolean).join('\n\n'),
+        metaDescription: String(outline?.metaDescription || '').trim(),
+        tags: Array.isArray(outline?.tags) ? outline.tags.map(String).slice(0, 8) : [],
+      };
+    };
 
     // maxDuration(300초)보다 먼저 끊어야 플랫폼이 죽이기 전에 한국어 에러를
     // 돌려줄 수 있다. 여유를 두고 240초.
@@ -312,12 +408,27 @@ SEO 최적화 제목
 
     try {
       const generatePromise = (async () => {
-        // maxOutputTokens를 16384로 상향하여 출력 여유 공간 극대화
-        let text = (await generateWithRetry(prompt, {
-          generationConfig: { maxOutputTokens: 16384 }
-        })).trim();
-        const parsed = parseStructuredBlog(text);
-        
+        let parsed: { title: string; body: string; metaDescription: string; tags: string[] } | null = null;
+
+        // 긴 글만 나눠 쓴다. 짧은 글은 한 번에 써도 빠르고, 굳이 나누면
+        // 소제목이 잘게 쪼개져 읽기만 나빠진다.
+        if (wordCount >= SPLIT_MIN_CHARS) {
+          try {
+            const s = await generateBySections();
+            if (s.body.length > 0) parsed = s;
+          } catch (splitErr) {
+            console.warn('[blog] 나눠 쓰기 실패, 단일 호출로 대체:', splitErr);
+          }
+        }
+
+        if (!parsed) {
+          // maxOutputTokens를 16384로 상향하여 출력 여유 공간 극대화
+          const text = (await generateWithRetry(prompt, {
+            generationConfig: { maxOutputTokens: 16384 }
+          })).trim();
+          parsed = parseStructuredBlog(text);
+        }
+
         // 후처리 청소 적용
         parsed.title = cleanContent(parsed.title, format, true);
         parsed.body = cleanContent(parsed.body, format, false);
