@@ -11,6 +11,7 @@ import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
 import { withTagLine } from '@/lib/blog/tagLine';
 import QualityPanel from '@/components/blog/QualityPanel';
+import ManuscriptMetrics from '@/components/blog/ManuscriptMetrics';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
 import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
 
@@ -1425,6 +1426,15 @@ ${withTagLine(result.body, result.tags)}
                   </button>
                 </div>
               </div>
+
+              {/* 이 원고의 수치. 세면 나오는 값이라 AI 없이 즉시 보여준다 —
+                  본문을 고치면 바로 따라 움직인다. */}
+              <ManuscriptMetrics
+                title={result.title}
+                body={result.body}
+                tags={result.tags}
+                images={images}
+              />
 
               {/* Title */}
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">

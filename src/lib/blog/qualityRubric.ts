@@ -15,7 +15,10 @@
 // 항목에 measure 가 있으면 코드가 직접 센다(=항상 같은 값). 없으면 AI가
 // 판단한다. 셀 수 있는 것을 AI에게 맡기지 않는 이유는 재현성 때문이다.
 
-export const RUBRIC_VERSION = '2026-08-16.1';
+// 기준을 바꾸면 여기를 올린다 (프롬프트·판정식·계측 방식 전부 포함).
+// 2026-08-16.2 — 수치 인식 단위에 날짜(월/주)와 조·만·개 등 추가,
+//                연도 이중 계산 제거, 질문형 소제목도 소제목으로 인정
+export const RUBRIC_VERSION = '2026-08-16.2';
 
 /** 채점 대상 원고 */
 export type QualityDoc = {
@@ -48,9 +51,13 @@ export function measureDoc(d: QualityDoc) {
   const lines = body.split('\n').map(l => l.trim());
   const paragraphs = body.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
 
-  // 소제목: 마크다운 헤딩이거나, 짧고 마침표로 안 끝나는 단독 줄
+  // 소제목: 마크다운 헤딩이거나, 짧고 마침표로 안 끝나는 단독 줄.
+  //
+  // 물음표로 끝나는 줄은 뺐다가 되돌렸다. '청약 제도는 어떻게 바뀌나요?'
+  // 같은 질문형 소제목이 소제목에서 빠져 개수가 실제보다 적게 나왔다.
+  // 질문형이든 아니든 글을 나누는 줄이면 소제목이다.
   const headings = lines.filter(l =>
-    /^#{1,6}\s+\S/.test(l) || (l.length > 0 && l.length <= 30 && !/[.!?]$/.test(l) && !l.startsWith('#') && !/^[-*·]/.test(l))
+    /^#{1,6}\s+\S/.test(l) || (l.length > 0 && l.length <= 30 && !/[.!]$/.test(l) && !l.startsWith('#') && !/^[-*·]/.test(l))
   );
 
   // 문장 (한국어 종결 기준)
@@ -61,8 +68,16 @@ export function measureDoc(d: QualityDoc) {
     .filter(s => s.length > 4);
 
   // 인용 가능한 수치: 숫자 + 단위/기호
-  const numeric = body.match(/\d[\d,.]*\s*(%|원|만원|억|년|개월|일|명|건|㎡|평|층|배|위|회|가구|세대|점)/g) || [];
-  const bareYears = body.match(/\b20\d{2}\b/g) || [];
+  //
+  // 긴 단위를 앞에 둔다 — '3개월'이 '개'로 잘리면 안 되고 '5만원'이 '원'으로
+  // 잘리면 안 된다. 실제 원고를 넣어 보고 '8월 13일'의 '월'이 빠져 있는 걸
+  // 발견해 날짜 단위를 채웠다.
+  const numeric = body.match(
+    /\d[\d,.]*\s*(개월|만원|천만|가구|세대|퍼센트|포인트|%|원|조|억|만|년|월|주|일|명|건|㎡|평|층|배|위|회|점|개|채|호)/g
+  ) || [];
+  // 단위 없이 쓰인 연도('2026 기준'). '2026년'은 위에서 이미 셌으므로 제외한다
+  // — 안 그러면 같은 숫자를 두 번 센다.
+  const bareYears = body.match(/\b20\d{2}\b(?!\s*년)/g) || [];
 
   // 질문형 문장·소제목
   const questions = lines.filter(l => /[?？]\s*$/.test(l) || /(무엇|어떻게|왜|언제|어디|누가|얼마|인가요|할까요|되나요|가요)\s*[?？]?$/.test(l));
