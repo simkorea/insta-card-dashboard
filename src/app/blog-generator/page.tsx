@@ -10,6 +10,7 @@ import {
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
 import { withTagLine } from '@/lib/blog/tagLine';
+import QualityPanel from '@/components/blog/QualityPanel';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
 import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
 
@@ -107,6 +108,16 @@ export default function BlogGeneratorPage() {
   );
 
   const [currentPostId, setCurrentPostId] = useState<string | null>(null);
+
+  // 품질 점검 이력을 묶는 키.
+  // 아직 저장 안 한 초안도 고쳐 가며 여러 번 채점하므로, 저장 전에도
+  // '같은 원고의 이전 점수'를 찾을 수 있어야 한다. 새로 생성할 때마다
+  // 새 키를 발급해 다른 원고의 점수와 섞이지 않게 한다.
+  const newDraftKey = () =>
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `draft_${Date.now().toString(36)}_${Math.floor(Math.random() * 1e9).toString(36)}`;
+  const [draftKey, setDraftKey] = useState<string>(newDraftKey);
   const [tagInput, setTagInput] = useState('');
 
   const [inputMode, setInputMode] = useState<'topic' | 'url' | 'trend' | 'smart' | 'cardnews'>('topic');
@@ -676,6 +687,8 @@ ${withTagLine(result.body, result.tags)}
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setResult(data);
+      // 새 원고다 — 품질 점수 이력을 이전 원고와 섞지 않는다
+      setDraftKey(newDraftKey());
 
       // 글 생성 후 비동기로 슬롯에 대한 AI 추천 라벨 자동 생성 발동 (3단계)
       fetch('/api/generate/blog-labels', {
@@ -1532,6 +1545,17 @@ ${withTagLine(result.body, result.tags)}
                   />
                 </div>
               </div>
+
+              {/* 발행 전 품질 점검. 우리는 글을 직접 만들므로 발행 전에 볼 수 있다 —
+                  URL을 넣어야 하는 사후 분석 도구가 구조적으로 못 하는 자리다. */}
+              <QualityPanel
+                title={result.title}
+                body={withTagLine(result.body, result.tags)}
+                tags={result.tags}
+                images={images}
+                draftKey={draftKey}
+                blogPostId={currentPostId}
+              />
 
               {/* 이미지 갤러리 섹션 (1단계 & 3단계 통합) */}
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
