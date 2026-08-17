@@ -18,7 +18,10 @@
 // 기준을 바꾸면 여기를 올린다 (프롬프트·판정식·계측 방식 전부 포함).
 // 2026-08-16.2 — 수치 인식 단위에 날짜(월/주)와 조·만·개 등 추가,
 //                연도 이중 계산 제거, 질문형 소제목도 소제목으로 인정
-export const RUBRIC_VERSION = '2026-08-17.1';
+// 2026-08-17.1 — 기준값을 TARGETS 로 뽑아 글쓰기 지시문과 공유,
+//                문장을 줄 단위로 자르고 질문을 문장 단위로 셈
+// 2026-08-17.2 — 첫 문단 결론·마무리 요약을 글쓰기 요건에 추가
+export const RUBRIC_VERSION = '2026-08-17.2';
 
 /**
  * 만점을 받는 기준값.
@@ -36,6 +39,10 @@ export const TARGETS = {
   minQuestions: 3,
   minNumerics: 6,
   minImages: 3,
+  /** 첫 문단에서 결론이 나와야 하는 지점 (aeo_lead_answer) */
+  leadAnswerChars: 200,
+  /** 마무리에 명시할 '기억할 항목' 개수 (aeo_takeaway) */
+  minTakeaways: 3,
   titleMin: 20,
   titleMax: 35,
   kwDensityMin: 0.5,
@@ -303,7 +310,7 @@ const AEO: RubricArea[] = [
   {
     id: 'lead_answer', label: '핵심답 상단 제시 (역피라미드)',
     items: [
-      { id: 'aeo_lead_answer', label: '첫 문단에 결론', criteria: '본문 첫 200자 안에 질문에 대한 결론이 있으면 5, 첫 500자 안이면 3, 중반 이후면 1, 없으면 0' },
+      { id: 'aeo_lead_answer', label: '첫 문단에 결론', criteria: `본문 첫 ${TARGETS.leadAnswerChars}자 안에 질문에 대한 결론이 있으면 5, 첫 500자 안이면 3, 중반 이후면 1, 없으면 0` },
       { id: 'aeo_lead_selfcontained', label: '첫 문단 독립성', criteria: '첫 문단만 읽어도 뜻이 통하면 5, 앞뒤 맥락이 있어야 하면 3, 배경 설명뿐이면 1' },
       { id: 'aeo_no_long_intro', label: '군더더기 도입부 없음', criteria: '인사·서론이 100자 이내면 5, 100~300자면 3, 300자 초과면 1' },
     ],
@@ -345,7 +352,7 @@ const AEO: RubricArea[] = [
     id: 'closing', label: '명확한 요약·결론',
     items: [
       { id: 'aeo_summary', label: '요약 존재', criteria: '핵심을 다시 묶어 주는 요약이 있으면 5, 마무리 인사만 있으면 3, 없으면 1' },
-      { id: 'aeo_takeaway', label: '핵심 정리 항목', criteria: '기억할 항목을 3개 이상 명시하면 5, 1~2개 3, 없으면 1' },
+      { id: 'aeo_takeaway', label: '핵심 정리 항목', criteria: `기억할 항목을 ${TARGETS.minTakeaways}개 이상 명시하면 5, 1~2개 3, 없으면 1` },
       { id: 'aeo_next_action', label: '다음 행동 안내', criteria: '독자가 다음에 할 일을 구체적으로 안내하면 5, 모호하면 3, 없으면 1' },
     ],
   },
@@ -576,8 +583,30 @@ export function buildSectionRules(o: {
           ? `- 이 부분 안에 "${q}" 를 한 줄로 그대로 쓰고, 바로 다음 문장에서 답하세요.`
           : `- 이 부분 안에 독자가 물을 법한 질문을 물음표로 끝나는 한 줄로 쓰고, 바로 다음 문장에서 답하세요.`)
       : null,
+    // 첫 부분은 결론부터. 소제목을 질문형으로 시켰더니 글이 질문으로 열리고
+    // 결론이 중반으로 밀려, 얻은 점수만큼 '첫 문단에 결론'에서 깎였다.
+    // 질문으로 여는 건 좋지만 답이 바로 따라와야 한다.
+    o.index === 0
+      ? `- 이 부분의 첫 문단에서 결론부터 말하세요. 배경 설명이나 인사말로 시작하지 말고, 첫 ${TARGETS.leadAnswerChars}자 안에 이 글의 답이 나와야 합니다.${
+          isQuestionText(heads[0] || '') ? ' 소제목이 질문이므로 첫 문장이 곧 그 답이어야 합니다.' : ''
+        }`
+      : null,
+    o.index === 0
+      ? `- 첫 문단은 그것만 읽어도 뜻이 통해야 합니다. "앞서 말했듯이" 같은 앞뒤 맥락에 기대는 표현을 쓰지 마세요.`
+      : null,
     o.index === 0 && kw
       ? `- 첫 문단 안에 "${kw}"${josa(kw, '을', '를')} 자연스럽게 한 번 넣으세요.`
+      : null,
+    // 마지막 부분은 요약과 정리. 인사말만으로 끝내면 둘 다 0점이다.
+    //
+    // '요약'이라고만 하면 자기가 쓴 부분만 묶는다 — 실제로 3회 모두 마지막
+    // 소제목 얘기만 정리했다. 글 전체를 묶으라고 못박고, 위에 준 구성표를
+    // 쓰라고 알려 준다.
+    o.index === o.sectionCount - 1
+      ? `- 끝맺기 전에 글 전체(위 구성 1~${o.sectionCount}번)의 핵심을 묶어 주는 요약을 넣으세요. 이 부분만 요약하지 마세요.`
+      : null,
+    o.index === o.sectionCount - 1
+      ? `- 이어서 독자가 기억할 항목을 "- "로 시작하는 목록 ${TARGETS.minTakeaways}개 이상으로 정리하세요. 서로 다른 소제목의 내용을 담고, 마무리 인사만으로 끝내지 마세요.`
       : null,
     kw ? `- "${kw}"${josa(kw, '을', '를')} 억지로 반복하지 마세요. 이 부분에서 2번을 넘기지 않습니다.` : null,
   ].filter(Boolean).join('\n');
@@ -593,6 +622,8 @@ export function buildArticleRules(o: { sectionCount: number; keyword?: string })
     `- 소제목은 ${TARGETS.minHeadings}개 이상, 하나당 30자 이내로 쓰세요.`,
     `- 그중 ${qHeadings}개는 물음표로 끝나는 질문 형태로 쓰고, 바로 다음 문장에서 답하세요.`,
     `- 본문 안에도 독자가 물을 법한 질문을 ${Math.max(1, TARGETS.minQuestions - qHeadings)}번 이상 던지고 바로 답하세요.`,
+    `- 본문 첫 ${TARGETS.leadAnswerChars}자 안에 결론부터 말하세요. 배경 설명이나 인사말로 시작하지 마세요. 첫 문단은 그것만 읽어도 뜻이 통해야 합니다.`,
+    `- 끝맺기 전에 핵심을 다시 묶는 요약을 넣고, 기억할 항목을 "- "로 시작하는 목록 ${TARGETS.minTakeaways}개 이상으로 정리하세요. 마무리 인사만으로 끝내지 마세요.`,
     `- 단위가 붙은 구체적 수치(금액·면적·기간·비율 등)를 글 전체에 ${TARGETS.minNumerics}개 이상 넣으세요.`,
     `- 나열할 내용은 "- "로 시작하는 목록 ${TARGETS.minBullets}줄 이상으로 정리하세요.`,
     `- 한 문장은 ${TARGETS.maxSentenceChars}자, 한 문단은 ${TARGETS.maxParagraphChars}자를 넘기지 마세요.`,
