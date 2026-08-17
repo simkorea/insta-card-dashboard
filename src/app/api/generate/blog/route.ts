@@ -1,5 +1,6 @@
 import { generateWithRetry, toKoreanError } from '@/lib/gemini';
 import { callOpenRouter } from '@/lib/ai/openrouter';
+import { buildOutlineRules, buildSectionRules, buildArticleRules } from '@/lib/blog/qualityRubric';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -131,6 +132,26 @@ export async function POST(request: Request) {
 - 해시태그 20-30개`,
     };
 
+    // 소제목 하나만 쓰는 작성자에게 주는 형식 안내.
+    //
+    // 위 안내는 '글 한 편'을 쓰는 사람 기준이다. 제목을 정하고 해시태그로
+    // 마무리하라는 항목이 들어 있는데, 나눠 쓰기에서는 그걸 소제목마다
+    // 한 명씩 다 읽는다. 그래서 네 부분이 전부 해시태그 뭉치로 끝나
+    // 본문 한가운데 해시태그가 네 번 박혔다. 한 줄로 금지시켜 봤지만
+    // 3회 중 2회는 그래도 붙었다 — 안내문 자체를 안 주는 게 맞다.
+    // 여기엔 문단·표기 같은 '쓰는 방식'만 남긴다.
+    const sectionFormatGuide: Record<string, string> = {
+      naver: `[네이버 블로그 스타일]
+- 중간중간 개행으로 가독성 확보`,
+      tistory: `[티스토리/워드프레스 스타일]
+- H2/H3 소제목 계층 구조 (## / ###) 사용
+- 리스트, 표, 인용구 적극 활용
+- 전문적인 설명과 근거 제시`,
+      instagram: `[인스타그램 캡처용 스타일]
+- 핵심 포인트 3-5개로 압축
+- 줄바꿈으로 읽기 편하게`,
+    };
+
     const personaSection = persona
       ? `[브랜드 페르소나]
 - 브랜드: ${persona.brand_name}
@@ -184,11 +205,27 @@ export async function POST(request: Request) {
     const sectionCount = Math.min(8, Math.max(3, Math.round(wordCount / 500)));
     const perSection = Math.round(wordCount / sectionCount);
 
+    // 채점 루브릭이 요구하는 것을 쓸 때 미리 시킨다.
+    //
+    // 점검 패널은 다 쓴 글을 재기만 했다. 그래서 매번 같은 항목에서 깎였다 —
+    // 수치가 없다, 소제목이 없다, 질문형이 없다. 셀 수 있는 요구사항이니
+    // 애초에 프롬프트에 넣는 편이 낫다. 문구는 루브릭 파일이 만든다(같은
+    // 상수를 읽으므로 '시키는 값'과 '채점하는 값'이 어긋나지 않는다).
+    //
+    // 목표 검색어는 사용자가 넣은 키워드의 첫 번째를 쓴다. 채점 쪽은
+    // 검색어가 없으면 본문에서 추정하는데, 여기서는 추정할 본문이 아직 없다.
+    const targetKeyword = (keywords || [])
+      .map((k: unknown) => String(k).trim())
+      .filter(Boolean)[0] || '';
+
     // 주제·페르소나·톤·형식 등 '어떤 글인가'를 정하는 부분.
     // 나눠 쓰기에서 뼈대와 각 소제목 요청이 이 부분만 공유한다 — 아래
     // [목표 분량]과 [응답 형식]까지 같이 넘기면 소제목 하나를 쓰라고
     // 해 놓고 전체 분량과 [TITLE] 형식을 요구하는 꼴이 된다.
-    const contextBlock = `당신은 SEO 전문가이자 블로그 작가입니다.
+    //
+    // 형식 안내는 글 한 편을 쓰는 경우와 소제목 하나만 쓰는 경우가 다르다.
+    // 자세한 이유는 sectionFormatGuide 주석 참고.
+    const buildContext = (scope: 'article' | 'section') => `당신은 SEO 전문가이자 블로그 작가입니다.
 ${langInstruction[language] || langInstruction.auto}
 
 ${personaSection}
@@ -200,7 +237,9 @@ ${mainInput}
 
 ${extraSections ? `[추가 설정]\n${extraSections}\n` : ''}
 ${refLinksSection ? `${refLinksSection}\n` : ''}
-${formatGuide[format] || formatGuide.naver}
+${scope === 'section'
+  ? (sectionFormatGuide[format] || sectionFormatGuide.naver)
+  : (formatGuide[format] || formatGuide.naver)}
 
 [작성 및 톤 지침]
 ${persona ? `- 글의 전반적인 말투와 분위기는 브랜드 페르소나의 '글의 톤/말투'(${persona.tone})를 적극 반영하여 통일성 있게 작성하세요.
@@ -210,11 +249,16 @@ ${persona ? `- 글의 전반적인 말투와 분위기는 브랜드 페르소나
 ${ctaInstruction}
 ${markdownAndEmojiInstruction}${instructionsInstruction}`;
 
+    const contextBlock = buildContext('article');
+    const sectionContext = buildContext('section');
+
     const prompt = `${contextBlock}
 
 [목표 분량]
 - 본문 분량: 공백 포함 ${wordCount}자. ${Math.round(wordCount * 0.9)}자~${Math.round(wordCount * 1.15)}자 사이로 맞추세요.
 - 소제목 ${sectionCount}개로 나누고, 소제목 하나당 ${perSection}자 내외로 서술하세요.
+
+${buildArticleRules({ sectionCount, keyword: targetKeyword })}
 
 [응답 형식]
 반드시 JSON 구조나 마크다운 코드블록 없이, 정확히 아래 지정된 대괄호 구분자 포맷으로만 작성하십시오:
@@ -247,6 +291,9 @@ SEO 최적화 제목
     //   나눠 쓰기(haiku)     2951자   33초   ← 이걸 쓴다
     //
     // 뼈대가 깨지면(JSON 파싱 실패 등) 기존 단일 호출로 돌아간다.
+    //
+    // 소제목 작성자는 sectionContext 를 받는다. 글 한 편 기준의 형식 안내를
+    // 그대로 주면 부분마다 해시태그로 끝맺는다 — sectionFormatGuide 주석 참고.
     const SPLIT_MIN_CHARS = 1500;
     const SECTION_MODEL = 'anthropic/claude-haiku-4.5';
 
@@ -268,16 +315,22 @@ SEO 최적화 제목
   "title": "제목",
   "metaDescription": "120자 이내 요약",
   "tags": ["태그", "... 8개"],
-  "sections": [{ "heading": "소제목", "points": ["이 부분에서 다룰 내용 3가지"] }]
+  "sections": [{
+    "heading": "소제목",
+    "points": ["이 부분에서 다룰 내용 3가지"],
+    "question": "이 부분에서 독자가 실제로 물을 법한 질문 한 문장 (반드시 물음표로 끝낼 것)"
+  }]
 }
 
-소제목은 정확히 ${sectionCount}개이고, 서로 내용이 겹치지 않아야 합니다.`,
+소제목은 정확히 ${sectionCount}개이고, 서로 내용이 겹치지 않아야 합니다.
+
+${buildOutlineRules({ sectionCount, keyword: targetKeyword })}`,
       });
 
       const outline = JSON.parse(
         outlineRaw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
       );
-      const sections: { heading?: string; points?: string[] }[] =
+      const sections: { heading?: string; points?: string[]; question?: string }[] =
         Array.isArray(outline?.sections) ? outline.sections : [];
       if (sections.length === 0) throw new Error('뼈대에 소제목이 없습니다');
 
@@ -289,7 +342,7 @@ SEO 최적화 제목
           callOpenRouter({
             model: SECTION_MODEL,
             maxTokens: 4000,
-            prompt: `${contextBlock}
+            prompt: `${sectionContext}
 
 [지금 할 일]
 글 전체 구성은 이렇습니다:
@@ -301,8 +354,17 @@ ${map}
 - 공백 포함 ${perSection}자 내외로 쓰세요.
 - ${headingRule}
 - 이 부분의 내용만 쓰고, 글 전체의 인사말이나 맺음말은 넣지 마세요.
+- 해시태그(#...)를 쓰지 마세요. 태그는 뼈대에서 따로 뽑습니다.
 ${i === sections.length - 1 ? '- 다만 마지막 부분이므로 위 지침에 있는 마무리 문구/CTA는 여기에 넣으세요.' : ''}
-- [TITLE] 같은 구분자 없이 본문 텍스트만 답하세요.`,
+- [TITLE] 같은 구분자 없이 본문 텍스트만 답하세요.
+
+${buildSectionRules({
+  index: i,
+  sectionCount: sections.length,
+  keyword: targetKeyword,
+  headings: sections.map(x => x.heading || ''),
+  question: s.question,
+})}`,
           }).then(t => t.trim())
         )
       );

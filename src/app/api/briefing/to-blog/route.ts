@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { callOpenRouter } from "@/lib/ai/openrouter";
+// 이 경로로 만든 글들은 저장된 6편 모두 목록 0개·질문형 0개였다. 채점에서
+// 매번 깎이던 자리라, 블로그 생성 라우트와 같은 요건을 여기서도 준다.
+import { buildArticleRules } from "@/lib/blog/qualityRubric";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -110,6 +113,8 @@ export async function POST(request: NextRequest) {
 3. 본문 분량은 공백 포함 1,500자~2,500자 정도로 작성하세요.
 4. 부동산에 관심 있는 일반 독자를 대상으로 차분하고 담백하며 친절한 정보 전달 톤을 유지하세요.
 5. 응답은 반드시 마크다운 코드펜스(\`\`\`json ...)나 설명 문구 없이 오직 순수한 JSON 객체만 반환하세요.
+
+${buildArticleRules({ sectionCount: 5 })}
 
 [반환 JSON 스키마]
 {
