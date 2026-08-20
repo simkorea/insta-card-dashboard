@@ -3,7 +3,10 @@ import { usePathname } from 'next/navigation';
 import { AuthProvider } from '@/components/providers/AuthProvider';
 import Sidebar from '@/components/layout/Sidebar';
 
-const AUTH_PATHS = ['/login', '/signup', '/auth/callback', '/privacy'];
+// 사이드바/하단 메뉴를 감출 경로.
+// '/render'는 서버가 카드를 캡처하는 화면이라 앱 껍데기가 있으면 안 된다 —
+// 실제로 하단 메뉴가 카드 위에 겹쳐 찍혔다.
+const AUTH_PATHS = ['/login', '/signup', '/auth/callback', '/privacy', '/render'];
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

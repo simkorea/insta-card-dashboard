@@ -3,7 +3,10 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
 // 로그인 없이 접근 가능한 페이지 경로
-const PUBLIC_PAGE_PATHS = ['/login', '/signup', '/auth/callback', '/share', '/view', '/privacy'];
+// '/render'는 사람이 볼 화면이 아니다. 10시 크론이 헤드리스 크롬으로 열어
+// 카드를 캡처하는 용도라 세션 쿠키가 없다. 대신 CRON_SECRET 토큰이 맞아야
+// 내용을 그린다(페이지 안에서 검사) — 토큰이 틀리면 404.
+const PUBLIC_PAGE_PATHS = ['/login', '/signup', '/auth/callback', '/share', '/view', '/privacy', '/render'];
 
 // 인증 없이 허용할 API 경로 (이미지 프록시, 공유 등)
 const PUBLIC_API_PATHS = [

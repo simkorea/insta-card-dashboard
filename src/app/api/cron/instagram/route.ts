@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { scheduleTodayNewsCardnews } from '@/lib/newsCardnews/autoSchedule';
+import { saveBriefingAsBlog } from '@/lib/blog/saveBriefingAsBlog';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -151,128 +153,155 @@ async function publishToInstagram(
   }
 }
 
-// Vercel Cron: 매시간 정각 실행 (vercel.json에 설정)
+// 아침 10시(KST) 자동 처리.
+//
+// 하는 일이 셋이다. 순서가 곧 우선순위다 — 시간이 모자라면 뒤가 밀린다.
+//   1. 오늘 만들어진 뉴스 카드뉴스 초안을 서버에서 그려 발행 줄에 넣는다
+//   2. 발행 대기 중인 게시물을 인스타에 올린다 (1번이 넣은 것 포함)
+//   3. 오늘 브리핑으로 블로그 글을 만들어 보관함에 저장한다
+//
+// Vercel Hobby 는 크론을 2개까지만 준다. 그래서 하나로 묶었다.
+// 함수 한도가 300초라 단계마다 남은 시간을 보고 진행 여부를 정한다.
+export const maxDuration = 300;
+
+const RENDER_BUDGET_MS = 110_000;  // 카드 그리기에 줄 시간
+const PUBLISH_CUTOFF_MS = 200_000; // 이 시각을 넘기면 남은 발행은 다음으로 미룬다
+const BLOG_CUTOFF_MS = 200_000;    // 이 시각을 넘겼으면 블로그는 건너뛴다
+
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
   const now = new Date();
   const kstTimeStr = new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().replace('Z', '+09:00');
+  const elapsed = () => Date.now() - startTime;
 
   console.log(`[Cron:Instagram] === Cron 실행 시작 ===`);
   console.log(`[Cron:Instagram] UTC 시각: ${now.toISOString()} | KST 시각: ${kstTimeStr}`);
 
   const authHeader = request.headers.get('authorization');
-  const isAuthValid = authHeader === `Bearer ${process.env.CRON_SECRET}`;
-  console.log(`[Cron:Instagram] Auth 헤더 검증: ${isAuthValid ? '성공 (Valid)' : '실패 (Unauthorized)'}`);
-
-  if (!isAuthValid) {
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     console.warn(`[Cron:Instagram] Unauthorized 요청 차단 (Header: ${authHeader ? '존재함' : '없음'})`);
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  console.log(`[Cron:Instagram] pending 게시물 조회 중 (scheduled_at <= ${now.toISOString()})...`);
+  // ── 1. 오늘 카드뉴스 초안 → 그림 → 발행 줄 ───────────────────────────
+  let autoCard: unknown;
+  try {
+    const r = await scheduleTodayNewsCardnews(RENDER_BUDGET_MS);
+    autoCard = r;
+    if (!r.ok) console.error('[Cron:Instagram] 카드뉴스 자동 등록 실패:', r.error);
+    else if (r.skipped) console.log('[Cron:Instagram] 카드뉴스 자동 등록 건너뜀:', r.reason);
+    else console.log(`[Cron:Instagram] 카드뉴스 자동 등록: ${r.name} ${r.slides}장`);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    autoCard = { ok: false, error: msg };
+    console.error('[Cron:Instagram] 카드뉴스 자동 등록 중 예외:', msg);
+  }
+
+  // ── 2. 발행 ──────────────────────────────────────────────────────────
+  const publishNow = new Date();
+  console.log(`[Cron:Instagram] pending 게시물 조회 중 (scheduled_at <= ${publishNow.toISOString()})...`);
   const { data: posts, error: fetchErr } = await supabase
     .from('scheduled_posts')
     .select('*')
     .eq('status', 'pending')
-    .lte('scheduled_at', now.toISOString());
+    .lte('scheduled_at', publishNow.toISOString());
 
-  if (fetchErr) {
-    console.error(`[Cron:Instagram] DB 게시물 조회 실패: ${fetchErr.message}`);
-    return NextResponse.json({ error: fetchErr.message }, { status: 500 });
-  }
-
-  const fetchedCount = posts ? posts.length : 0;
-  console.log(`[Cron:Instagram] 조회된 pending 게시물 수: ${fetchedCount}건`);
-
-  if (!posts || posts.length === 0) {
-    const totalElapsedMs = Date.now() - startTime;
-    console.log(`[Cron:Instagram] 발행 대상 게시물 없음. 종료 (총 소요시간: ${totalElapsedMs}ms)`);
-    return NextResponse.json({ message: '발행할 게시물 없음', processed: 0 });
-  }
-
-  posts.forEach((p, idx) => {
-    const slideCount = p.slide_image_urls?.length ?? (p.thumbnail_url ? 1 : 0);
-    console.log(`[Cron:Instagram] [게시물 #${idx + 1}] ID: ${p.id} | 예약시각: ${p.scheduled_at} | 이미지 수: ${slideCount}개`);
-  });
-
-  console.log(`[Cron:Instagram] instagram_settings 연동 정보 조회 중...`);
-  const { data: settings } = await supabase
-    .from('instagram_settings')
-    .select('access_token, ig_user_id')
-    .limit(1)
-    .maybeSingle();
-
-  const hasSettings = !!settings;
-  const hasIgUserId = !!(settings?.ig_user_id);
-  const hasAccessToken = !!(settings?.access_token);
-
-  console.log(`[Cron:Instagram] 설정 정보 - Settings 존재: ${hasSettings} | ig_user_id 존재: ${hasIgUserId} | access_token 존재: ${hasAccessToken}`);
-
-  if (!settings || !settings.ig_user_id || !settings.access_token) {
-    console.error(`[Cron:Instagram] Instagram 설정 미비로 발행 불가 (Settings: ${hasSettings}, ig_user_id: ${hasIgUserId}, access_token: ${hasAccessToken})`);
-    return NextResponse.json({ error: 'Instagram 설정 없음 — 연동 필요' }, { status: 400 });
-  }
-
-  const { access_token, ig_user_id } = settings;
   const results: { id: string; success: boolean; error?: string; slide_count?: number }[] = [];
-
   let successCount = 0;
   let failCount = 0;
   let remainingCount = 0;
-  const MAX_EXEC_MS = 240000; // 240초 (4분) 전체 실행 타임아웃 안전 임계값
 
-  for (let i = 0; i < posts.length; i++) {
-    const post = posts[i];
-    const elapsedMs = Date.now() - startTime;
+  if (fetchErr) {
+    console.error(`[Cron:Instagram] DB 게시물 조회 실패: ${fetchErr.message}`);
+  } else if (!posts || posts.length === 0) {
+    console.log('[Cron:Instagram] 발행 대상 게시물 없음');
+  } else {
+    console.log(`[Cron:Instagram] 조회된 pending 게시물 수: ${posts.length}건`);
 
-    if (elapsedMs > MAX_EXEC_MS) {
-      remainingCount = posts.length - i;
-      console.warn(`[Cron:Instagram] 전체 실행 시간 240초 초과 (${(elapsedMs / 1000).toFixed(1)}s). 남은 ${remainingCount}건은 다음 실행으로 미룹니다 (pending 상태 유지).`);
-      break;
-    }
+    const { data: settings } = await supabase
+      .from('instagram_settings')
+      .select('access_token, ig_user_id')
+      .limit(1)
+      .maybeSingle();
 
-    const postStartTime = Date.now();
-    console.log(`[Cron:Instagram] ---> [게시물 ID: ${post.id}] 처리 시작 (예약시각: ${post.scheduled_at})`);
+    if (!settings?.ig_user_id || !settings?.access_token) {
+      console.error('[Cron:Instagram] Instagram 설정 미비로 발행 불가 — 연동 필요');
+    } else {
+      const { access_token, ig_user_id } = settings;
 
-    // slide_image_urls 우선, 없으면 thumbnail_url 폴백
-    const imageUrls: string[] = (post.slide_image_urls?.length ? post.slide_image_urls : null)
-      ?? (post.thumbnail_url ? [post.thumbnail_url] : []);
+      for (let i = 0; i < posts.length; i++) {
+        const post = posts[i];
 
-    if (imageUrls.length === 0) {
-      console.warn(`[Cron:Instagram] [게시물 ID: ${post.id}] 이미지 URL 없음 -> status=failed 업데이트`);
-      await supabase.from('scheduled_posts').update({ status: 'failed', error_message: '이미지 URL 없음' }).eq('id', post.id);
-      results.push({ id: post.id, success: false, error: '이미지 URL 없음' });
-      failCount++;
-      continue;
-    }
+        if (elapsed() > PUBLISH_CUTOFF_MS) {
+          remainingCount = posts.length - i;
+          console.warn(`[Cron:Instagram] 시간 초과 (${(elapsed() / 1000).toFixed(1)}s). 남은 ${remainingCount}건은 다음 실행으로 미룹니다.`);
+          break;
+        }
 
-    try {
-      const fullCaption = post.hashtags ? `${post.caption}\n\n${post.hashtags}` : post.caption;
-      const igPostId = await publishToInstagram(ig_user_id, access_token, imageUrls, fullCaption);
+        const postStartTime = Date.now();
+        console.log(`[Cron:Instagram] ---> [게시물 ID: ${post.id}] 처리 시작 (예약시각: ${post.scheduled_at})`);
 
-      const postElapsedMs = Date.now() - postStartTime;
-      console.log(`[Cron:Instagram] [게시물 ID: ${post.id}] 발행 성공! (IG Post ID: ${igPostId}, 소요시간: ${postElapsedMs}ms)`);
+        const imageUrls: string[] = (post.slide_image_urls?.length ? post.slide_image_urls : null)
+          ?? (post.thumbnail_url ? [post.thumbnail_url] : []);
 
-      await supabase.from('scheduled_posts').update({ status: 'published', ig_post_id: igPostId }).eq('id', post.id);
-      results.push({ id: post.id, success: true, slide_count: imageUrls.length });
-      successCount++;
-    } catch (e: any) {
-      const postElapsedMs = Date.now() - postStartTime;
-      console.error(`[Cron:Instagram] [게시물 ID: ${post.id}] 발행 실패 (에러: ${e.message}, 소요시간: ${postElapsedMs}ms)`);
+        if (imageUrls.length === 0) {
+          console.warn(`[Cron:Instagram] [게시물 ID: ${post.id}] 이미지 URL 없음 -> status=failed`);
+          await supabase.from('scheduled_posts').update({ status: 'failed', error_message: '이미지 URL 없음' }).eq('id', post.id);
+          results.push({ id: post.id, success: false, error: '이미지 URL 없음' });
+          failCount++;
+          continue;
+        }
 
-      await supabase.from('scheduled_posts').update({ status: 'failed', error_message: e.message }).eq('id', post.id);
-      results.push({ id: post.id, success: false, error: e.message });
-      failCount++;
+        try {
+          const fullCaption = post.hashtags?.length ? `${post.caption}
+
+${post.hashtags}` : post.caption;
+          const igPostId = await publishToInstagram(ig_user_id, access_token, imageUrls, fullCaption);
+
+          console.log(`[Cron:Instagram] [게시물 ID: ${post.id}] 발행 성공! (IG Post ID: ${igPostId}, ${Date.now() - postStartTime}ms)`);
+          await supabase.from('scheduled_posts').update({ status: 'published', ig_post_id: igPostId }).eq('id', post.id);
+          results.push({ id: post.id, success: true, slide_count: imageUrls.length });
+          successCount++;
+        } catch (e: any) {
+          console.error(`[Cron:Instagram] [게시물 ID: ${post.id}] 발행 실패 (${e.message}, ${Date.now() - postStartTime}ms)`);
+          await supabase.from('scheduled_posts').update({ status: 'failed', error_message: e.message }).eq('id', post.id);
+          results.push({ id: post.id, success: false, error: e.message });
+          failCount++;
+        }
+      }
     }
   }
 
-  const totalElapsedMs = Date.now() - startTime;
-  console.log(`[Cron:Instagram] === Cron 실행 종료 ===`);
-  console.log(`[Cron:Instagram] 총 대상: ${posts.length}건 | 처리: ${results.length}건 | 성공: ${successCount}건 | 실패: ${failCount}건 | 이월(Pending): ${remainingCount}건 | 총 소요시간: ${totalElapsedMs}ms`);
+  // ── 3. 블로그 저장 ───────────────────────────────────────────────────
+  //
+  // 발행이 먼저다. 시간이 모자라면 블로그를 거른다 — 카드뉴스는 시각이
+  // 중요하지만 블로그는 보관함에 들어가기만 하면 되고, 이미 쓴 브리핑이
+  // 남아 있어 나중에 화면에서 한 번 눌러도 된다.
+  let blog: unknown;
+  if (elapsed() > BLOG_CUTOFF_MS) {
+    blog = { ok: false, error: `시간이 모자라 건너뜀 (${(elapsed() / 1000).toFixed(1)}s 경과)` };
+    console.warn('[Cron:Instagram] 블로그 저장 건너뜀 — 남은 시간 부족');
+  } else {
+    try {
+      const r = await saveBriefingAsBlog();
+      blog = r;
+      if (!r.ok) console.error('[Cron:Instagram] 블로그 저장 실패:', r.error);
+      else if (r.skipped) console.log('[Cron:Instagram] 블로그 저장 건너뜀:', r.reason);
+      else console.log(`[Cron:Instagram] 블로그 저장: ${r.title}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      blog = { ok: false, error: msg };
+      console.error('[Cron:Instagram] 블로그 저장 중 예외:', msg);
+    }
+  }
+
+  console.log(`[Cron:Instagram] === Cron 실행 종료 === 성공: ${successCount} | 실패: ${failCount} | 이월: ${remainingCount} | 총 ${elapsed()}ms`);
 
   return NextResponse.json({
+    autoCard,
+    blog,
     processed: results.length,
-    total: posts.length,
+    total: posts?.length ?? 0,
     remaining: remainingCount,
     results,
   });
