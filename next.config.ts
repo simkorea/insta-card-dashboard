@@ -17,6 +17,11 @@ const nextConfig: NextConfig = {
     // 10시 크론도 헤드리스 크롬으로 카드를 그린다. 라우트마다 따로 적어야
     // 한다 — 안 적으면 그 함수 번들에서 크롬이 통째로 빠져 배포 후에야
     // 알게 된다.
+    // 크롬이 운영에서 뜨는지 발행 없이 시험하는 자리
+    '/api/designs/render-check': [
+      './node_modules/playwright-core/**',
+      './node_modules/@sparticuz/chromium/**',
+    ],
     '/api/cron/instagram': [
       './node_modules/playwright-core/**',
       './node_modules/@sparticuz/chromium/**',
