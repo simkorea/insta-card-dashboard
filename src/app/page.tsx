@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {
   PenTool, Bot, FileText, CalendarDays,
   MessageSquare, TrendingUp, ChevronRight,
-  Plus, Sparkles, Clock, RefreshCw, Palette, ArrowRight,
+  Plus, Sparkles, Clock, RefreshCw, Palette, ArrowRight, Send,
 } from 'lucide-react';
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { HybridThumb } from '@/components/cardnews/HybridThumb';
@@ -171,6 +171,44 @@ export default function DashboardPage() {
     }
   };
 
+  // 오늘 몫을 지금 돌린다 — 10시 크론이 하는 일을 사람이 시작한다.
+  //
+  // 크론이 하루를 건너뛰면 그날 카드뉴스와 블로그가 통째로 빈다. 다음 날까지
+  // 기다리면 그 뉴스는 이미 지난 뉴스다. 실제로 인스타에 올라가므로 반드시
+  // 한 번 물어본다.
+  const [isRunningToday, setIsRunningToday] = useState(false);
+  const runTodayNow = async (slides: number) => {
+    if (!confirm(
+      `오늘 카드뉴스 ${slides}장을 인스타그램에 지금 올리고, 블로그 글도 저장합니다.\n\n` +
+      '올라간 게시물은 되돌릴 수 없습니다. 진행할까요?'
+    )) return;
+
+    setIsRunningToday(true);
+    try {
+      const res = await fetch('/api/designs/run-today', { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      fetchDashboard();
+
+      const card = json?.autoCard;
+      const blog = json?.blog;
+      const lines: string[] = [];
+      if (json?.results?.[0]?.success) lines.push('인스타 발행 완료');
+      else if (card?.skipped) lines.push(`카드뉴스 건너뜀 — ${card.reason}`);
+      else if (card?.ok === false) lines.push(`카드뉴스 실패 — ${card.error}`);
+      else if (json?.results?.[0]) lines.push(`인스타 발행 실패 — ${json.results[0].error}`);
+
+      if (blog?.skipped) lines.push('블로그는 이미 저장돼 있었습니다');
+      else if (blog?.ok) lines.push(`블로그 저장 완료 — ${blog.title ?? ''}`);
+      else if (blog?.error) lines.push(`블로그 실패 — ${blog.error}`);
+
+      alert(lines.length ? lines.join('\n') : '실행은 끝났지만 처리할 항목이 없었습니다.');
+    } catch (err: any) {
+      alert('에러가 발생했습니다: ' + err.message);
+    } finally {
+      setIsRunningToday(false);
+    }
+  };
+
   const saveToBlog = async () => {
     if (!briefing || !briefing.id) return;
     setIsSavingToBlog(true);
@@ -221,6 +259,9 @@ export default function DashboardPage() {
   // 오늘 할 일 네 칸. 막혀 있는 것은 빨간 점으로 표시한다.
   const nextAt = todo.nextScheduledAt ? new Date(todo.nextScheduledAt) : null;
   const blogToday: number = todo.blogToday ?? 0;
+  // 오늘 초안이 인스타에 올라갔는지. 10시 크론이 올린다.
+  const autoPostStatus: string | null = todo.autoPostStatus ?? null;
+  const autoPublished = autoPostStatus === 'published';
   // 오늘 아침 뉴스로 만들어진 초안인지 (KST 기준 24시간 이내)
   // '자동 뉴스' 초안 조회에는 날짜 조건이 없어서, 크론이 며칠 죽어 있으면
   // 지난 초안이 그대로 잡힌다. 오래된 뉴스로 글이 나가지 않도록 여기서 막는다.
@@ -326,7 +367,11 @@ export default function DashboardPage() {
                   <p className="text-[12px] text-amber-800/80 leading-relaxed mb-3 break-words">
                     {newsDraft.name}
                     {Array.isArray(newsDraft.pages_data) && ` · ${newsDraft.pages_data.length}장`}
-                    {' · 자동 발행되지 않습니다. 내용을 확인하고 직접 발행해주세요.'}
+                    {autoPublished
+                      ? ' · 오늘 인스타그램에 올라갔습니다.'
+                      : autoPostStatus === 'failed'
+                        ? ' · 자동 발행이 실패했습니다. 아래에서 다시 시도할 수 있습니다.'
+                        : ' · 아침 10~11시 사이에 자동으로 올라갑니다.'}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <Link
@@ -344,6 +389,20 @@ export default function DashboardPage() {
                     >
                       {isMakingAll ? '블로그 쓰는 중...' : <><Sparkles size={13} /> 블로그까지 한 번에</>}
                     </button>
+                    {/* 크론이 하루를 건너뛰었을 때 사람이 바로 채우는 자리.
+                        이미 올라갔으면 버튼을 두지 않는다 — 두 번 올릴 일이 없다. */}
+                    {!autoPublished && (
+                      <button
+                        onClick={() => runTodayNow(
+                          Array.isArray(newsDraft.pages_data) ? newsDraft.pages_data.length : 0
+                        )}
+                        disabled={isRunningToday}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-rose-600 text-white text-xs font-bold rounded-xl hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-300 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        title="10시 크론이 하는 일을 지금 실행합니다 (실제로 발행됩니다)"
+                      >
+                        {isRunningToday ? '올리는 중... (2~3분)' : <><Send size={13} /> 지금 발행하기</>}
+                      </button>
+                    )}
                     <button
                       onClick={() => generateNewsDraft(true)}
                       disabled={isGeneratingDraft}

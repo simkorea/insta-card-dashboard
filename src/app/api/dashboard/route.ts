@@ -31,6 +31,21 @@ export async function GET() {
       .limit(1)
       .maybeSingle();
 
+    // 오늘 초안이 인스타에 올라갔는지.
+    //
+    // 10시 크론이 이 초안을 그려 발행한다. 화면에서 "자동 발행되지 않습니다"
+    // 라고 안내하던 시절의 문구가 남아 있으면 거짓말이 되므로, 실제 상태를
+    // 보고 문구와 버튼을 정한다.
+    const { data: autoPost } = newsDraft
+      ? await supabase
+          .from('scheduled_posts')
+          .select('status, ig_post_id, error_message')
+          .eq('design_id', (newsDraft as any).id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      : { data: null };
+
     // 목록에 보여줄 대기 건 (가장 이른 5건)
     const pendingPosts = (postsRes.data ?? []).filter((p: any) => p.status !== 'published');
 
@@ -153,6 +168,9 @@ export async function GET() {
         // 만들어 놓고 아직 인스타에 안 올린 카드뉴스 (최근 2주)
         unpublishedCount: unpublished.length,
         unpublished: unpublished.slice(0, 3).map((d: any) => ({ id: d.id, name: d.name, created_at: d.created_at })),
+        // 오늘 초안의 발행 상태 (없으면 아직 안 올라간 것)
+        autoPostStatus: (autoPost as any)?.status ?? null,
+        autoPostError: (autoPost as any)?.error_message ?? null,
         // 예약 대기와 가장 이른 발행 시각
         pendingCount: pendingCount ?? pendingPosts.length,
         nextScheduledAt: nextPostRes.data?.scheduled_at ?? null,
