@@ -18,7 +18,7 @@ function kstDayRangeUtc(now = new Date()) {
 }
 
 export type AutoScheduleResult =
-  | { ok: true; skipped: true; reason: string }
+  | { ok: true; skipped: true; reason: string; designId?: string }
   | { ok: true; skipped: false; designId: string; name: string; slides: number; postId: string }
   | { ok: false; error: string };
 
@@ -59,18 +59,18 @@ export async function scheduleTodayNewsCardnews(budgetMs = 120_000): Promise<Aut
     .eq('design_id', design.id)
     .limit(1)
     .maybeSingle();
-  if (dup) return { ok: true, skipped: true, reason: `이미 ${dup.status} 상태로 등록돼 있습니다.` };
+  if (dup) return { ok: true, skipped: true, designId: design.id, reason: `이미 ${dup.status} 상태로 등록돼 있습니다.` };
 
   // 3) 안전장치 — 카드가 모자라면 올리지 않는다.
   //    빈 카드가 공개 계정에 올라가는 것보다 하루 거르는 편이 낫다.
   if (pages.length < 3) {
-    return { ok: true, skipped: true, reason: `카드가 ${pages.length}장뿐이라 올리지 않습니다.` };
+    return { ok: true, skipped: true, designId: design.id, reason: `카드가 ${pages.length}장뿐이라 올리지 않습니다.` };
   }
   const emptyPages = pages.filter(
     (p: { blocks?: unknown[] }) => !Array.isArray(p?.blocks) || p.blocks.length === 0,
   ).length;
   if (emptyPages > 0) {
-    return { ok: true, skipped: true, reason: `내용이 빈 카드가 ${emptyPages}장 있어 올리지 않습니다.` };
+    return { ok: true, skipped: true, designId: design.id, reason: `내용이 빈 카드가 ${emptyPages}장 있어 올리지 않습니다.` };
   }
 
   // 4) 서버에서 그린다

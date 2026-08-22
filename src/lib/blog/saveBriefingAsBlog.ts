@@ -3,6 +3,7 @@ import { callOpenRouter } from '@/lib/ai/openrouter';
 import { buildArticleRules } from '@/lib/blog/qualityRubric';
 import { withTagLine } from '@/lib/blog/tagLine';
 import { extractJson } from '@/lib/blog/extractJson';
+import { getSlideImageUrls, toBlogImageSlots } from '@/lib/cardnews/slideImages';
 
 // 브리핑 한 건을 블로그 글로 만들어 보관함에 저장한다.
 //
@@ -15,7 +16,15 @@ export type SaveBriefingResult =
   | { ok: true; skipped: false; postId: string; title: string }
   | { ok: false; status: number; error: string };
 
-export async function saveBriefingAsBlog(briefingId?: string): Promise<SaveBriefingResult> {
+/**
+ * @param briefingId 없으면 최신 브리핑
+ * @param cardnewsDesignId 같은 브리핑으로 만든 카드뉴스. 주면 그 카드를 글의
+ *        그림으로 같이 넣는다 — 인스타에 올리며 그린 것이 있으면 그대로 쓴다.
+ */
+export async function saveBriefingAsBlog(
+  briefingId?: string,
+  cardnewsDesignId?: string,
+): Promise<SaveBriefingResult> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return { ok: false, status: 500, error: 'Supabase 설정이 없습니다.' };
@@ -130,9 +139,32 @@ ${buildArticleRules({ sectionCount: 5 })}
   }
 
   const tags = parsed.tags || [];
+
+  // 카드 그림을 같이 넣는다.
+  //
+  // 글만 저장하면 다시 열었을 때 이미지가 0장이라, 네이버에 붙여넣을 그림을
+  // 따로 만들어야 했다. 화면에서 카드뉴스를 골라 만들 때는 들어가는데
+  // 서버에서 만드는 길만 빠져 있었다.
+  //
+  // 어느 카드뉴스인지는 호출부가 안 알려줘도 찾을 수 있다. 아침 초안은
+  // description 에 'briefing:<id>' 를 달고 저장되므로 그걸로 짝을 짓는다.
+  let designId = cardnewsDesignId;
+  if (!designId) {
+    const { data: pair } = await supabase
+      .from('card_designs')
+      .select('id')
+      .eq('description', `briefing:${targetId}`)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    designId = (pair as { id?: string } | null)?.id;
+  }
+  const slideUrls = designId ? await getSlideImageUrls(designId, 90_000) : [];
+
   const { data: post, error: insErr } = await supabase
     .from('blog_posts')
     .insert({
+      images_data: toBlogImageSlots(slideUrls),
       title: parsed.title.trim(),
       // 손으로 저장할 때와 같은 모양으로 남긴다 — 본문 끝에 해시태그 줄
       body: withTagLine(parsed.body, tags),

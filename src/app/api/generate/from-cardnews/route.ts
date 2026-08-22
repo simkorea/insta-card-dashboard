@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSlideImageUrls, toBlogImageSlots } from '@/lib/cardnews/slideImages';
 import { createClient } from '@supabase/supabase-js';
 import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
 import { buildNarration } from '@/lib/cardnews/narration';
@@ -71,11 +72,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 카드 그림도 같이 넣는다.
+    //
+    // 화면에서 카드뉴스를 골라 만들면 카드가 그림으로 들어가는데, 이 길로
+    // 만든 글은 글만 저장돼서 다시 열면 이미지가 0장이었다. 인스타에 올리며
+    // 이미 그려 둔 그림이 있으면 그걸 그대로 쓰고, 없으면 서버에서 그린다.
+    const slideUrls = await getSlideImageUrls(designId, 120_000);
+
     // 만든 글을 보관한다. 실패해도 글 자체는 돌려준다 — 다시 만들게 하는 것보다 낫다.
     let blogPostId: string | null = null;
     const { data: saved, error: saveErr } = await supabase
       .from('blog_posts')
       .insert({
+        images_data: toBlogImageSlots(slideUrls),
         title: blog.title || design.name,
         // 화면에서 저장할 때와 같게 — 붙여넣으면 태그도 같이 간다
         body: withTagLine(blog.body || '', blog.tags),

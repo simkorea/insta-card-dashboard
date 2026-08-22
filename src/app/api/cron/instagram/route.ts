@@ -185,9 +185,13 @@ export async function GET(request: NextRequest) {
 
   // ── 1. 오늘 카드뉴스 초안 → 그림 → 발행 줄 ───────────────────────────
   let autoCard: unknown;
+  // 블로그에도 같은 카드를 그림으로 넣는다. 방금 인스타용으로 그린 것을
+  // 그대로 쓰므로 두 번 그리지 않는다.
+  let autoDesignId: string | undefined;
   try {
     const r = await scheduleTodayNewsCardnews(RENDER_BUDGET_MS);
     autoCard = r;
+    if (r.ok) autoDesignId = r.designId;
     if (!r.ok) console.error('[Cron:Instagram] 카드뉴스 자동 등록 실패:', r.error);
     else if (r.skipped) console.log('[Cron:Instagram] 카드뉴스 자동 등록 건너뜀:', r.reason);
     else console.log(`[Cron:Instagram] 카드뉴스 자동 등록: ${r.name} ${r.slides}장`);
@@ -283,7 +287,7 @@ ${post.hashtags}` : post.caption;
     console.warn('[Cron:Instagram] 블로그 저장 건너뜀 — 남은 시간 부족');
   } else {
     try {
-      const r = await saveBriefingAsBlog();
+      const r = await saveBriefingAsBlog(undefined, autoDesignId);
       blog = r;
       if (!r.ok) console.error('[Cron:Instagram] 블로그 저장 실패:', r.error);
       else if (r.skipped) console.log('[Cron:Instagram] 블로그 저장 건너뜀:', r.reason);
