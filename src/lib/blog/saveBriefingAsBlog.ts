@@ -4,6 +4,9 @@ import { buildArticleRules } from '@/lib/blog/qualityRubric';
 import { withTagLine } from '@/lib/blog/tagLine';
 import { extractJson } from '@/lib/blog/extractJson';
 import { getSlideImageUrls, toBlogImageSlots } from '@/lib/cardnews/slideImages';
+import {
+  usableSources, buildSourceListForPrompt, citedIndexes, buildSourceSection,
+} from '@/lib/blog/newsSources';
 
 // 브리핑 한 건을 블로그 글로 만들어 보관함에 저장한다.
 //
@@ -77,6 +80,29 @@ export async function saveBriefingAsBlog(
     return { ok: true, skipped: true, postId: existing.id, reason: '이 브리핑으로 만든 글이 이미 있습니다.' };
   }
 
+  // 브리핑이 모아 둔 실제 기사를 근거로 준다.
+  //
+  // 지어낸 출처는 없느니만 못하므로 목록에 있는 것만 쓰게 하고, 주소는
+  // 아예 넘기지 않는다 — 보여주면 본문에 옮겨 적다가 틀리게 쓴다.
+  const sources = usableSources(briefing.news_items);
+  const dateLabel = String(briefing.date || '').slice(0, 10);
+  const sourceBlock = sources.length
+    ? `
+[근거로 쓸 수 있는 오늘의 기사]
+${buildSourceListForPrompt(sources, dateLabel)}
+`
+    : '';
+  const sourceRules = sources.length
+    ? `
+[출처 규칙]
+- 위 목록에 있는 기사만 근거로 쓰세요. 목록에 없는 언론사·기관·보고서 이름을 지어내지 마세요.
+- 근거가 되는 문장 끝에 [1] 처럼 기사 번호를 답니다. 소제목마다 최소 한 번은 답니다.
+- 기사에 기관·법령·통계 이름(예: 국토교통부, 한국부동산원)이 나오면 본문에 그대로 밝히고, 언제 기준인지(${dateLabel}) 같이 적으세요.
+- 주소(URL)는 절대 쓰지 마세요. 번호만 쓰면 주소는 저장할 때 자동으로 붙습니다.
+- 기사에 없는 수치는 만들지 마세요. 확실하지 않으면 그 문장을 빼세요.
+`
+    : '';
+
   const systemPrompt = `당신은 전문 부동산 블로그 에디터입니다.
 제공된 일일 부동산 브리핑 원문을 바탕으로 독자들이 읽기 쉽고 유익한 블로그 포스팅으로 재가공하세요.
 
@@ -88,13 +114,14 @@ export async function saveBriefingAsBlog(
 5. 응답은 반드시 마크다운 코드펜스나 설명 문구 없이 오직 순수한 JSON 객체만 반환하세요.
 
 ${buildArticleRules({ sectionCount: 5 })}
-
+${sourceRules}
 [반환 JSON 스키마]
 {
   "title": "35자 이내, 클릭을 부르되 과장 없는 제목",
   "meta_description": "100자 이내 요약",
   "tags": ["태그1", "태그2", "태그3", "태그4", "태그5"],
-  "body": "블로그 본문 내용 (소제목 ## 포함)"
+  "body": "블로그 본문 내용 (소제목 ## 포함)",
+  "used_sources": [1, 2, 3]
 }`;
 
   // 모델을 haiku 로 고정하고 한 번 더 시도한다.
@@ -106,7 +133,8 @@ ${buildArticleRules({ sectionCount: 5 })}
   const MODEL = 'anthropic/claude-haiku-4.5';
   const userPrompt =
     '아래 일일 브리핑 원문을 바탕으로 블로그 글을 작성해 주세요.' +
-    String.fromCharCode(10, 10) + '[일일 브리핑 원문]' + String.fromCharCode(10) + report;
+    String.fromCharCode(10, 10) + '[일일 브리핑 원문]' + String.fromCharCode(10) + report +
+    sourceBlock;
 
   let raw = '';
   let lastErr = '';
@@ -125,7 +153,7 @@ ${buildArticleRules({ sectionCount: 5 })}
   // 펜스를 지우고 JSON.parse 하는 기존 방식으로는 깨진다. 긴 한국어 본문이
   // 오면 모델이 body 안에 진짜 줄바꿈을 넣어 보내서 "Bad control character"
   // 로 죽었다 — 실제로 이 경로에서 그렇게 실패했다.
-  let parsed: { title?: string; meta_description?: string; tags?: string[]; body?: string };
+  let parsed: { title?: string; meta_description?: string; tags?: string[]; body?: string; used_sources?: unknown };
   try {
     parsed = extractJson(raw);
   } catch (e) {
@@ -139,6 +167,11 @@ ${buildArticleRules({ sectionCount: 5 })}
   }
 
   const tags = parsed.tags || [];
+
+  // 본문에 달린 [n] 과 AI가 알려준 목록을 합쳐 실제 주소를 붙인다.
+  const cited = citedIndexes(parsed.body, parsed.used_sources, sources.length);
+  const sourceSection = buildSourceSection(sources, cited, dateLabel);
+  if (sources.length) console.log(`[to-blog] 출처 ${cited.length}건 첨부 (기사 ${sources.length}건 중)`);
 
   // 카드 그림을 같이 넣는다.
   //
@@ -166,8 +199,9 @@ ${buildArticleRules({ sectionCount: 5 })}
     .insert({
       images_data: toBlogImageSlots(slideUrls),
       title: parsed.title.trim(),
-      // 손으로 저장할 때와 같은 모양으로 남긴다 — 본문 끝에 해시태그 줄
-      body: withTagLine(parsed.body, tags),
+      // 본문 → 출처 → 해시태그 순서. 해시태그가 맨 끝에 와야 네이버에
+      // 붙여넣었을 때 태그로 잡힌다.
+      body: withTagLine(parsed.body + sourceSection, tags),
       meta_description: parsed.meta_description?.trim() || null,
       tags,
       topic: '부동산 브리핑',
