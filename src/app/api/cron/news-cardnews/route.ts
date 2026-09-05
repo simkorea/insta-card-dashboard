@@ -15,7 +15,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const result = await generateNewsCardnewsDraft();
+  // 아침 크론(/api/briefing)이 만드는 것과 같은 방식이어야 한다.
+  // 여기만 기본값으로 두면 손으로 다시 만든 날만 카드 모양이 달라진다.
+  const result = await generateNewsCardnewsDraft({ cardStyle: 'hybrid' });
   if (!result.ok) {
     console.error('[NewsCardnews:cron] 실패:', result.error);
     return NextResponse.json({ success: false, error: result.error }, { status: result.status });

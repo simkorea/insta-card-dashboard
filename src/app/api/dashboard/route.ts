@@ -46,6 +46,17 @@ export async function GET() {
           .maybeSingle()
       : { data: null };
 
+    // 오늘 자동 작업이 어떻게 끝났는지.
+    //
+    // 결과물이 없다는 것만으로는 "아직 안 돌았는지, 돌다 죽었는지"를 구분할
+    // 수 없다. 9/5 에 초안이 없었을 때 이유를 못 찾은 게 그래서다.
+    const kstToday = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+    const { data: runsToday } = await supabase
+      .from('automation_runs')
+      .select('step, ok, reason, ms, created_at')
+      .eq('run_date', kstToday)
+      .order('created_at', { ascending: true });
+
     // 목록에 보여줄 대기 건 (가장 이른 5건)
     const pendingPosts = (postsRes.data ?? []).filter((p: any) => p.status !== 'published');
 
@@ -168,6 +179,8 @@ export async function GET() {
         // 만들어 놓고 아직 인스타에 안 올린 카드뉴스 (최근 2주)
         unpublishedCount: unpublished.length,
         unpublished: unpublished.slice(0, 3).map((d: any) => ({ id: d.id, name: d.name, created_at: d.created_at })),
+        // 오늘 자동 작업 기록 (단계별 성공/실패와 사유)
+        runsToday: runsToday ?? [],
         // 오늘 초안의 발행 상태 (없으면 아직 안 올라간 것)
         autoPostStatus: (autoPost as any)?.status ?? null,
         autoPostError: (autoPost as any)?.error_message ?? null,

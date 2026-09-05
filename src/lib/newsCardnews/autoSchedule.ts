@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { captureDesignSlides } from '@/lib/cardnews/captureSlides';
 import { buildVideoCaption } from '@/lib/cardnews/videoMeta';
+import { generateNewsCardnewsDraft } from '@/lib/newsCardnews/generateDraft';
 
 // 오늘 아침에 만들어진 뉴스 카드뉴스 초안을 발행 대기 줄에 올린다.
 //
@@ -37,7 +38,7 @@ export async function scheduleTodayNewsCardnews(budgetMs = 120_000): Promise<Aut
   const { startIso } = kstDayRangeUtc();
 
   // 1) 오늘 만들어진 자동 초안
-  const { data: design, error: dErr } = await supabase
+  const findToday = () => supabase
     .from('card_designs')
     .select('id, name, pages_data')
     .eq('category', AUTO_CATEGORY)
@@ -46,20 +47,53 @@ export async function scheduleTodayNewsCardnews(budgetMs = 120_000): Promise<Aut
     .limit(1)
     .maybeSingle();
 
+  let { data: design, error: dErr } = await findToday();
   if (dErr) return { ok: false, error: `초안 조회 실패: ${dErr.message}` };
-  if (!design) return { ok: true, skipped: true, reason: '오늘 만들어진 자동 초안이 없습니다.' };
+
+  // 초안이 없으면 여기서 만든다.
+  //
+  // 아침 크론이 브리핑까지만 하고 초안에서 실패하는 날이 있다 (9/5). 그러면
+  // 그날은 카드뉴스도 인스타도 통째로 빈다. 브리핑은 이미 있으니 여기서
+  // 이어 만들면 그날치를 살릴 수 있다 — 아침 것과 같은 hybrid 로 만든다.
+  if (!design) {
+    console.warn('[AutoSchedule] 오늘 초안이 없어 지금 만듭니다 (아침 크론에서 빠진 것으로 보임)');
+    const made = await generateNewsCardnewsDraft({ cardStyle: 'hybrid' });
+    if (!made.ok) {
+      return { ok: false, error: `초안이 없어 새로 만들려 했으나 실패: ${made.error}` };
+    }
+    ({ data: design } = await findToday());
+    if (!design) return { ok: true, skipped: true, reason: '초안을 만들었지만 오늘 것으로 잡히지 않습니다.' };
+  }
 
   const pages = Array.isArray(design.pages_data) ? design.pages_data : [];
 
-  // 2) 같은 초안이 이미 줄에 서 있거나 올라갔으면 그만둔다.
-  //    크론이 두 번 돌아도 같은 글이 두 번 올라가면 안 된다.
-  const { data: dup } = await supabase
+  // 2) 오늘 이미 올렸으면 그만둔다.
+  //
+  // 예전에는 '이 초안이 이미 등록됐는지'만 봤다. 그러면 하루에 초안이 두 개
+  // 생겼을 때 둘 다 나간다 — 2026-09-05 에 실제로 그랬다. 아침 초안이 빠져
+  // 손으로 채우는 동안 화면에서 '다시 만들기'를 눌러 초안이 하나 더 생겼고,
+  // 서로 다른 초안이라 중복 검사를 둘 다 통과해 두 건이 발행됐다.
+  //
+  // 계정에 하루 두 번 올라가는 것이 사고다. 초안이 몇 개든 하루 한 건으로 막는다.
+  const { data: todayPosts } = await supabase
     .from('scheduled_posts')
-    .select('id, status')
-    .eq('design_id', design.id)
-    .limit(1)
-    .maybeSingle();
-  if (dup) return { ok: true, skipped: true, designId: design.id, reason: `이미 ${dup.status} 상태로 등록돼 있습니다.` };
+    .select('id, status, design_id, design_name')
+    .gte('created_at', startIso)
+    .in('status', ['pending', 'published'])
+    .limit(5);
+
+  const already = (todayPosts ?? [])[0];
+  if (already) {
+    const sameDesign = already.design_id === design.id;
+    return {
+      ok: true,
+      skipped: true,
+      designId: design.id,
+      reason: sameDesign
+        ? `이미 ${already.status} 상태로 등록돼 있습니다.`
+        : `오늘은 이미 '${already.design_name}'이(가) ${already.status === 'published' ? '올라갔습니다' : '발행 대기 중입니다'}. 하루 한 건만 올립니다.`,
+    };
+  }
 
   // 3) 안전장치 — 카드가 모자라면 올리지 않는다.
   //    빈 카드가 공개 계정에 올라가는 것보다 하루 거르는 편이 낫다.

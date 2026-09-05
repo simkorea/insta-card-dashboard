@@ -7,6 +7,7 @@ import { mapWithLimit, budget } from '@/lib/notebookImage/pool';
 import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
 import { notebookFactsFromBlocks } from '@/lib/notebookImage/factsFromBlocks';
 import { readCardBlocks } from '@/lib/cardnews/readCardBlocks';
+import { extractJson } from '@/lib/blog/extractJson';
 
 // 아침 브리핑 본문 → 카드뉴스 "초안"을 만들어 내 보관함(card_designs)에 저장한다.
 // 장수는 그날 쓸 만한 기사 수를 따라간다 (3~10장).
@@ -317,27 +318,49 @@ ${toneBlock}
 
 ${sourceBlock}`;
 
-  let text: string;
-  try {
-    text = await callAI({
-      prompt,
-      model: 'anthropic/claude-haiku-4.5',
-      maxTokens: 8000,
-      system: '당신은 부동산 분양 정보를 다루는 SNS 콘텐츠 기획자입니다.',
-    });
-  } catch (e: any) {
-    return { ok: false, error: `AI 생성 실패: ${e.message}`, status: 502 };
+  // 한 번 실패하면 그날 카드뉴스가 통째로 없어진다.
+  //
+  // 2026-09-05 에 실제로 그랬다. 브리핑은 멀쩡히 만들어졌는데 초안만
+  // 안 생겼고, 로그는 1시간 뒤 사라져 이유도 확인할 수 없었다.
+  //
+  // 파싱도 블로그 쪽에서 이미 겪은 방식으로 바꾼다. 펜스만 벗기고
+  // JSON.parse 하면, 앞뒤에 설명 문장이 붙거나 본문 안에 진짜 줄바꿈이
+  // 들어왔을 때 그대로 죽는다 — 카드 10장짜리 긴 JSON 이라 더 잘 걸린다.
+  let parsed: { title?: string; cards?: GeneratedCard[] } | null = null;
+  let lastErr = '';
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    let text = '';
+    try {
+      text = await callAI({
+        prompt,
+        model: 'anthropic/claude-haiku-4.5',
+        maxTokens: 8000,
+        system: '당신은 부동산 분양 정보를 다루는 SNS 콘텐츠 기획자입니다.',
+      });
+    } catch (e: any) {
+      lastErr = `AI 호출 실패: ${e.message}`;
+      console.warn(`[NewsCardnews] ${attempt}번째 시도 — ${lastErr}`);
+      continue;
+    }
+
+    if (!text.trim()) {
+      lastErr = '빈 응답';
+      console.warn(`[NewsCardnews] ${attempt}번째 시도 — 빈 응답`);
+      continue;
+    }
+
+    try {
+      parsed = extractJson<{ title?: string; cards?: GeneratedCard[] }>(text);
+      break;
+    } catch (e: any) {
+      lastErr = `JSON 파싱 실패: ${e.message}`;
+      console.warn(`[NewsCardnews] ${attempt}번째 시도 — ${lastErr}`, text.slice(0, 200));
+    }
   }
 
-  if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
-  else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
-
-  let parsed: { title?: string; cards?: GeneratedCard[] };
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    console.error('[NewsCardnews] JSON 파싱 실패:', text.slice(0, 300));
-    return { ok: false, error: 'AI 응답 형식이 올바르지 않습니다. 다시 시도해주세요.', status: 502 };
+  if (!parsed) {
+    return { ok: false, error: `AI 응답을 두 번 다 읽지 못했습니다 (${lastErr})`, status: 502 };
   }
 
   const made = (parsed.cards || [])

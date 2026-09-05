@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { scheduleTodayNewsCardnews } from '@/lib/newsCardnews/autoSchedule';
 import { saveBriefingAsBlog } from '@/lib/blog/saveBriefingAsBlog';
+import { recordRun } from '@/lib/automation/recordRun';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -200,8 +201,42 @@ export async function GET(request: NextRequest) {
     autoCard = { ok: false, error: msg };
     console.error('[Cron:Instagram] 카드뉴스 자동 등록 중 예외:', msg);
   }
+  {
+    const r = autoCard as { ok?: boolean; skipped?: boolean; reason?: string; error?: string; name?: string };
+    await recordRun('cardnews', Boolean(r?.ok), r?.error ?? r?.reason ?? r?.name, elapsed());
+  }
 
-  // ── 2. 발행 ──────────────────────────────────────────────────────────
+  // ── 2. 블로그 저장 ───────────────────────────────────────────────────
+  //
+  // 발행보다 먼저 한다. 예전에는 발행 뒤에 뒀는데, 카로셀 10장 발행이
+  // 100초 넘게 걸리는 날에는 남은 시간이 모자라 블로그가 잘려나갔다 —
+  // 9/3, 9/4 가 실제로 그랬다(발행은 됐고 블로그만 없다).
+  //
+  // 순서를 바꿔도 그림은 붙는다. 카드는 1번에서 이미 그려 두었고 블로그는
+  // 그 주소를 그대로 물려받는다. 블로그는 20초짜리라 발행을 늦추지도 않는다.
+  let blog: unknown;
+  if (elapsed() > BLOG_CUTOFF_MS) {
+    blog = { ok: false, error: `시간이 모자라 건너뜀 (${(elapsed() / 1000).toFixed(1)}s 경과)` };
+    console.warn('[Cron:Instagram] 블로그 저장 건너뜀 — 남은 시간 부족');
+  } else {
+    try {
+      const r = await saveBriefingAsBlog(undefined, autoDesignId);
+      blog = r;
+      if (!r.ok) console.error('[Cron:Instagram] 블로그 저장 실패:', r.error);
+      else if (r.skipped) console.log('[Cron:Instagram] 블로그 저장 건너뜀:', r.reason);
+      else console.log(`[Cron:Instagram] 블로그 저장: ${r.title}`);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      blog = { ok: false, error: msg };
+      console.error('[Cron:Instagram] 블로그 저장 중 예외:', msg);
+    }
+  }
+  {
+    const r = blog as { ok?: boolean; skipped?: boolean; reason?: string; error?: string; title?: string };
+    await recordRun('blog', Boolean(r?.ok), r?.error ?? r?.reason ?? r?.title, elapsed());
+  }
+
+  // ── 3. 발행 ──────────────────────────────────────────────────────────
   const publishNow = new Date();
   console.log(`[Cron:Instagram] pending 게시물 조회 중 (scheduled_at <= ${publishNow.toISOString()})...`);
   const { data: posts, error: fetchErr } = await supabase
@@ -276,28 +311,15 @@ ${post.hashtags}` : post.caption;
     }
   }
 
-  // ── 3. 블로그 저장 ───────────────────────────────────────────────────
-  //
-  // 발행이 먼저다. 시간이 모자라면 블로그를 거른다 — 카드뉴스는 시각이
-  // 중요하지만 블로그는 보관함에 들어가기만 하면 되고, 이미 쓴 브리핑이
-  // 남아 있어 나중에 화면에서 한 번 눌러도 된다.
-  let blog: unknown;
-  if (elapsed() > BLOG_CUTOFF_MS) {
-    blog = { ok: false, error: `시간이 모자라 건너뜀 (${(elapsed() / 1000).toFixed(1)}s 경과)` };
-    console.warn('[Cron:Instagram] 블로그 저장 건너뜀 — 남은 시간 부족');
-  } else {
-    try {
-      const r = await saveBriefingAsBlog(undefined, autoDesignId);
-      blog = r;
-      if (!r.ok) console.error('[Cron:Instagram] 블로그 저장 실패:', r.error);
-      else if (r.skipped) console.log('[Cron:Instagram] 블로그 저장 건너뜀:', r.reason);
-      else console.log(`[Cron:Instagram] 블로그 저장: ${r.title}`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      blog = { ok: false, error: msg };
-      console.error('[Cron:Instagram] 블로그 저장 중 예외:', msg);
-    }
-  }
+
+  await recordRun(
+    'publish',
+    failCount === 0 && successCount > 0,
+    successCount > 0
+      ? `성공 ${successCount}건${failCount ? `, 실패 ${failCount}건` : ''}${remainingCount ? `, 이월 ${remainingCount}건` : ''}`
+      : (posts && posts.length ? `실패 ${failCount}건` : '올릴 게시물이 없었습니다'),
+    elapsed(),
+  );
 
   console.log(`[Cron:Instagram] === Cron 실행 종료 === 성공: ${successCount} | 실패: ${failCount} | 이월: ${remainingCount} | 총 ${elapsed()}ms`);
 

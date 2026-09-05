@@ -62,6 +62,13 @@ function MiniCardPreview({ page }: { page: any }) {
   );
 }
 
+const STEP_LABEL: Record<string, string> = {
+  briefing: '뉴스 수집',
+  cardnews: '카드뉴스',
+  blog: '블로그',
+  publish: '인스타 발행',
+};
+
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -261,6 +268,8 @@ export default function DashboardPage() {
   const blogToday: number = todo.blogToday ?? 0;
   // 오늘 초안이 인스타에 올라갔는지. 10시 크론이 올린다.
   const autoPostStatus: string | null = todo.autoPostStatus ?? null;
+  // 오늘 자동 작업 기록 (단계별 성공/실패와 사유)
+  const runsToday: any[] = todo.runsToday ?? [];
   const autoPublished = autoPostStatus === 'published';
   // 오늘 아침 뉴스로 만들어진 초안인지 (KST 기준 24시간 이내)
   // '자동 뉴스' 초안 조회에는 날짜 조건이 없어서, 크론이 며칠 죽어 있으면
@@ -562,6 +571,29 @@ export default function DashboardPage() {
           <p className="text-[10px] text-gray-400 mt-2">
             초록: 초안까지 완료 · 노랑: 수집만 됨 · 빨강: 그날 아무것도 안 만들어짐
           </p>
+
+          {/* 오늘 각 단계가 어떻게 끝났는지.
+              막대만 보면 "빠졌다"는 것만 알고 왜인지는 모른다 — 9/5 에
+              초안이 없었을 때 이유를 못 찾은 게 그래서다. */}
+          {runsToday.length > 0 && (
+            <div className="mt-3 border border-gray-100 rounded-xl p-3">
+              <p className="text-[11px] font-bold text-gray-700 mb-1.5">오늘 자동 작업</p>
+              {runsToday.map((r: any, i: number) => (
+                <div key={i} className="flex items-start gap-2 text-[10px] leading-relaxed">
+                  <span className={`shrink-0 font-bold ${r.ok ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {r.ok ? '완료' : '실패'}
+                  </span>
+                  <span className="shrink-0 text-gray-500 w-14">{STEP_LABEL[r.step] || r.step}</span>
+                  <span className={`min-w-0 flex-1 truncate ${r.ok ? 'text-gray-500' : 'text-rose-600'}`}>
+                    {r.reason || (r.ok ? '' : '원인 미상')}
+                  </span>
+                  {typeof r.ms === 'number' && (
+                    <span className="shrink-0 text-gray-300 tabular-nums">{Math.round(r.ms / 1000)}초</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           {health.failedPosts?.length > 0 && (
             <div className="mt-3 bg-rose-50 border border-rose-100 rounded-xl p-3">

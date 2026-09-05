@@ -3,6 +3,7 @@ import { fetchAdPerformance, adSectionMarkdown } from "@/lib/metaAds/fetchInsigh
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { generateNewsCardnewsDraft } from "@/lib/newsCardnews/generateDraft";
+import { recordRun } from "@/lib/automation/recordRun";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -204,8 +205,10 @@ ${adSectionMarkdown(adPerformance)}`;
       .single();
 
     if (dbError) {
+      await recordRun('briefing', false, `저장 실패: ${dbError.message}`, Date.now() - startedAt);
       throw new Error(`Supabase Insert 에러: ${dbError.message}`);
     }
+    await recordRun('briefing', true, `기사 ${newsItems.length}건`, Date.now() - startedAt);
 
     // 카드뉴스 초안까지 이어서 (크론일 때만).
     //
@@ -219,12 +222,15 @@ ${adSectionMarkdown(adPerformance)}`;
       if (remain < 25_000) {
         cardnews = { ok: false, error: `브리핑에 시간을 다 써서 카드뉴스는 건너뜁니다 (남은 ${Math.round(remain / 1000)}초)` };
         console.warn('[Briefing] 카드뉴스 초안 건너뜀 — 남은 시간 부족');
+        await recordRun('cardnews', false, cardnews.error, Date.now() - startedAt);
       } else {
+        const t0 = Date.now();
         const draft = await generateNewsCardnewsDraft({ cardStyle: 'hybrid' });
         cardnews = draft.ok
           ? { ok: true, name: draft.name, slides: 'slides' in draft ? draft.slides : undefined }
           : { ok: false, error: draft.error };
         console.log('[Briefing] 카드뉴스 초안:', cardnews.ok ? cardnews.name : cardnews.error);
+        await recordRun('cardnews', Boolean(cardnews.ok), cardnews.ok ? cardnews.name : cardnews.error, Date.now() - t0);
       }
     }
 
