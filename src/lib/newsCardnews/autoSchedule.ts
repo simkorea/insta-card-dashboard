@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { captureDesignSlides } from '@/lib/cardnews/captureSlides';
 import { buildVideoCaption } from '@/lib/cardnews/videoMeta';
 import { generateNewsCardnewsDraft } from '@/lib/newsCardnews/generateDraft';
+import { runDailyBriefing, hasTodayBriefing } from '@/lib/briefing/runDailyBriefing';
 
 // 오늘 아침에 만들어진 뉴스 카드뉴스 초안을 발행 대기 줄에 올린다.
 //
@@ -10,6 +11,11 @@ import { generateNewsCardnewsDraft } from '@/lib/newsCardnews/generateDraft';
 // 기존 발행 크론이 그대로 집어 올린다 — 발행 코드는 건드리지 않는다.
 
 const AUTO_CATEGORY = '자동 뉴스';
+
+// 아침 크론이 통째로 빠진 날, 여기서 브리핑까지 만드는 데 쓰는 시간.
+// 이 시간은 budgetMs(카드 그리기 몫)와 별개다 — 실측으로 브리핑 25~31초 +
+// 초안 26초라 넉넉하다. 뒤이어 그림·블로그·발행이 남으므로 더 늘리지 않는다.
+const RECOVERY_BRIEFING_MS = 140_000;
 
 function kstDayRangeUtc(now = new Date()) {
   const kstNow = new Date(now.getTime() + 9 * 3600 * 1000);
@@ -52,17 +58,48 @@ export async function scheduleTodayNewsCardnews(budgetMs = 120_000): Promise<Aut
 
   // 초안이 없으면 여기서 만든다.
   //
-  // 아침 크론이 브리핑까지만 하고 초안에서 실패하는 날이 있다 (9/5). 그러면
-  // 그날은 카드뉴스도 인스타도 통째로 빈다. 브리핑은 이미 있으니 여기서
-  // 이어 만들면 그날치를 살릴 수 있다 — 아침 것과 같은 hybrid 로 만든다.
+  // 아침 크론이 빠지는 날이 있다. 9/5 는 브리핑까지만 하고 초안에서 실패했고,
+  // 9/8 은 크론 자체가 아예 실행되지 않았다 — 그날은 카드뉴스도 인스타도
+  // 블로그도 통째로 빈다. 여기서 이어 만들면 그날치를 살릴 수 있다.
+  //
+  // 아침과 같은 hybrid 로 만든다. AI 그림은 장당 약 ₩270 이 든다 —
+  // 사람이 누르지 않은 자동 경로에서는 돈이 나가는 길로 가지 않는다.
   if (!design) {
     console.warn('[AutoSchedule] 오늘 초안이 없어 지금 만듭니다 (아침 크론에서 빠진 것으로 보임)');
-    const made = await generateNewsCardnewsDraft({ cardStyle: 'hybrid' });
-    if (!made.ok) {
-      return { ok: false, error: `초안이 없어 새로 만들려 했으나 실패: ${made.error}` };
+
+    // (1) 브리핑부터 없으면 브리핑을 먼저 만든다.
+    //
+    // 초안 생성기는 '가장 최근' 브리핑을 쓴다. 오늘 브리핑이 없으면 어제 것을
+    // 집는데, 어제 초안은 이미 있으니 "이미 만듦"으로 건너뛰고 끝난다.
+    // 9/8 이 정확히 그랬다 — 3.1초 만에 끝나고 아무것도 만들어지지 않았다.
+    if (!(await hasTodayBriefing())) {
+      console.warn('[AutoSchedule] 오늘 브리핑도 없습니다 — 브리핑부터 만듭니다');
+      const b = await runDailyBriefing({ withCardnews: true, budgetMs: RECOVERY_BRIEFING_MS });
+      if (!b.ok) {
+        return { ok: false, error: `오늘 브리핑이 없어 만들려 했으나 실패: ${b.error}` };
+      }
+      ({ data: design } = await findToday());
     }
-    ({ data: design } = await findToday());
-    if (!design) return { ok: true, skipped: true, reason: '초안을 만들었지만 오늘 것으로 잡히지 않습니다.' };
+
+    // (2) 브리핑은 있는데 초안만 없는 경우
+    if (!design) {
+      const made = await generateNewsCardnewsDraft({ cardStyle: 'hybrid' });
+      if (!made.ok) {
+        return { ok: false, error: `초안이 없어 새로 만들려 했으나 실패: ${made.error}` };
+      }
+      // 건너뛰었다는 건 '오늘 것이 아닌 브리핑'으로 만든 초안이 이미 있다는 뜻이다.
+      // 예전에는 이것을 성공으로 읽고 넘어가 원인이 가려졌다.
+      if (made.skipped) {
+        return {
+          ok: false,
+          error: `초안이 새로 만들어지지 않았습니다 — '${made.name}'이(가) 이미 있어 건너뛰었습니다(오늘 브리핑으로 만든 것이 아닙니다).`,
+        };
+      }
+      ({ data: design } = await findToday());
+      if (!design) {
+        return { ok: false, error: `초안 '${made.name}'을 만들었지만 오늘 것으로 잡히지 않습니다.` };
+      }
+    }
   }
 
   const pages = Array.isArray(design.pages_data) ? design.pages_data : [];

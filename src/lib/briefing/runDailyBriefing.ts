@@ -1,0 +1,282 @@
+import { callAI } from "@/lib/ai/openrouter";
+import { fetchAdPerformance, adSectionMarkdown } from "@/lib/metaAds/fetchInsights";
+import { createClient } from "@supabase/supabase-js";
+import { generateNewsCardnewsDraft } from "@/lib/newsCardnews/generateDraft";
+import { recordRun } from "@/lib/automation/recordRun";
+
+// 아침 브리핑 만들기 — 뉴스 수집 → AI 요약 → 광고 지표 → 저장(→ 카드뉴스 초안).
+//
+// 라우트(/api/briefing) 안에 있던 것을 그대로 꺼냈다. 10시 크론이 "오늘 브리핑이
+// 아예 없다"를 발견했을 때 여기서 직접 만들어야 하기 때문이다. 2026-09-08 에
+// 아침 크론이 실행되지 않았는데, 브리핑이 없으니 그날 카드뉴스도 블로그도
+// 통째로 비었다 — HTTP 로 자기 자신을 부르지 않고 함수로 이어 붙인다.
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+function cleanText(text: string): string {
+  return text
+    .replace(/<!\[CDATA\[/gi, "")
+    .replace(/\]\]>/g, "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+type NewsItem = { title: string; link: string; description: string };
+
+// 국토교통부 RSS(https://www.molit.go.kr/rss/rss.jsp)는 2026-07 무렵부터 자기 자신으로
+// 무한 307 리다이렉트를 돌려주어 사실상 폐기됨 → 매번 타임아웃만 소모해서 제거했다.
+const RSS_SOURCES = [
+  { label: "연합뉴스 경제", url: "https://www.yna.co.kr/rss/economy.xml" },
+  { label: "JTBC 경제", url: "https://fs.jtbc.co.kr/RSS/economy.xml" },
+  { label: "동아일보 경제", url: "https://rss.donga.com/economy.xml" },
+];
+
+const RSS_TIMEOUT_MS = 15000; // 예전엔 6초였는데 크론(콜드 스타트) 때 자주 끊겼다
+const RSS_RETRIES = 2;
+
+async function fetchRssItems(url: string, label: string): Promise<NewsItem[]> {
+  for (let attempt = 1; attempt <= RSS_RETRIES; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          Accept: "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
+        },
+        signal: AbortSignal.timeout(RSS_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`상태코드 ${res.status}`);
+
+      const xmlText = await res.text();
+      const items: NewsItem[] = [];
+      const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+      let match: RegExpExecArray | null;
+      while ((match = itemRegex.exec(xmlText)) !== null) {
+        const itemContent = match[1];
+        const titleMatch = itemContent.match(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i);
+        if (!titleMatch) continue;
+        const linkMatch = itemContent.match(/<link>([\s\S]*?)<\/link>/i);
+        const descMatch = itemContent.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i);
+        items.push({
+          title: cleanText(titleMatch[1]),
+          link: linkMatch ? cleanText(linkMatch[1]) : "",
+          description: descMatch ? cleanText(descMatch[1]) : "",
+        });
+      }
+      console.log(`[Briefing] ${label}: ${items.length}건 수집 (시도 ${attempt})`);
+      return items;
+    } catch (e: any) {
+      console.warn(`[Briefing] ${label} 수집 실패 (시도 ${attempt}/${RSS_RETRIES}): ${e.message}`);
+      if (attempt < RSS_RETRIES) await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  return [];
+}
+
+export type BriefingCardnews = { ok: boolean; name?: string; slides?: number; error?: string };
+
+export type BriefingRunResult =
+  | { ok: true; date: string; newsCount: number; data: unknown; cardnews?: BriefingCardnews }
+  | { ok: false; error: string; status: number };
+
+/** 한국 날짜 (YYYY-MM-DD) */
+export function kstDateString(now = new Date()): string {
+  return new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+/** 오늘(KST) 브리핑이 이미 저장돼 있는지 */
+export async function hasTodayBriefing(): Promise<boolean> {
+  const { data } = await supabase
+    .from("briefings")
+    .select("id")
+    .eq("date", kstDateString())
+    .limit(1)
+    .maybeSingle();
+  return Boolean(data);
+}
+
+/**
+ * @param withCardnews 브리핑이 끝나면 카드뉴스 초안까지 이어서 만든다 (크론 경로).
+ * @param budgetMs 이 작업 전체에 쓸 수 있는 시간. 카드뉴스로 넘어갈지 여기서 판단한다.
+ */
+export async function runDailyBriefing(opts?: {
+  withCardnews?: boolean;
+  budgetMs?: number;
+}): Promise<BriefingRunResult> {
+  const startedAt = Date.now();
+  const budgetMs = Math.max(Number(opts?.budgetMs) || 280_000, 60_000);
+
+  // 실패도 반드시 한 줄 남긴다.
+  //
+  // 예전에는 저장에 성공했을 때만 기록했다. 그래서 "크론이 아예 안 돌았다"와
+  // "돌다가 뉴스 수집에서 죽었다"를 구분할 수 없었다 — 9/8 에 정확히 이것 때문에
+  // 원인을 확정하지 못했다. Hobby 는 런타임 로그를 1시간만 보관한다.
+  const fail = async (error: string, status: number): Promise<BriefingRunResult> => {
+    await recordRun("briefing", false, error, Date.now() - startedAt);
+    return { ok: false, error, status };
+  };
+
+  try {
+    if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      return await fail(
+        "SUPABASE_SERVICE_ROLE_KEY 환경변수가 정의되지 않았습니다. .env.local 설정을 확인해주세요.",
+        500,
+      );
+    }
+    // KST 기준 오늘/어제. 브리핑 날짜는 뉴스를 수집한 오늘,
+    // 광고 지표만 수치가 확정된 어제를 쓴다.
+    const kstNow = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    const briefingDate = kstNow.toISOString().split("T")[0];
+    const adDateStr = new Date(kstNow.getTime() - 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+
+    // 1. 부동산 뉴스 RSS 수집
+    const KEYWORDS = ["부동산", "주택", "아파트", "분양", "토지", "건설", "청약", "전세", "월세", "공시가격", "재건축", "재개발", "임대", "주거", "토지거래허가구역", "미분양", "집값", "매매가", "입주"];
+    const EXCLUDE_KEYWORDS = ["공모주", "유상증자", "코스피", "코스닥", "증시", "주가"];
+
+    // 여러 소스를 병렬로 받아온다. 하나가 죽어도 나머지로 브리핑이 나오도록.
+    const collected = (await Promise.all(RSS_SOURCES.map(src => fetchRssItems(src.url, src.label)))).flat();
+    console.log(`[Briefing] 전체 수집 ${collected.length}건`);
+
+    const newsItems: NewsItem[] = [];
+    for (const item of collected) {
+      const hasKeyword = KEYWORDS.some(k => item.title.includes(k) || item.description.includes(k));
+      const hasExclude = EXCLUDE_KEYWORDS.some(k => item.title.includes(k));
+      if (!hasKeyword || hasExclude) continue;
+      if (newsItems.some(n => n.title === item.title)) continue;
+      newsItems.push(item);
+    }
+    console.log(`[Briefing] 부동산 키워드 매칭 ${newsItems.length}건`);
+
+    // 부동산 기사가 너무 적으면 일반 경제 기사로 최소 5건까지 보강
+    if (newsItems.length < 5) {
+      for (const item of collected) {
+        if (newsItems.length >= 5) break;
+        if (!newsItems.some(n => n.title === item.title)) newsItems.push(item);
+      }
+      console.log(`[Briefing] 보강 후 총 ${newsItems.length}건`);
+    }
+
+    // 수집이 전부 실패했으면 여기서 멈춘다.
+    // 예전에는 "뉴스가 없습니다" 행을 그대로 저장해서, 대시보드가 마지막 정상 브리핑 대신
+    // 빈 브리핑을 보여주는 바람에 며칠째 뉴스가 안 보이는 것처럼 됐다.
+    if (newsItems.length === 0) {
+      console.error("[Briefing] 모든 RSS 소스 수집 실패 — 기존 브리핑을 덮어쓰지 않고 종료");
+      return await fail("뉴스 소스를 한 곳도 읽지 못했습니다. 기존 브리핑을 유지합니다.", 503);
+    }
+
+    console.log(`[Briefing] 최종 요약 대상 뉴스 개수: ${newsItems.length}건`);
+    newsItems.forEach((item, idx) => console.log(`[뉴스 ${idx + 1}] ${item.title}`));
+
+    // 2. OpenRouter API를 통한 뉴스 요약 생성
+    let newsSummary = "";
+    const newsPrompt = `오늘은 ${briefingDate}입니다. 아래는 오늘자 국내 부동산·경제 뉴스 목록입니다.
+주요 정책 변화나 시장 이슈를 중심으로 핵심 포인트를 격식 있고 읽기 쉬운 한글 리포트 형식으로 요약해 주세요.
+각 항목별로 요약과 함께 짧은 시사점을 포함해 주세요.
+
+날짜를 적을 때는 반드시 위에 알려드린 ${briefingDate}을 쓰고, 다른 연도·날짜를 임의로 적지 마세요.
+
+뉴스 목록:
+${newsItems.map((item, idx) => `[뉴스 ${idx + 1}] ${item.title}\n요약: ${item.description}`).join("\n\n")}`;
+
+    const MAX_AI_RETRIES = 3;
+    let lastAiError: any = null;
+    for (let attempt = 1; attempt <= MAX_AI_RETRIES; attempt++) {
+      try {
+        newsSummary = await callAI({
+          prompt: newsPrompt,
+          model: "deepseek/deepseek-v4-flash",
+          system: "당신은 부동산 정책 및 시장 분석을 전문으로 하는 금융 애널리스트 비서입니다.",
+        });
+        lastAiError = null;
+        break;
+      } catch (aiError: any) {
+        lastAiError = aiError;
+        console.warn(`[Briefing] AI 요약 생성 실패 (시도 ${attempt}/${MAX_AI_RETRIES}):`, aiError.message);
+        if (attempt < MAX_AI_RETRIES) await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    // 요약에 실패하면 에러 문구를 브리핑으로 저장하지 않는다 (기존 정상 브리핑 유지)
+    if (lastAiError || !newsSummary.trim()) {
+      console.error("[Briefing] AI 요약 생성 최종 실패:", lastAiError?.message);
+      return await fail(
+        `AI 요약 생성 실패로 브리핑을 저장하지 않았습니다. (${lastAiError?.message || "빈 응답"})`,
+        503,
+      );
+    }
+
+    // 3. Meta 광고 성과 — 실제 Graph API 조회.
+    // 광고 지표만 '어제' 기준이다 (Meta 인사이트는 당일 수치가 확정되지 않는다).
+    // 브리핑 자체의 날짜(briefingDate)는 뉴스를 수집한 '오늘'이다.
+    //
+    // 연동 전에는 고정 더미값(노출 12,480 / 지출 68,500원)을 매일 저장하고
+    // 있었다. 실제 계정은 캠페인이 전부 중단돼 지출이 0원인데도 화면에는
+    // 매일 광고비를 쓴 것처럼 보였다 — 지어낸 숫자는 넣지 않는다.
+    const adPerformance = await fetchAdPerformance(adDateStr);
+
+    // 4. Supabase briefings 테이블에 저장
+    const fullReport = `# 일일 종합 브리핑 요약 (${briefingDate})
+
+## 1. 부동산 뉴스 분석 브리핑
+${newsSummary}
+
+${adSectionMarkdown(adPerformance)}`;
+
+    const { data: dbData, error: dbError } = await supabase
+      .from("briefings")
+      .insert({
+        date: briefingDate,
+        real_estate_summary: newsSummary,
+        ad_performance: adPerformance,
+        full_report: fullReport,
+        // 요약 전 원본 뉴스도 함께 저장 — 카드뉴스 초안이 "뉴스 1건 = 카드 1장"으로
+        // 만들려면 요약문이 아니라 개별 기사가 필요하다
+        news_items: newsItems.slice(0, 20),
+      })
+      .select()
+      .single();
+
+    if (dbError) {
+      return await fail(`저장 실패: ${dbError.message}`, 500);
+    }
+    await recordRun("briefing", true, `기사 ${newsItems.length}건`, Date.now() - startedAt);
+
+    // 카드뉴스 초안까지 이어서 (크론일 때만).
+    //
+    // 하이브리드로 만든다. 예전에는 AI가 카드를 통째로 그렸는데, 크론 2개
+    // 제한 때문에 이 작업을 브리핑 안으로 합치면서 그림에 쓸 시간이 남지
+    // 않게 됐다 — 8/6은 10장 중 2장, 8/7은 0장만 그려졌다.
+    // 하이브리드는 그릴 것이 없어 시간도 비용도 들지 않으므로 이 실패가 없다.
+    // 그림은 돈이 든다(장당 약 ₩270) — 자동으로 도는 경로에서는 절대 그리지 않는다.
+    let cardnews: BriefingCardnews | undefined;
+    if (opts?.withCardnews) {
+      const remain = budgetMs - (Date.now() - startedAt);
+      if (remain < 25_000) {
+        cardnews = { ok: false, error: `브리핑에 시간을 다 써서 카드뉴스는 건너뜁니다 (남은 ${Math.round(remain / 1000)}초)` };
+        console.warn("[Briefing] 카드뉴스 초안 건너뜀 — 남은 시간 부족");
+        await recordRun("cardnews", false, cardnews.error, Date.now() - startedAt);
+      } else {
+        const t0 = Date.now();
+        const draft = await generateNewsCardnewsDraft({ cardStyle: "hybrid" });
+        cardnews = draft.ok
+          ? { ok: true, name: draft.name, slides: "slides" in draft ? draft.slides : undefined }
+          : { ok: false, error: draft.error };
+        console.log("[Briefing] 카드뉴스 초안:", cardnews.ok ? cardnews.name : cardnews.error);
+        await recordRun("cardnews", Boolean(cardnews.ok), cardnews.ok ? cardnews.name : cardnews.error, Date.now() - t0);
+      }
+    }
+
+    return { ok: true, date: briefingDate, newsCount: newsItems.length, data: dbData, cardnews };
+  } catch (error: any) {
+    console.error("[Briefing] 브리핑 처리 중 실패:", error?.message);
+    return await fail(error?.message || "Unknown Error", 500);
+  }
+}

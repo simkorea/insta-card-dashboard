@@ -123,13 +123,21 @@ export default function DashboardPage() {
   };
 
   // 크론(매일 08:30)을 기다리지 않고 지금 바로 뉴스 카드뉴스 초안 만들기
-  const generateNewsDraft = async (force: boolean) => {
+  //
+  // paid=true 는 AI가 카드를 통째로 그리는 방식이다. 그림이 확실히 좋지만
+  // Gemini 유료 호출이라 장당 약 ₩270 이 든다(10장이면 약 ₩2,700).
+  // 기본은 무료 방식이고, 유료는 아래에서 금액을 보여주고 물어본 뒤에만 간다.
+  const generateNewsDraft = async (force: boolean, paid = false) => {
     setIsGeneratingDraft(true);
     try {
       const res = await fetch('/api/news-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force }),
+        body: JSON.stringify(
+          paid
+            ? { force, cardStyle: 'notebook', confirmPaid: true }
+            : { force, cardStyle: 'hybrid' },
+        ),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -416,8 +424,28 @@ export default function DashboardPage() {
                       onClick={() => generateNewsDraft(true)}
                       disabled={isGeneratingDraft}
                       className="inline-flex items-center px-4 py-2 bg-white border border-amber-200 text-amber-800 text-xs font-bold rounded-xl hover:bg-amber-100/60 focus:outline-none focus:ring-2 focus:ring-amber-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="아침 자동 발행과 같은 방식입니다. AI 그림을 그리지 않아 요금이 들지 않습니다."
                     >
-                      {isGeneratingDraft ? '만드는 중...' : '다시 만들기'}
+                      {isGeneratingDraft ? '만드는 중...' : '다시 만들기 (무료)'}
+                    </button>
+                    {/* 유료 경로는 여기 하나뿐이다.
+                        예전에는 '다시 만들기'가 아무 표시 없이 이 길로 갔다 —
+                        누르는 사람은 모른 채 매번 그림 10장 값이 나갔다. */}
+                    <button
+                      onClick={() => {
+                        const slides = Array.isArray(newsDraft.pages_data) ? newsDraft.pages_data.length : 10;
+                        if (!confirm(
+                          `AI가 카드 ${slides}장을 직접 그립니다. 그림 품질은 확실히 좋아집니다.\n\n` +
+                          `유료입니다 — 장당 약 270원, 약 ${(slides * 270).toLocaleString()}원이 청구됩니다.\n` +
+                          '(무료로 만들려면 옆의 "다시 만들기 (무료)"를 누르세요)\n\n진행할까요?'
+                        )) return;
+                        generateNewsDraft(true, true);
+                      }}
+                      disabled={isGeneratingDraft}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 bg-white border border-violet-300 text-violet-700 text-xs font-bold rounded-xl hover:bg-violet-50 focus:outline-none focus:ring-2 focus:ring-violet-200 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="AI가 카드를 통째로 그립니다. 장당 약 270원의 요금이 발생합니다."
+                    >
+                      {isGeneratingDraft ? '만드는 중...' : <><Sparkles size={13} /> AI 그림으로 (유료)</>}
                     </button>
                   </div>
                 </>
