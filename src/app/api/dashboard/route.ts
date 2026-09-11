@@ -6,20 +6,23 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-const supabaseService = process.env.SUPABASE_SERVICE_ROLE_KEY
-  ? createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY)
-  : null;
+// scheduled_posts·briefings 는 서버 전용이다 (service role).
+// 키가 없다고 anon 으로 넘어가지 않는다. RLS 가 닫힌 테이블에서 anon 은
+// 빈 결과만 받아, 화면이 조용히 틀린 숫자를 보여준다 ('7일 중 7일 빠짐' 사고).
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!serviceKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY 가 설정되지 않았습니다.');
+const supabaseService = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
 export async function GET() {
   try {
     const [designsRes, postsRes, templatesRes, commentsRes, briefingRes] = await Promise.all([
       supabase.from('card_designs').select('id, name, created_at, pages_data').order('created_at', { ascending: false }).limit(6),
-      supabase.from('scheduled_posts').select('id, design_name, thumbnail_url, caption, scheduled_at, status').order('scheduled_at', { ascending: true }).limit(5),
+      supabaseService.from('scheduled_posts').select('id, design_name, thumbnail_url, caption, scheduled_at, status').order('scheduled_at', { ascending: true }).limit(5),
       supabase.from('card_designs').select('id', { count: 'exact', head: true }),
       supabase.from('comment_templates').select('id', { count: 'exact', head: true }),
-      supabaseService
-        ? supabaseService.from('briefings').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle()
-        : supabase.from('briefings').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      supabaseService.from('briefings').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
     ]);
 
     // 아침 뉴스로 자동 생성된 카드뉴스 초안 (사람이 확인 후 발행하는 대기 항목)
@@ -37,7 +40,7 @@ export async function GET() {
     // 라고 안내하던 시절의 문구가 남아 있으면 거짓말이 되므로, 실제 상태를
     // 보고 문구와 버튼을 정한다.
     const { data: autoPost } = newsDraft
-      ? await supabase
+      ? await supabaseService
           .from('scheduled_posts')
           .select('status, ig_post_id, error_message')
           .eq('design_id', (newsDraft as any).id)
@@ -63,7 +66,7 @@ export async function GET() {
     // 개수는 따로 센다.
     // 위 목록은 limit(5)로 5건만 가져오므로 그걸 세면 아무리 밀려 있어도
     // 최대 5로 보인다. 대기가 20건인데 5라고 뜨면 볼 이유가 없는 숫자가 된다.
-    const { count: pendingCount } = await supabase
+    const { count: pendingCount } = await supabaseService
       .from('scheduled_posts')
       .select('id', { count: 'exact', head: true })
       .neq('status', 'published');
@@ -84,8 +87,8 @@ export async function GET() {
       // pages_data는 무거워서 뺀다 — 개수와 이름만 필요하다
       supabase.from('card_designs').select('id, name, created_at')
         .gte('created_at', since14).order('created_at', { ascending: false }),
-      supabase.from('scheduled_posts').select('design_id').eq('status', 'published'),
-      supabase.from('scheduled_posts').select('scheduled_at, design_name')
+      supabaseService.from('scheduled_posts').select('design_id').eq('status', 'published'),
+      supabaseService.from('scheduled_posts').select('scheduled_at, design_name')
         .neq('status', 'published').order('scheduled_at', { ascending: true }).limit(1).maybeSingle(),
     ]);
 
@@ -129,9 +132,9 @@ export async function GET() {
       // briefings 는 RLS가 걸려 있어 anon 키로는 0건이 온다.
       // 위 briefingRes 가 supabaseService 를 쓰는 이유와 같다 — 여기서 그걸
       // 놓쳐서 '7일 중 7일 빠짐'이라고 잘못 표시됐다.
-      (supabaseService || supabase).from('briefings').select('created_at').gte('created_at', since7),
+      supabaseService.from('briefings').select('created_at').gte('created_at', since7),
       supabase.from('card_designs').select('created_at').eq('category', '자동 뉴스').gte('created_at', since7),
-      supabase.from('scheduled_posts').select('id, design_name, error_message, scheduled_at')
+      supabaseService.from('scheduled_posts').select('id, design_name, error_message, scheduled_at')
         .eq('status', 'failed').order('scheduled_at', { ascending: false }).limit(3),
     ]);
 
@@ -154,8 +157,7 @@ export async function GET() {
 
     let isBriefingSaved = false;
     if (briefingRes.data) {
-      const dbClient = supabaseService || supabase;
-      const { count } = await dbClient
+      const { count } = await supabaseService
         .from('blog_posts')
         .select('id', { count: 'exact', head: true })
         .eq('briefing_id', briefingRes.data.id);

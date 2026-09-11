@@ -97,3 +97,14 @@ npm run start    # 프로덕션 서버 실행
 npm run lint     # eslint (flat config: eslint-config-next core-web-vitals + typescript)
 npx tsc --noEmit # 타입 체크만 (테스트 러너 없음)
 ```
+
+---
+
+## 🧭 9단계 정밀제작(inputMode 'step9') 작업 방침
+
+- 4번(완전자동)을 고치지 않고 5번(9단계 정밀제작)을 새로 만든다.
+- 9단계 미리보기는 BlockRenderer를 쓰지 않고 가벼운 정적 미리보기 카드(슬라이드 1장, 선택 스타일만 적용)로 만든다.
+- 6단계 스타일은 방식1(titleStyle/bulletStyle 등 글자 스타일만 적용, 배경이미지는 기존 방식 유지). 전체 테마 교체(방식2)는 쓰지 않는다.
+- 커밋·푸시는 사용자가 "커밋해"라고 말할 때만 한다.
+- 원인을 단정하지 않는다. 가능한 원인을 여러 개 제시하고 코드로 확인한 뒤 결론낸다.
+- 요청 범위만 한다. 새 기능을 덧붙이지 않는다.

@@ -4,10 +4,17 @@ import { scheduleTodayNewsCardnews } from '@/lib/newsCardnews/autoSchedule';
 import { saveBriefingAsBlog } from '@/lib/blog/saveBriefingAsBlog';
 import { recordRun } from '@/lib/automation/recordRun';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// scheduled_posts·instagram_settings 는 서버 전용이다 (service role).
+// 여기서 바꾼 것은 키뿐이다 — 발행 로직·순서·시간은 그대로다.
+//
+// 키가 없다고 anon 으로 넘어가지 않는다. RLS 를 닫은 뒤에는 anon 이
+// 대기 행도 토큰도 못 읽어 "올릴 게시물이 없었습니다"로 조용히 끝난다.
+// 그러느니 여기서 멈춰 실패가 드러나게 한다.
+const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!serviceKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY 가 설정되지 않았습니다.');
+const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
 
 const IG_API = 'https://graph.instagram.com/v21.0';
 
