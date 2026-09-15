@@ -161,7 +161,8 @@ export async function scheduleTodayNewsCardnews(budgetMs = 120_000): Promise<Aut
       thumbnail_url: shot.urls[0],
       slide_image_urls: shot.urls.slice(0, 10),
       caption,
-      hashtags: [],
+      // hashtags 는 text 컬럼이다. 배열을 넣으면 '[]' 로 저장돼 캡션 끝에 붙었다.
+      hashtags: '',
       scheduled_at: new Date().toISOString(),
       status: 'pending',
     })

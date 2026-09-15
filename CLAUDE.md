@@ -80,7 +80,7 @@ Supabase Postgres, 스키마는 저장소 루트의 수동 SQL 파일로 관리 
 
 ### SNS 연동 & 스케줄링
 
-`/api/instagram/*`가 OAuth(`auth`, `callback`)/발행/인사이트/설정 담당. `vercel.json`에 Vercel Cron 라우트 2개: `/api/cron/instagram`(매일 09:00 UTC), `/api/briefing`(매일 23:00 UTC). Threads/TikTok/YouTube 관련 env는 존재하지만 실제로 라우트에 연결됐는지 확인 후 사용할 것.
+`/api/instagram/*`가 OAuth(`auth`, `callback`)/발행/인사이트/설정 담당. `vercel.json`에 Vercel Cron 라우트 2개: `/api/cron/instagram`(매일 01:00 UTC = 10:00 KST), `/api/briefing`(매일 23:00 UTC). Threads/TikTok/YouTube 관련 env는 존재하지만 실제로 라우트에 연결됐는지 확인 후 사용할 것.
 
 ### 컨벤션
 
@@ -108,3 +108,7 @@ npx tsc --noEmit # 타입 체크만 (테스트 러너 없음)
 - 커밋·푸시는 사용자가 "커밋해"라고 말할 때만 한다.
 - 원인을 단정하지 않는다. 가능한 원인을 여러 개 제시하고 코드로 확인한 뒤 결론낸다.
 - 요청 범위만 한다. 새 기능을 덧붙이지 않는다.
+- 9단계 정의: 1=입력·카테고리·최신성, 2=주제 선택, 3=선택 주제로 생성, 4=기획안 확인(공통 흐름),
+  5=장별 기획(공통 흐름), 6=스타일 구성, 7=상세 설정(장수·비율·생성 스타일),
+  8=편집기 다듬기(/cardnews/editor), 9=예약 발행(편집기 발행 모달 → scheduled_posts → 크론)
+- 4·5·8·9 는 기존 공통 화면을 쓴다. 9단계 전용 화면을 새로 만들지 않는다.

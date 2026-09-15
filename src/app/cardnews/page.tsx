@@ -297,6 +297,9 @@ export default function CardNewsPage() {
   const [extraInstruction, setExtraInstruction] = useState('');
   const [outputLanguage, setOutputLanguage] = useState('auto');
   const [lastSourceInput, setLastSourceInput] = useState('');
+  // 어느 탭에서 시작한 생성인지. 생성이 끝나면 inputMode 가 'text' 로 바뀌어서
+  // 이걸 따로 기억하지 않으면 '다시 생성'이 9단계 설정(프리셋·장수·비율)을 잃는다.
+  const [lastSourceType, setLastSourceType] = useState<'url' | 'trend' | 'text' | 'step9'>('text');
   const [inputMode, setInputMode] = useState<'text' | 'url' | 'trend' | 'smart' | 'step9'>('text');
   const [urlInput, setUrlInput] = useState('');
   const [trendInput, setTrendInput] = useState('');
@@ -1308,6 +1311,7 @@ export default function CardNewsPage() {
       else body.originalText = prompt;
       // 2단계에서 '설정 반영해 다시 생성'을 누를 때 쓰려고 원본 입력을 기억해둔다
       setLastSourceInput(body.originalText || urlInput || '');
+      setLastSourceType(type);
       body.templateTitle = selectedTemplate?.title || '';
       // 우측 설정 패널 값 — 예전에는 어디에도 전달되지 않아 입력해도 무시됐다
       if (extraInstruction.trim()) body.extraInstruction = extraInstruction.trim();
@@ -3938,7 +3942,9 @@ export default function CardNewsPage() {
                           return;
                         }
                         if (!confirm('오른쪽 설정을 반영해 카드뉴스를 새로 만듭니다.\n지금 화면의 기획안 내용은 사라집니다. 계속할까요?')) return;
-                        handleGenerateUnified('text', source);
+                        // 9단계에서 시작했으면 9단계로 다시 만든다 — 프리셋 글자 스타일·장수·비율 유지.
+                        // 그 밖의 탭은 예전과 똑같이 'text' 로 다시 만든다.
+                        handleGenerateUnified(lastSourceType === 'step9' ? 'step9' : 'text', source);
                       }}
                       disabled={isGenerating}
                       className="w-full py-3 mt-2 bg-white border border-primary-300 text-primary-700 rounded-xl font-bold text-[14px] hover:bg-primary-50 focus:outline-none focus:ring-2 focus:ring-primary-200 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex justify-center items-center gap-2"

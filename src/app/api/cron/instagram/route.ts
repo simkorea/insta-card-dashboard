@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { scheduleTodayNewsCardnews } from '@/lib/newsCardnews/autoSchedule';
 import { saveBriefingAsBlog } from '@/lib/blog/saveBriefingAsBlog';
 import { recordRun } from '@/lib/automation/recordRun';
+import { composeCaption } from '@/lib/cardnews/composeCaption';
 
 // scheduled_posts·instagram_settings 는 서버 전용이다 (service role).
 // 여기서 바꾼 것은 키뿐이다 — 발행 로직·순서·시간은 그대로다.
@@ -299,9 +300,8 @@ export async function GET(request: NextRequest) {
         }
 
         try {
-          const fullCaption = post.hashtags?.length ? `${post.caption}
-
-${post.hashtags}` : post.caption;
+          // '[]' 와 캡션에 이미 있는 태그는 붙이지 않는다 (예전엔 캡션이 "…\n\n[]" 로 끝났다)
+          const fullCaption = composeCaption(post.caption, post.hashtags);
           const igPostId = await publishToInstagram(ig_user_id, access_token, imageUrls, fullCaption);
 
           console.log(`[Cron:Instagram] [게시물 ID: ${post.id}] 발행 성공! (IG Post ID: ${igPostId}, ${Date.now() - postStartTime}ms)`);

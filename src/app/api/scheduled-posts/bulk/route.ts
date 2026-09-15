@@ -17,7 +17,7 @@ type Item = {
   designName: string;
   imageUrls: string[];
   caption?: string;
-  hashtags?: string[];
+  hashtags?: string[] | string;
   scheduledAt: string;
 };
 
@@ -65,7 +65,8 @@ export async function POST(request: NextRequest) {
       thumbnail_url: it.imageUrls[0],
       slide_image_urls: it.imageUrls,
       caption: it.caption || '',
-      hashtags: it.hashtags || [],
+      // hashtags 는 text 컬럼이다. 배열을 그대로 넣으면 '[]' 로 저장돼 캡션 끝에 붙었다.
+      hashtags: Array.isArray(it.hashtags) ? it.hashtags.join(' ') : (it.hashtags || ''),
       scheduled_at: it.scheduledAt,
       status: 'pending',
     }));

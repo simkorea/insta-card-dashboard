@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { composeCaption } from '@/lib/cardnews/composeCaption';
 
 // scheduled_posts·instagram_settings 는 서버 전용이다 (service role).
 // 키가 없다고 anon 으로 넘어가지 않는다. RLS 를 닫은 뒤에는 anon 이
@@ -70,7 +71,8 @@ export async function POST(request: NextRequest) {
     }
 
     const { access_token, ig_user_id } = settings;
-    const fullCaption = hashtags ? `${caption}\n\n${hashtags}` : caption;
+    // 크론과 같은 규칙 — '[]' 와 캡션에 이미 있는 태그는 붙이지 않는다
+    const fullCaption = composeCaption(caption, hashtags);
 
     let igPostId: string;
 
