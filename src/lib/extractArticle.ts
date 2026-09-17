@@ -18,6 +18,7 @@ const CONTENT_HINTS = [
   'harmonyContainer',       // 다음 뉴스
   'story-news',             // 연합뉴스
   'article-txt',            // 연합뉴스
+  'news_view',              // 동아일보 — 없으면 옆 기사 목록(news_body)을 본문으로 잡는다
   'articleBody',
   'article-body',
   'article_body',

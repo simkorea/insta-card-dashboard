@@ -3,6 +3,7 @@ import { callOpenRouter } from '@/lib/ai/openrouter';
 import { buildOutlineRules, buildSectionRules, buildArticleRules } from '@/lib/blog/qualityRubric';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { extractArticle } from '@/lib/extractArticle';
 
 // 60초로는 지금 구성에서 긴 글이 절대 안 나온다.
 //
@@ -24,28 +25,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-async function fetchTextFromUrl(url: string, maxChars: number): Promise<string> {
-  if (!url) return '';
-  try {
-    const res = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; CardNewsBot/1.0)' },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return '';
-    const html = await res.text();
-    const cleaned = html
-      .replace(/<(nav|header|footer)[^>]*>[\s\S]*?<\/\1>/gi, '')
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return cleaned.slice(0, maxChars);
-  } catch (err) {
-    return '';
-  }
-}
-
 export async function POST(request: Request) {
   try {
     const {
@@ -65,14 +44,31 @@ export async function POST(request: Request) {
       sourceUrl,
     } = await request.json();
 
+    // 기사 URL 은 카드뉴스와 같은 추출기(extractArticle)로 읽는다.
+    //
+    // 예전에는 HTML 태그만 지우고 앞 3000자를 넘겼다. 뉴스 사이트 앞부분은
+    // 메뉴·광고·다른 기사 제목이라, 넣은 기사와 전혀 다른 글이 나왔다.
+    // 읽기에 실패하면 빈 채로 넘어가 AI가 주소만 보고 글을 지어냈다 —
+    // 이제는 여기서 멈추고 이유를 돌려준다.
     let urlContent = '';
+    let sourceTitle = '';
     if (sourceUrl) {
-      urlContent = await fetchTextFromUrl(sourceUrl, 3000);
+      try {
+        const article = await extractArticle(sourceUrl, 5000);
+        urlContent = article.text;
+        sourceTitle = article.title;
+      } catch (e) {
+        return NextResponse.json(
+          { error: e instanceof Error ? e.message : '기사 본문을 읽지 못했습니다.' },
+          { status: 422 },
+        );
+      }
     }
 
+    // 참고 링크는 선택 사항이라 못 읽은 것은 조용히 뺀다
     const validRefLinks = (refLinks || []).filter((l: string) => l.trim());
     const refContents = await Promise.allSettled(
-      validRefLinks.map((url: string) => fetchTextFromUrl(url, 1200))
+      validRefLinks.map((url: string) => extractArticle(url, 1200).then(a => a.text))
     );
     const validRefContents = refContents
       .map(r => r.status === 'fulfilled' ? r.value : '')
@@ -82,7 +78,7 @@ export async function POST(request: Request) {
       ? validRefContents.map((text, idx) => `[참고자료 ${idx + 1} 본문]\n${text}`).join('\n\n')
       : '';
 
-    const mainInput = topic || content || (sourceUrl ? `[기사 URL 참고생성: ${sourceUrl}]` : '');
+    const mainInput = topic || content || (sourceUrl ? `${sourceTitle || sourceUrl} (위 원문 기사를 바탕으로)` : '');
     if (!mainInput) return NextResponse.json({ error: '주제 또는 내용이 필요합니다' }, { status: 400 });
 
     let persona = null;

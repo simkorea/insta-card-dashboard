@@ -15,6 +15,56 @@ import ManuscriptMetrics from '@/components/blog/ManuscriptMetrics';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
 import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
 
+// 이미지 한 장을 저장소에 올리고 공개 주소를 돌려준다.
+//
+// 예전에는 'image' 라는 이름으로 보냈는데 /api/upload-image 는 'file' 만 받는다.
+// 그래서 업로드가 매번 400 으로 실패하고, 조용히 base64(data:) 로 대신 들어가
+// 글 저장 때 수 MB 짜리 문자열이 DB 에 쌓였다. 실패하면 그때만 base64 로 둔다.
+async function uploadImageFile(file: File): Promise<string> {
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/upload-image', { method: 'POST', body: form });
+    const data = await res.json();
+    if (data.url) return data.url as string;
+    throw new Error(data.error || '업로드 주소를 받지 못했습니다');
+  } catch (e) {
+    console.error('이미지 업로드 실패, 브라우저 안에 임시로 둡니다:', e);
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+  }
+}
+
+// 끌어다 놓은 것에서 파일을 꺼낸다. 폴더를 놓으면 안쪽까지 들어가 모두 모은다.
+// dataTransfer.items 는 이벤트가 끝나면 비므로, 첫 await 전에 항목부터 잡아 둔다.
+async function filesFromDrop(dt: DataTransfer): Promise<File[]> {
+  const entries = [...dt.items]
+    .map(it => it.webkitGetAsEntry?.())
+    .filter((e): e is FileSystemEntry => !!e);
+  if (entries.length === 0) return [...dt.files];
+
+  const out: File[] = [];
+  const walk = async (entry: FileSystemEntry): Promise<void> => {
+    if (entry.isFile) {
+      out.push(await new Promise<File>((res, rej) => (entry as FileSystemFileEntry).file(res, rej)));
+    } else if (entry.isDirectory) {
+      const reader = (entry as FileSystemDirectoryEntry).createReader();
+      // readEntries 는 한 번에 일부만 준다 — 빈 배열이 올 때까지 읽는다
+      for (;;) {
+        const batch = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej));
+        if (batch.length === 0) break;
+        for (const child of batch) await walk(child);
+      }
+    }
+  };
+  for (const entry of entries) await walk(entry);
+  return out;
+}
+
 const FORMATS = [
   { id: 'naver', label: '네이버 블로그', icon: '🟢', desc: '이모지+가독성 중심, 해시태그' },
   { id: 'tistory', label: '티스토리 / 워드프레스', icon: '🔵', desc: 'SEO 최적화, 전문적' },
@@ -414,6 +464,42 @@ export default function BlogGeneratorPage() {
     setImages(prev => prev.map((img, idx) => idx === index ? { ...img, url: '', source: '' } : img));
   };
 
+  // 여러 장을 한 번에 넣는다 — 파일 여러 개 선택·폴더 선택·끌어다 놓기가 모두 여기로 온다.
+  // 파일 이름 순(1, 2, 10 순서)으로 빈 슬롯부터 채우고, 모자라면 슬롯을 최대 10개까지 늘린다.
+  const [bulkProgress, setBulkProgress] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
+  const bulkInputRef = useRef<HTMLInputElement | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleBulkFiles = async (fileList: File[]) => {
+    const files = fileList
+      .filter(f => f.type.startsWith('image/'))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    if (files.length === 0) {
+      if (fileList.length > 0) alert('이미지 파일이 없습니다.');
+      return;
+    }
+    const targets = [
+      ...images.map((img, i) => (img.url ? -1 : i)).filter(i => i >= 0),
+      ...Array.from({ length: 10 - images.length }, (_, i) => images.length + i),
+    ].slice(0, files.length);
+    if (files.length > targets.length) {
+      alert(`슬롯은 최대 10개라 ${targets.length}장만 넣습니다. (${files.length - targets.length}장 제외)`);
+    }
+    if (targets.length === 0) return;
+    const needed = Math.max(...targets) + 1;
+    if (needed > images.length) handleImageCountChange(needed);
+
+    let done = 0;
+    setBulkProgress(`올리는 중 0/${targets.length}`);
+    await Promise.all(targets.map(async (slot, k) => {
+      const url = await uploadImageFile(files[k]);
+      setImages(prev => prev.map((img, idx) => idx === slot ? { ...img, url, source: 'upload' } : img));
+      setBulkProgress(`올리는 중 ${++done}/${targets.length}`);
+    }));
+    setBulkProgress('');
+  };
+
   // 라벨 수동 생성, 크롭 및 다운로드 상태와 헬퍼 함수 (3단계)
   const [labelsLoading, setLabelsLoading] = useState(false);
   const [activeCropSlotIdx, setActiveCropSlotIdx] = useState<number | null>(null);
@@ -750,6 +836,16 @@ ${withTagLine(result.body, result.tags)}
   };
 
   const updateRefLink = (i: number, val: string) => {
+    // 주소 여러 개를 한 번에 붙여넣으면 칸을 나눠 채운다 (최대 3개)
+    const urls = val.split(/\s+/).filter(u => /^https?:\/\//i.test(u));
+    if (urls.length > 1) {
+      setRefLinks(prev => {
+        const next = [...prev.slice(0, i), ...urls, ...prev.slice(i + 1).filter(l => l.trim())];
+        if (next.length > 3) alert(`참고 링크는 3개까지라 ${next.length - 3}개는 뺐습니다.`);
+        return next.slice(0, 3);
+      });
+      return;
+    }
     setRefLinks(prev => prev.map((l, idx) => idx === i ? val : l));
   };
 
@@ -1568,15 +1664,64 @@ ${withTagLine(result.body, result.tags)}
               />
 
               {/* 이미지 갤러리 섹션 (1단계 & 3단계 통합) */}
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+              <div
+                className={`bg-white rounded-2xl border shadow-sm p-5 space-y-4 transition-colors ${isDragOver ? 'border-primary-400 ring-2 ring-primary-300 bg-primary-50/40' : 'border-gray-100'}`}
+                onDragOver={e => {
+                  if (!e.dataTransfer.types.includes('Files')) return;
+                  e.preventDefault();
+                  setIsDragOver(true);
+                }}
+                onDragLeave={e => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIsDragOver(false);
+                }}
+                onDrop={async e => {
+                  if (!e.dataTransfer.types.includes('Files')) return;
+                  e.preventDefault();
+                  setIsDragOver(false);
+                  if (bulkProgress) return;
+                  handleBulkFiles(await filesFromDrop(e.dataTransfer));
+                }}
+              >
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div>
                     <h3 className="font-bold text-gray-800 text-sm flex items-center gap-1.5">
                       <ImageIcon size={16} className="text-primary-500" /> 이미지 갤러리
                     </h3>
-                    <p className="text-[11px] text-gray-400">블로그 본문에 사용할 이미지를 관리합니다</p>
+                    <p className="text-[11px] text-gray-400">
+                      {bulkProgress
+                        ? <span className="text-primary-600 font-bold">{bulkProgress}</span>
+                        : '사진 여러 장이나 폴더를 이 칸으로 끌어다 놓으면 빈 슬롯부터 채웁니다'}
+                    </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={bulkInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      hidden
+                      onChange={e => { handleBulkFiles([...(e.target.files ?? [])]); e.target.value = ''; }}
+                    />
+                    <input
+                      ref={el => { folderInputRef.current = el; el?.setAttribute('webkitdirectory', ''); }}
+                      type="file"
+                      hidden
+                      onChange={e => { handleBulkFiles([...(e.target.files ?? [])]); e.target.value = ''; }}
+                    />
+                    <button
+                      onClick={() => bulkInputRef.current?.click()}
+                      disabled={!!bulkProgress}
+                      className="px-2.5 py-1 bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
+                    >
+                      <Upload size={12} /> 여러 장 올리기
+                    </button>
+                    <button
+                      onClick={() => folderInputRef.current?.click()}
+                      disabled={!!bulkProgress}
+                      className="px-2.5 py-1 bg-white border border-gray-200 hover:bg-gray-50 disabled:opacity-50 text-gray-700 rounded-lg text-xs font-bold transition-colors flex items-center gap-1"
+                    >
+                      <Upload size={12} /> 폴더 올리기
+                    </button>
                     <button
                       onClick={handleAutoGenerateLabels}
                       disabled={labelsLoading || !result?.body}
@@ -1917,24 +2062,7 @@ function ImageAddModal({
     if (!file) return;
     setUploadLoading(true);
     try {
-      const form = new FormData();
-      form.append('image', file);
-      const res = await fetch('/api/upload-image', { method: 'POST', body: form });
-      const data = await res.json();
-      if (data.url) {
-        onSelect(data.url);
-      } else {
-        throw new Error('No URL returned');
-      }
-    } catch {
-      // Fallback base64
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === 'string') {
-          onSelect(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+      onSelect(await uploadImageFile(file));
     } finally {
       setUploadLoading(false);
     }
