@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { callAI } from '@/lib/ai/openrouter';
+import { callAI, callGroq } from '@/lib/ai/openrouter';
 
 const PRIMARY_MODEL = 'gemini-2.5-flash';
 const FALLBACK_MODEL = 'gemini-2.5-flash-lite';
@@ -53,6 +53,51 @@ export function toKoreanError(err: unknown): string {
     return 'AI 생성 결과가 불완전하게 반환되었습니다. 글자 수를 조금 줄이거나 다시 시도해주세요.';
   }
   return 'AI 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+}
+
+// 자동 경로용 AI 호출: OpenRouter 의 지정 모델(예: haiku) → Gemini → Groq.
+//
+// 2026-09-18 아침 카드뉴스 초안이 통째로 빠졌다. OpenRouter 크레딧($5)이
+// 바닥나 haiku 호출이 402 로 두 번 다 실패했기 때문이다. 혼자 도는 자동
+// 경로는 한 공급자만 믿으면 그날이 빈다 — 막히면 다음 공급자로 간다.
+// 마지막 Groq 는 무료 등급이라 셋 다 돈이 떨어져도 하루는 채운다.
+//
+// Gemini 2.5 는 생각(thinking) 토큰도 출력 한도에서 빠진다. 한도를 넉넉히
+// 주고 생각은 끈다 — 안 그러면 긴 JSON 이 중간에 잘린다.
+export async function callWithFallback(opts: {
+  prompt: string;
+  model: string;
+  system?: string;
+  maxTokens?: number;
+  json?: boolean;
+}): Promise<string> {
+  const errors: string[] = [];
+  const fail = (who: string, e: unknown) => {
+    const msg = e instanceof Error ? e.message : String(e);
+    errors.push(`${who}: ${msg.slice(0, 200)}`);
+    console.warn(`[AI] ${who} 실패 → 다음 공급자로: ${msg.slice(0, 200)}`);
+  };
+
+  try {
+    return await callAI(opts);
+  } catch (e) { fail(opts.model, e); }
+
+  try {
+    return await generateWithRetry(opts.prompt, {
+      systemInstruction: opts.system,
+      generationConfig: {
+        maxOutputTokens: Math.max(16384, (opts.maxTokens ?? 0) * 2),
+        thinkingConfig: { thinkingBudget: 0 },
+        ...(opts.json ? { responseMimeType: 'application/json' } : {}),
+      },
+    });
+  } catch (e) { fail('Gemini', e); }
+
+  try {
+    return await callGroq({ prompt: opts.prompt, system: opts.system, maxTokens: opts.maxTokens, jsonMode: opts.json });
+  } catch (e) { fail('Groq', e); }
+
+  throw new Error(`AI 공급자 셋 다 실패 — ${errors.join(' / ')}`);
 }
 
 // Accepts the same input types as model.generateContent():

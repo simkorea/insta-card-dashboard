@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { callOpenRouter } from '@/lib/ai/openrouter';
+import { callWithFallback } from '@/lib/gemini';
 import { buildArticleRules } from '@/lib/blog/qualityRubric';
 import { withTagLine } from '@/lib/blog/tagLine';
 import { extractJson } from '@/lib/blog/extractJson';
@@ -140,7 +140,7 @@ ${sourceRules}
   let lastErr = '';
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
-      raw = await callOpenRouter({ prompt: userPrompt, system: systemPrompt, model: MODEL, maxTokens: 4000 });
+      raw = await callWithFallback({ prompt: userPrompt, system: systemPrompt, model: MODEL, maxTokens: 4000, json: true });
       if (raw.trim()) break;
       lastErr = '빈 응답';
     } catch (e) {

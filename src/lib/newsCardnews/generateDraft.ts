@@ -1,4 +1,4 @@
-import { callAI } from '@/lib/ai/openrouter';
+import { callWithFallback } from '@/lib/gemini';
 import { createClient } from '@supabase/supabase-js';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { generateNewsNotebookImage, generateEdgeNotebookImage, type CardStyle } from '@/lib/notebookImage/generate';
@@ -332,11 +332,13 @@ ${sourceBlock}`;
   for (let attempt = 1; attempt <= 2; attempt++) {
     let text = '';
     try {
-      text = await callAI({
+      // haiku 가 막히면(크레딧 소진 등) Gemini → Groq 로 넘어간다 — callWithFallback 주석 참고
+      text = await callWithFallback({
         prompt,
         model: 'anthropic/claude-haiku-4.5',
         maxTokens: 8000,
         system: '당신은 부동산 분양 정보를 다루는 SNS 콘텐츠 기획자입니다.',
+        json: true,
       });
     } catch (e: any) {
       lastErr = `AI 호출 실패: ${e.message}`;

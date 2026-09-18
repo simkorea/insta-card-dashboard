@@ -279,6 +279,9 @@ export default function DashboardPage() {
   // 오늘 자동 작업 기록 (단계별 성공/실패와 사유)
   const runsToday: any[] = todo.runsToday ?? [];
   const autoPublished = autoPostStatus === 'published';
+  // 10시 크론이 이미 지나갔는데 오늘 초안이 줄에도 없으면, 저절로는 안 올라간다.
+  // (9/18 에 초안이 11시에 늦게 생겼는데 '10~11시에 자동으로 올라갑니다'라고 떴다)
+  const autoWindowPassed = !autoPostStatus && (new Date().getUTCHours() + 9) % 24 >= 11;
   // 오늘 아침 뉴스로 만들어진 초안인지 (KST 기준 24시간 이내)
   // '자동 뉴스' 초안 조회에는 날짜 조건이 없어서, 크론이 며칠 죽어 있으면
   // 지난 초안이 그대로 잡힌다. 오래된 뉴스로 글이 나가지 않도록 여기서 막는다.
@@ -388,7 +391,9 @@ export default function DashboardPage() {
                       ? ' · 오늘 인스타그램에 올라갔습니다.'
                       : autoPostStatus === 'failed'
                         ? ' · 자동 발행이 실패했습니다. 아래에서 다시 시도할 수 있습니다.'
-                        : ' · 아침 10~11시 사이에 자동으로 올라갑니다.'}
+                        : autoWindowPassed
+                          ? ' · 오늘 10시 자동 발행 시간이 지났습니다. "지금 발행하기"로 올려 주세요.'
+                          : ' · 아침 10~11시 사이에 자동으로 올라갑니다.'}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <Link

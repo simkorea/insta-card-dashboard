@@ -66,10 +66,14 @@ export async function GET() {
     // 개수는 따로 센다.
     // 위 목록은 limit(5)로 5건만 가져오므로 그걸 세면 아무리 밀려 있어도
     // 최대 5로 보인다. 대기가 20건인데 5라고 뜨면 볼 이유가 없는 숫자가 된다.
+    //
+    // 실패(failed) 행은 대기가 아니다. 예전엔 '발행 안 됨'을 모두 세서, 9/15·9/17
+    // 실패 행이 '예약 발행 대기 2건 · 다음 9월 15일'로 떠 곧 올라갈 것처럼 보였다.
+    // 실패는 아래 '발행에 실패한 예약'에 따로 나온다.
     const { count: pendingCount } = await supabaseService
       .from('scheduled_posts')
       .select('id', { count: 'exact', head: true })
-      .neq('status', 'published');
+      .eq('status', 'pending');
 
     // 이번주 생성 수
     const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -89,7 +93,7 @@ export async function GET() {
         .gte('created_at', since14).order('created_at', { ascending: false }),
       supabaseService.from('scheduled_posts').select('design_id').eq('status', 'published'),
       supabaseService.from('scheduled_posts').select('scheduled_at, design_name')
-        .neq('status', 'published').order('scheduled_at', { ascending: true }).limit(1).maybeSingle(),
+        .eq('status', 'pending').order('scheduled_at', { ascending: true }).limit(1).maybeSingle(),
     ]);
 
     // 오늘(한국 시간) 쓴 블로그 글이 있는지.
