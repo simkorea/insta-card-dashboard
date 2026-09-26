@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// scheduled_posts·instagram_settings 는 서버 전용이다 (service role).
+// scheduled_posts·sns_accounts 는 서버 전용이다 (service role).
 // 키가 없다고 anon 으로 넘어가지 않는다. RLS 를 닫은 뒤에는 anon 이
 // 빈 결과만 받아 성과가 0으로 보인다 — 여기서 멈춰 실패가 드러나게 한다.
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -13,10 +13,11 @@ const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, serviceKey,
 const IG_API = 'https://graph.facebook.com/v21.0';
 
 export async function GET() {
-  // Load IG settings
+  // Load IG settings — instagram_settings 대신 sns_accounts 를 읽는다 (cron/instagram/route.ts 참고)
   const { data: settings } = await supabase
-    .from('instagram_settings')
-    .select('access_token, ig_user_id')
+    .from('sns_accounts')
+    .select('access_token, ig_user_id:platform_user_id')
+    .eq('platform', 'instagram')
     .limit(1)
     .maybeSingle();
 

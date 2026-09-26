@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { composeCaption } from '@/lib/cardnews/composeCaption';
 
-// scheduled_posts·instagram_settings 는 서버 전용이다 (service role).
+// scheduled_posts·sns_accounts 는 서버 전용이다 (service role).
 // 키가 없다고 anon 으로 넘어가지 않는다. RLS 를 닫은 뒤에는 anon 이
 // 토큰을 못 읽어 발행이 되지 않는다 — 여기서 멈춰 실패가 드러나게 한다.
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -60,9 +60,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '이미지 URL이 없습니다. 공개 접근 가능한 이미지 URL이 필요합니다.' }, { status: 400 });
     }
 
+    // instagram_settings 대신 sns_accounts 를 읽는다 — cron/instagram/route.ts 참고
     const { data: settings, error: settingsErr } = await supabase
-      .from('instagram_settings')
-      .select('access_token, ig_user_id')
+      .from('sns_accounts')
+      .select('access_token, ig_user_id:platform_user_id')
+      .eq('platform', 'instagram')
       .limit(1)
       .maybeSingle();
 

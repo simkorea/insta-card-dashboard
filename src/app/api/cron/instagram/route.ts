@@ -5,7 +5,7 @@ import { saveBriefingAsBlog } from '@/lib/blog/saveBriefingAsBlog';
 import { recordRun } from '@/lib/automation/recordRun';
 import { composeCaption } from '@/lib/cardnews/composeCaption';
 
-// scheduled_posts·instagram_settings 는 서버 전용이다 (service role).
+// scheduled_posts·sns_accounts 는 서버 전용이다 (service role).
 // 여기서 바꾼 것은 키뿐이다 — 발행 로직·순서·시간은 그대로다.
 //
 // 키가 없다고 anon 으로 넘어가지 않는다. RLS 를 닫은 뒤에는 anon 이
@@ -265,9 +265,14 @@ export async function GET(request: NextRequest) {
   } else {
     console.log(`[Cron:Instagram] 조회된 pending 게시물 수: ${posts.length}건`);
 
+    // instagram_settings 대신 sns_accounts 를 읽는다. '재연동' 버튼(OAuth,
+    // /api/instagram/callback)이 갱신하는 테이블이 이거라서, 여기서 안 읽으면
+    // 재연동해도 크론은 계속 옛 토큰을 쓴다 — 2026-09-26에 이걸로 3일간 발행이
+    // 막혔다(사람이 매번 DB를 손으로 복사해줘야 했음).
     const { data: settings } = await supabase
-      .from('instagram_settings')
-      .select('access_token, ig_user_id')
+      .from('sns_accounts')
+      .select('access_token, ig_user_id:platform_user_id')
+      .eq('platform', 'instagram')
       .limit(1)
       .maybeSingle();
 
