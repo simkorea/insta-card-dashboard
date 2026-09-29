@@ -19,6 +19,7 @@ const PUBLIC_API_PATHS = [
   '/api/instagram/webhook',  // Meta가 직접 호출 — 세션 쿠키 없음, 서명 검증(X-Hub-Signature-256)으로 보호
   '/api/youtube/auth',
   '/api/youtube/callback',   // 구글에서 돌아오는 경로. 안에서 세션을 확인하고 없으면 /login으로 보낸다
+  '/api/mcp',                // MCP: 쿠키 대신 route 안에서 MCP_SECRET_TOKEN Bearer로 보호
 ];
 
 // 인증이 필요한 API 경로 prefix
