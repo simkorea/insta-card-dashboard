@@ -104,7 +104,7 @@ export async function middleware(request: NextRequest) {
   // 미로그인 → 보호된 페이지 접근 시 /login 으로
   if (!user && !isPublicPage) {
     const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('next', pathname);
+    loginUrl.searchParams.set('next', pathname + request.nextUrl.search);
     return NextResponse.redirect(loginUrl);
   }
 

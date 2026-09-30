@@ -8,7 +8,11 @@ import { Loader2, Eye, EyeOff } from 'lucide-react';
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get('next') ?? '/cardnews';
+  // next는 미들웨어가 붙여주는 리다이렉트 대상. "//evil.com"처럼 프로토콜 상대
+  // 경로로 외부 주소로 튕기는 걸 막기 위해 "/"로 시작하고 "//"로는 시작하지
+  // 않을 때만 쓴다.
+  const rawNext = searchParams.get('next');
+  const next = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/cardnews';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
