@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
 import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
+import { ImpactRenderer } from '@/components/cardnews/ImpactRenderer';
 
 // 서버(헤드리스 크롬)가 카드를 캡처할 화면.
 //
@@ -95,6 +96,8 @@ export default function CaptureSheet({ pages }: { pages: Page[] }) {
         >
           {p.styleVariant === 'hybridPaper' ? (
             <NewspaperRenderer blocks={(p.blocks || []) as never} scale={CAPTURE_SCALE} index={i} noteLabel={p.noteLabel} noteNumber={p.noteNumber} />
+          ) : p.styleVariant === 'impact' ? (
+            <ImpactRenderer blocks={(p.blocks || []) as never} scale={CAPTURE_SCALE} index={i} noteLabel={p.noteLabel} noteNumber={p.noteNumber} />
           ) : (
             <HybridRenderer blocks={(p.blocks || []) as never} scale={CAPTURE_SCALE} index={i} noteLabel={p.noteLabel} noteNumber={p.noteNumber} />
           )}

@@ -40,11 +40,16 @@ export type DraftPage = {
   showFrame: boolean;
   blocksOffsetY: number;
   ratio: string;
-  styleVariant: 'hybrid';
+  styleVariant: 'hybrid' | 'impact';
+  noteNumber?: string;
   imageKeyword: string;
 };
 
-export function buildDraftPages(cards: UnifiedCard[], ratio = '4:5'): DraftPage[] {
+// 카드 스타일. note=손글씨 노트(기본, 정보 전달), impact=어두운 바탕 큰 글자(상담 유입).
+// DB에 저장되는 값(styleVariant)은 note → 'hybrid', impact → 'impact'.
+export type DraftStyle = 'note' | 'impact';
+
+export function buildDraftPages(cards: UnifiedCard[], ratio = '4:5', style: DraftStyle = 'note'): DraftPage[] {
   return cards.map((card, i) => {
     const brandTone: BrandTone = card.brandTone === 'sage' ? 'sage' : 'gold';
     const rawBlocks = Array.isArray(card.blocks) && card.blocks.length > 0
@@ -65,7 +70,9 @@ export function buildDraftPages(cards: UnifiedCard[], ratio = '4:5'): DraftPage[
       showFrame: card.showFrame !== undefined ? card.showFrame : true,
       blocksOffsetY: i === 0 ? 78 : 90,
       ratio,
-      styleVariant: 'hybrid',
+      styleVariant: style === 'impact' ? 'impact' : 'hybrid',
+      // impact 는 머리 오른쪽에 "n / 전체" 를 보여준다. note 는 이 값을 태그 라벨로 써서 넣지 않는다
+      ...(style === 'impact' ? { noteNumber: `${i + 1} / ${cards.length}` } : {}),
       imageKeyword: card.imageKeyword || '',
     };
   });

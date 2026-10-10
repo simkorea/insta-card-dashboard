@@ -94,10 +94,14 @@ const handler = createMcpHandler(
           slideCount: z.union([z.number().int().min(3).max(10), z.literal('auto')]).default('auto'),
           tone: z.enum(['origin', 'free']).optional().describe('origin: 원본 유지, free: 자유 변형'),
           outputLanguage: z.string().optional(),
+          style: z
+            .enum(['note', 'impact'])
+            .optional()
+            .describe('note: 손글씨 노트(기본, 정보 전달용), impact: 어두운 바탕에 큰 글자(상담 유입용)'),
         }),
         annotations: { readOnlyHint: false, destructiveHint: false },
       },
-      async ({ topic, url, slideCount, tone, outputLanguage }) => {
+      async ({ topic, url, slideCount, tone, outputLanguage, style }) => {
         if (!topic && !url) return fail('topic 또는 url 중 하나는 필요합니다.');
 
         let inputContent = topic || '';
@@ -129,6 +133,16 @@ const handler = createMcpHandler(
         } else if (tone === 'free') {
           genStyleInstruction = `\n- 스타일 지침: 자유 변형 스타일입니다. 생성된 콘텐츠의 개별 맥락과 내용적 필요에 따라 AI가 창의적이고 자유롭게 레이아웃 및 디자인 요소를 다채롭게 구성해 꾸미도록 지시하세요.`;
         }
+
+        // impact 는 상담 유입용 — 표지는 짧은 훅, 마지막 장은 저장·행동 유도.
+        // 한 줄 제목이 크게 찍히므로 길이 제한을 더 조인다.
+        const impactInstruction =
+          style === 'impact'
+            ? `\n    [임팩트 스타일 지침]
+    - 첫 장 headline은 공백 포함 12자 안팎의 짧은 훅(숫자 또는 손해 회피)으로, accentText 없이 마지막 낱말이 눈에 띄게 쓸 것.
+    - 마지막 장은 "저장해 두고 확인하세요"처럼 저장·행동을 유도하는 문구로 마무리할 것.
+    - 중간 장은 번호가 붙는 checklist 위주로 구성할 것.`
+            : '';
 
         const sourceFidelityBlock =
           sourceMode === 'url'
@@ -189,7 +203,7 @@ const handler = createMcpHandler(
     - accentText는 headline 안에서 강조할 3~6자 정도의 짧은 조각만 지정할 것.
     - sub(부제) 텍스트는 공백 포함 40자 이내로 작성할 것.
     - 주제가 비즈니스/부동산/세금/금융이면 brandTone "gold", 라이프/여행/패션/건강이면 "sage".
-${sourceFidelityBlock}${languageInstruction}
+${impactInstruction}${sourceFidelityBlock}${languageInstruction}
 내용: ${inputContent}`;
 
         let text: string;
@@ -208,7 +222,7 @@ ${sourceFidelityBlock}${languageInstruction}
           }
 
           // 새 코드: src/lib/mcp/buildDraftPages.ts — unified 응답을 pages_data로 변환
-          const pagesData = buildDraftPages(data.cardNews);
+          const pagesData = buildDraftPages(data.cardNews, '4:5', style ?? 'note');
 
           // 원본: src/app/api/designs/route.ts (POST) — 원본은 anon key를 쓰지만
           // 여기서는 CLAUDE.md 규칙대로 service role을 쓴다(원본 수정 시 이 차이 유지 여부 재검토).
