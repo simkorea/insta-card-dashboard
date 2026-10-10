@@ -1,0 +1,434 @@
+// 블로그 글 생성 본체.
+//
+// 원래 src/app/api/generate/blog/route.ts 의 POST 본문이었다. HTTP 경로(화면·
+// from-cardnews)와 MCP 도구(cardnews_to_blog)가 같은 코드를 부르도록 여기로
+// 옮겼다. 로직은 그대로이고, 바뀐 것은 두 가지뿐이다.
+//   - 요청 본문을 request.json() 대신 인자(input)로 받는다.
+//   - NextResponse.json(x, { status }) 대신 { status, json: x } 를 돌려준다
+//     (라우트가 그걸 NextResponse 로 감싼다).
+// parseStructuredBlog / cleanContent 는 blogText.ts 로 옮겼다(본문 동일).
+
+export type BlogGenerateJson = {
+  error?: string;
+  title?: string;
+  body?: string;
+  metaDescription?: string;
+  tags?: string[];
+};
+export type BlogGenerateResult = { status: number; json: BlogGenerateJson };
+
+import { generateWithRetry, toKoreanError } from '@/lib/gemini';
+import { callOpenRouter } from '@/lib/ai/openrouter';
+import { buildOutlineRules, buildSectionRules, buildArticleRules } from '@/lib/blog/qualityRubric';
+import { createClient } from '@supabase/supabase-js';
+import { extractArticle } from '@/lib/extractArticle';
+import { parseStructuredBlog, cleanContent } from '@/lib/blog/blogText';
+
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+// 요청 본문은 라우트가 받은 JSON 그대로다(필드 검사는 아래에서 기본값으로 처리 — 예전과 같음).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function generateBlogPost(input: any): Promise<BlogGenerateResult> {
+  try {
+    const {
+      topic,
+      content,
+      format = 'naver',
+      tone = 'professional',
+      language = 'auto',
+      targetAudience,
+      wordCount = 2000,
+      keywords = [],
+      refLinks = [],
+      instructions,
+      cta,
+      personaId,
+      category,
+      sourceUrl,
+    } = input;
+
+    // 기사 URL 은 카드뉴스와 같은 추출기(extractArticle)로 읽는다.
+    //
+    // 예전에는 HTML 태그만 지우고 앞 3000자를 넘겼다. 뉴스 사이트 앞부분은
+    // 메뉴·광고·다른 기사 제목이라, 넣은 기사와 전혀 다른 글이 나왔다.
+    // 읽기에 실패하면 빈 채로 넘어가 AI가 주소만 보고 글을 지어냈다 —
+    // 이제는 여기서 멈추고 이유를 돌려준다.
+    let urlContent = '';
+    let sourceTitle = '';
+    if (sourceUrl) {
+      try {
+        const article = await extractArticle(sourceUrl, 5000);
+        urlContent = article.text;
+        sourceTitle = article.title;
+      } catch (e) {
+        return {
+          status: 422,
+          json: { error: e instanceof Error ? e.message : '기사 본문을 읽지 못했습니다.' },
+        };
+      }
+    }
+
+    // 참고 링크는 선택 사항이라 못 읽은 것은 조용히 뺀다
+    const validRefLinks = (refLinks || []).filter((l: string) => l.trim());
+    const refContents = await Promise.allSettled(
+      validRefLinks.map((url: string) => extractArticle(url, 1200).then(a => a.text))
+    );
+    const validRefContents = refContents
+      .map(r => r.status === 'fulfilled' ? r.value : '')
+      .filter(Boolean);
+
+    const refLinksSection = validRefContents.length > 0
+      ? validRefContents.map((text, idx) => `[참고자료 ${idx + 1} 본문]\n${text}`).join('\n\n')
+      : '';
+
+    const mainInput = topic || content || (sourceUrl ? `${sourceTitle || sourceUrl} (위 원문 기사를 바탕으로)` : '');
+    if (!mainInput) return { status: 400, json: { error: '주제 또는 내용이 필요합니다' } };
+
+    let persona = null;
+    if (personaId && personaId !== 'none') {
+      const { data } = await supabase
+        .from('brand_personas')
+        .select('*')
+        .eq('id', personaId)
+        .maybeSingle();
+      persona = data;
+    }
+
+    const toneLabel: Record<string, string> = {
+      professional: '전문적이고 신뢰감 있는',
+      friendly: '친근하고 따뜻한',
+      trendy: '트렌디하고 젊은',
+      emotional: '감성적이고 공감가는',
+      informative: '정보 전달 중심의 명확한',
+      persuasive: '설득력 있고 행동 유도하는',
+    };
+
+    const langInstruction: Record<string, string> = {
+      auto: '입력된 주제의 언어에 맞게 작성하세요.',
+      ko: '반드시 한국어로 작성하세요.',
+      en: 'Write entirely in English.',
+      ja: '日本語で書いてください。',
+    };
+
+    const formatGuide: Record<string, string> = {
+      naver: `[네이버 블로그 스타일]
+- 제목: 검색 최적화 키워드 포함 (20-35자)
+- 중간중간 개행으로 가독성 확보
+- 친근하고 대화하듯 마무리 소통 문구
+- 해시태그 10-15개로 마무리`,
+      tistory: `[티스토리/워드프레스 스타일]
+- 제목: SEO 최적화, 핵심 키워드 앞에 배치
+- 목차 섹션 (## 목차) 포함
+- H2/H3 소제목 계층 구조 (## / ###) 사용
+- 리스트, 표, 인용구 적극 활용
+- 전문적인 설명과 근거 제시
+- 마지막에 핵심 요약 박스`,
+      instagram: `[인스타그램 캡처용 스타일]
+- 짧고 임팩트 있는 제목
+- 핵심 포인트 3-5개로 압축
+- 줄바꿈으로 읽기 편하게
+- 강력한 CTA 문구로 마무리
+- 해시태그 20-30개`,
+    };
+
+    // 소제목 하나만 쓰는 작성자에게 주는 형식 안내.
+    //
+    // 위 안내는 '글 한 편'을 쓰는 사람 기준이다. 제목을 정하고 해시태그로
+    // 마무리하라는 항목이 들어 있는데, 나눠 쓰기에서는 그걸 소제목마다
+    // 한 명씩 다 읽는다. 그래서 네 부분이 전부 해시태그 뭉치로 끝나
+    // 본문 한가운데 해시태그가 네 번 박혔다. 한 줄로 금지시켜 봤지만
+    // 3회 중 2회는 그래도 붙었다 — 안내문 자체를 안 주는 게 맞다.
+    // 여기엔 문단·표기 같은 '쓰는 방식'만 남긴다.
+    const sectionFormatGuide: Record<string, string> = {
+      naver: `[네이버 블로그 스타일]
+- 중간중간 개행으로 가독성 확보`,
+      tistory: `[티스토리/워드프레스 스타일]
+- H2/H3 소제목 계층 구조 (## / ###) 사용
+- 리스트, 표, 인용구 적극 활용
+- 전문적인 설명과 근거 제시`,
+      instagram: `[인스타그램 캡처용 스타일]
+- 핵심 포인트 3-5개로 압축
+- 줄바꿈으로 읽기 편하게`,
+    };
+
+    const personaSection = persona
+      ? `[브랜드 페르소나]
+- 브랜드: ${persona.brand_name}
+- 페르소나 이름: ${persona.persona_name || persona.brand_name}
+- 타겟 독자: ${persona.target_audience || '일반 대중'}
+- 업종: ${persona.industry || '미정'}
+- 글의 톤/말투: ${persona.tone || '전문적인 말투'}
+- 포스팅 목적: ${persona.posting_goal || '정보 제공 및 신뢰 구축'}
+- 연관 키워드: ${Array.isArray(persona.keywords) ? persona.keywords.join(', ') : ''}
+- 이모지 스타일: ${persona.emoji_style || '적절히 사용'}`
+      : '';
+
+    const extraSections = [
+      category && `카테고리: ${category}`,
+      targetAudience && `대상 독자: ${targetAudience}`,
+      keywords.length > 0 && `반드시 포함할 검색 키워드: ${keywords.join(', ')}`,
+      validRefLinks.length > 0 && validRefContents.length === 0 && `참고 링크 (내용 참고용, 직접 인용 금지): ${validRefLinks.join(', ')}`,
+      instructions && `추가 지시사항: ${instructions}`,
+      cta && `마지막에 CTA 포함 - 버튼 텍스트: "${cta.text}"${cta.url ? `, 링크: ${cta.url}` : ''}`,
+    ].filter(Boolean).join('\n');
+
+    const urlContentSection = urlContent
+      ? `[참고 원문 기사 본문 (반드시 이 내용을 바탕으로 새로운 블로그 글을 작성하십시오)]\n${urlContent}`
+      : '';
+
+    let markdownAndEmojiInstruction = '';
+    if (format === 'naver' || format === 'instagram') {
+      markdownAndEmojiInstruction = `
+[중요 - 마크다운 및 장식 이모지 사용 금지]
+- 본문에 **볼드** 및 ##, ### 같은 마크다운 헤딩 기호를 절대 사용하지 마십시오. 강조는 기호가 아닌 일반 문장 서술을 통해 진행하십시오.
+- 문단 앞이나 내용 강조를 위한 장식용 이모지(✅, 📌, 🎉, ⭐, 👉, ✨, 🔥, 📢, 📍, 🔔, 💡, 🚀, 👑 등)를 절대 사용하지 마십시오.
+- 오직 줄바꿈과 공백만을 사용하여 단락을 구분하고 가독성을 확보하십시오.`;
+    } else if (format === 'tistory') {
+      markdownAndEmojiInstruction = `
+[중요 - 장식 이모지 사용 금지]
+- 소제목 구성을 위해 마크다운 헤딩(##, ###)과 볼드(**단어**) 문법은 사용하되, 장식용 이모지(✅, 📌, 🎉, ⭐, 👉, ✨, 🔥, 📢, 📍, 🔔, 💡, 🚀, 👑 등)는 일체 사용하지 마십시오.`;
+    }
+
+    const ctaInstruction = cta
+      ? `- [필수 CTA] 글 마지막 마무리 단락에 다음 행동 유도(CTA)를 반드시 포함하여 독자의 행동을 유도하세요. 문구: "${cta.text}"${cta.url ? `, 링크: ${cta.url}` : ''}`
+      : (persona 
+          ? `- 글 마무리 시 브랜드(${persona.brand_name})와 부합하는 자연스러운 소통 멘트로 포스팅을 마치십시오.` 
+          : `- 브랜드 멘트나 링크 없이 깔끔하게 일반적인 마무리 소통 문구로 포스팅을 마치십시오.`);
+
+    const instructionsInstruction = instructions
+      ? `\n[특별 추가 지시사항]\n- 다음 지시사항을 반드시 따르십시오: ${instructions}`
+      : '';
+
+    // 소제목 수와 소제목당 분량을 목표 분량에서 뽑는다. 예전처럼 '6개 ×
+    // 500자'로 고정하면 1천자를 시켜도 3천자가 나온다.
+    const sectionCount = Math.min(8, Math.max(3, Math.round(wordCount / 500)));
+    const perSection = Math.round(wordCount / sectionCount);
+
+    // 채점 루브릭이 요구하는 것을 쓸 때 미리 시킨다.
+    //
+    // 점검 패널은 다 쓴 글을 재기만 했다. 그래서 매번 같은 항목에서 깎였다 —
+    // 수치가 없다, 소제목이 없다, 질문형이 없다. 셀 수 있는 요구사항이니
+    // 애초에 프롬프트에 넣는 편이 낫다. 문구는 루브릭 파일이 만든다(같은
+    // 상수를 읽으므로 '시키는 값'과 '채점하는 값'이 어긋나지 않는다).
+    //
+    // 목표 검색어는 사용자가 넣은 키워드의 첫 번째를 쓴다. 채점 쪽은
+    // 검색어가 없으면 본문에서 추정하는데, 여기서는 추정할 본문이 아직 없다.
+    const targetKeyword = (keywords || [])
+      .map((k: unknown) => String(k).trim())
+      .filter(Boolean)[0] || '';
+
+    // 주제·페르소나·톤·형식 등 '어떤 글인가'를 정하는 부분.
+    // 나눠 쓰기에서 뼈대와 각 소제목 요청이 이 부분만 공유한다 — 아래
+    // [목표 분량]과 [응답 형식]까지 같이 넘기면 소제목 하나를 쓰라고
+    // 해 놓고 전체 분량과 [TITLE] 형식을 요구하는 꼴이 된다.
+    //
+    // 형식 안내는 글 한 편을 쓰는 경우와 소제목 하나만 쓰는 경우가 다르다.
+    // 자세한 이유는 sectionFormatGuide 주석 참고.
+    const buildContext = (scope: 'article' | 'section') => `당신은 SEO 전문가이자 블로그 작가입니다.
+${langInstruction[language] || langInstruction.auto}
+
+${personaSection}
+
+${urlContentSection}
+
+[블로그 주제]
+${mainInput}
+
+${extraSections ? `[추가 설정]\n${extraSections}\n` : ''}
+${refLinksSection ? `${refLinksSection}\n` : ''}
+${scope === 'section'
+  ? (sectionFormatGuide[format] || sectionFormatGuide.naver)
+  : (formatGuide[format] || formatGuide.naver)}
+
+[작성 및 톤 지침]
+${persona ? `- 글의 전반적인 말투와 분위기는 브랜드 페르소나의 '글의 톤/말투'(${persona.tone})를 적극 반영하여 통일성 있게 작성하세요.
+- 타겟 독자(${targetAudience || persona.target_audience || '일반 대중'})의 관심사와 수준에 맞는 단어와 설명 방식을 선택하세요.
+- 포스팅 목적(${persona.posting_goal || '정보 제공'})이 잘 달성되도록 유용한 내용 위주로 깊이 있게 글을 구성하세요.` : `- 글의 전반적인 말투와 분위기는 지정된 톤(${toneLabel[tone] || '전문적인'})에 맞게 구성하세요.
+- 브랜드 언급이나 특정 페르소나 색채 없이 깔끔하고 객관적인 일반 글(정보성 콘텐츠) 형태로 작성하세요.`}
+${ctaInstruction}
+${markdownAndEmojiInstruction}${instructionsInstruction}`;
+
+    const contextBlock = buildContext('article');
+    const sectionContext = buildContext('section');
+
+    const prompt = `${contextBlock}
+
+[목표 분량]
+- 본문 분량: 공백 포함 ${wordCount}자. ${Math.round(wordCount * 0.9)}자~${Math.round(wordCount * 1.15)}자 사이로 맞추세요.
+- 소제목 ${sectionCount}개로 나누고, 소제목 하나당 ${perSection}자 내외로 서술하세요.
+
+${buildArticleRules({ sectionCount, keyword: targetKeyword })}
+
+[응답 형식]
+반드시 JSON 구조나 마크다운 코드블록 없이, 정확히 아래 지정된 대괄호 구분자 포맷으로만 작성하십시오:
+
+[TITLE]
+SEO 최적화 제목
+
+[BODY]
+블로그 본문 전체
+
+[META]
+검색 결과에 표시될 설명 (120자 이내)
+
+[TAGS]
+태그1, 태그2, 태그3, 태그4, 태그5`;
+
+    // ── 긴 글은 나눠서 쓴다 ────────────────────────────────────────────────
+    //
+    // 한 번에 3천자를 시키면 두 가지가 같이 어긋났다. 그냥 '3000자 내외'라고
+    // 하면 2400자쯤에서 끝내고, 분량을 강하게 밀어붙이면 이번엔 224초가
+    // 걸렸다 (재본 값이다). 길이를 맞추면 시간이 터지고, 시간을 맞추면
+    // 길이가 모자랐다.
+    //
+    // 뼈대를 먼저 잡고 소제목별로 나눠 쓰면 둘 다 풀린다. 소제목 하나는
+    // 500자짜리 짧은 요청이라 빠르고, 동시에 보내므로 제일 느린 하나만
+    // 기다리면 된다. 목표 3000자 기준 재본 값:
+    //
+    //   단일 호출(deepseek)  2910자  224초
+    //   나눠 쓰기(deepseek)  3356자   88초
+    //   나눠 쓰기(haiku)     2951자   33초   ← 이걸 쓴다
+    //
+    // 뼈대가 깨지면(JSON 파싱 실패 등) 기존 단일 호출로 돌아간다.
+    //
+    // 소제목 작성자는 sectionContext 를 받는다. 글 한 편 기준의 형식 안내를
+    // 그대로 주면 부분마다 해시태그로 끝맺는다 — sectionFormatGuide 주석 참고.
+    const SPLIT_MIN_CHARS = 1500;
+    const SECTION_MODEL = 'anthropic/claude-haiku-4.5';
+
+    const headingRule = format === 'tistory'
+      ? '첫 줄에 "## 소제목" 형태로 소제목을 쓰고 줄바꿈 후 본문을 이어가세요.'
+      : '첫 줄에 소제목을 그대로 쓰고(기호 없이) 줄바꿈 후 본문을 이어가세요.';
+
+    const generateBySections = async () => {
+      const outlineRaw = await callOpenRouter({
+        model: SECTION_MODEL,
+        maxTokens: 4000,
+        prompt: `${contextBlock}
+
+[지금 할 일]
+위 조건에 맞는 글의 '뼈대'만 짭니다. 본문은 쓰지 마세요.
+마크다운 코드블록 없이 순수 JSON 객체만 답하세요.
+
+{
+  "title": "제목",
+  "metaDescription": "120자 이내 요약",
+  "tags": ["태그", "... 8개"],
+  "sections": [{
+    "heading": "소제목",
+    "points": ["이 부분에서 다룰 내용 3가지"],
+    "question": "이 부분에서 독자가 실제로 물을 법한 질문 한 문장 (반드시 물음표로 끝낼 것)"
+  }]
+}
+
+소제목은 정확히 ${sectionCount}개이고, 서로 내용이 겹치지 않아야 합니다.
+
+${buildOutlineRules({ sectionCount, keyword: targetKeyword })}`,
+      });
+
+      const outline = JSON.parse(
+        outlineRaw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+      );
+      const sections: { heading?: string; points?: string[]; question?: string }[] =
+        Array.isArray(outline?.sections) ? outline.sections : [];
+      if (sections.length === 0) throw new Error('뼈대에 소제목이 없습니다');
+
+      const map = sections.map((s, i) => `${i + 1}. ${s.heading || ''}`).join('\n');
+
+      // 소제목별로 동시에 보낸다. 순서대로 보내면 이 방식의 이점이 사라진다.
+      const written = await Promise.all(
+        sections.map((s, i) =>
+          callOpenRouter({
+            model: SECTION_MODEL,
+            maxTokens: 4000,
+            prompt: `${sectionContext}
+
+[지금 할 일]
+글 전체 구성은 이렇습니다:
+${map}
+
+당신은 ${i + 1}번 "${s.heading}" 부분만 씁니다. 다른 번호에 해당하는 내용은 쓰지 마세요.
+이 부분에서 다룰 것: ${(s.points || []).join(', ') || s.heading}
+
+- 공백 포함 ${perSection}자 내외로 쓰세요.
+- ${headingRule}
+- 이 부분의 내용만 쓰고, 글 전체의 인사말이나 맺음말은 넣지 마세요.
+- 해시태그(#...)를 쓰지 마세요. 태그는 뼈대에서 따로 뽑습니다.
+${i === sections.length - 1 ? '- 다만 마지막 부분이므로 위 지침에 있는 마무리 문구/CTA는 여기에 넣으세요.' : ''}
+- [TITLE] 같은 구분자 없이 본문 텍스트만 답하세요.
+
+${buildSectionRules({
+  index: i,
+  sectionCount: sections.length,
+  keyword: targetKeyword,
+  headings: sections.map(x => x.heading || ''),
+  question: s.question,
+})}`,
+          }).then(t => t.trim())
+        )
+      );
+
+      return {
+        title: String(outline?.title || '').trim(),
+        body: written.filter(Boolean).join('\n\n'),
+        metaDescription: String(outline?.metaDescription || '').trim(),
+        tags: Array.isArray(outline?.tags) ? outline.tags.map(String).slice(0, 8) : [],
+      };
+    };
+
+    // maxDuration(300초)보다 먼저 끊어야 플랫폼이 죽이기 전에 한국어 에러를
+    // 돌려줄 수 있다. 여유를 두고 240초.
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('TIMEOUT')), 240000)
+    );
+
+    try {
+      const generatePromise = (async () => {
+        let parsed: { title: string; body: string; metaDescription: string; tags: string[] } | null = null;
+
+        // 긴 글만 나눠 쓴다. 짧은 글은 한 번에 써도 빠르고, 굳이 나누면
+        // 소제목이 잘게 쪼개져 읽기만 나빠진다.
+        if (wordCount >= SPLIT_MIN_CHARS) {
+          try {
+            const s = await generateBySections();
+            if (s.body.length > 0) parsed = s;
+          } catch (splitErr) {
+            console.warn('[blog] 나눠 쓰기 실패, 단일 호출로 대체:', splitErr);
+          }
+        }
+
+        if (!parsed) {
+          // maxOutputTokens를 16384로 상향하여 출력 여유 공간 극대화
+          const text = (await generateWithRetry(prompt, {
+            generationConfig: { maxOutputTokens: 16384 }
+          })).trim();
+          parsed = parseStructuredBlog(text);
+        }
+
+        // 후처리 청소 적용
+        parsed.title = cleanContent(parsed.title, format, true);
+        parsed.body = cleanContent(parsed.body, format, false);
+        parsed.metaDescription = cleanContent(parsed.metaDescription, format, false);
+        
+        return parsed;
+      })();
+
+      const data = await Promise.race([generatePromise, timeoutPromise]);
+      return { status: 200, json: data };
+    } catch (err: any) {
+      if (err.message === 'TIMEOUT') {
+        return {
+          status: 504,
+          json: { error: 'AI 생성 요청이 지연되어 시간 초과되었습니다. 잠시 후 다시 시도해주세요.' },
+        };
+      }
+      return { status: 500, json: { error: toKoreanError(err) } };
+    }
+  } catch (error: any) {
+    return { status: 500, json: { error: toKoreanError(error) } };
+  }
+}

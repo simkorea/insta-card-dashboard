@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSlideImageUrls, toBlogImageSlots } from '@/lib/cardnews/slideImages';
+import { toBlogImageSlots } from '@/lib/cardnews/slideImages';
 import { createClient } from '@supabase/supabase-js';
-import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
+import { generateBlogFromCardnews } from '@/lib/cardnews/cardnewsToBlog';
 import { buildNarration } from '@/lib/cardnews/narration';
 import { buildVideoTitle, buildVideoCaption } from '@/lib/cardnews/videoMeta';
 import { withTagLine } from '@/lib/blog/tagLine';
@@ -15,6 +15,9 @@ import { withTagLine } from '@/lib/blog/tagLine';
 // 영상은 여기서 만들지 않는다. 브라우저가 캔버스를 실시간으로 녹화해야 해서
 // 서버에서 끝낼 수 없다. 대신 영상 화면이 곧바로 쓸 수 있도록 제목·캡션·
 // 내레이션 대본을 같이 돌려준다.
+//
+// 읽기·생성·카드 그림 구하기는 src/lib/cardnews/cardnewsToBlog.ts 로 옮겼다
+// (MCP 도구 cardnews_to_blog 와 같은 코드를 쓴다). 저장과 영상 재료는 여기 남았다.
 
 export const maxDuration = 300;
 
@@ -34,50 +37,40 @@ export async function POST(request: NextRequest) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { data: design, error: designErr } = await supabase
-      .from('card_designs')
-      .select('id, name, pages_data')
-      .eq('id', designId)
-      .maybeSingle();
-
-    if (designErr) return NextResponse.json({ error: designErr.message }, { status: 500 });
-    if (!design) return NextResponse.json({ error: '카드뉴스를 찾을 수 없습니다.' }, { status: 404 });
-
-    const pages = Array.isArray(design.pages_data) ? design.pages_data : [];
-    if (pages.length === 0) {
-      return NextResponse.json({ error: '카드 내용이 비어 있습니다.' }, { status: 400 });
-    }
-
-    // 카드의 리드 문장·표·체크리스트·출처까지 근거로 넘긴다.
-    // 제목만 넘기면 AI가 나머지를 지어낸다 (예전에 그래서 엉뚱한 글이 나왔다).
-    const source = pagesToBlogSource(pages);
-
     // 블로그 생성 라우트는 미들웨어가 로그인으로 막고 있다.
     // 서버끼리 부르는 것이라 쿠키가 자동으로 따라가지 않아, 들어온 요청의
     // 세션 쿠키를 그대로 실어 보낸다. 안 그러면 '로그인이 필요합니다'로 막힌다.
     const origin = new URL(request.url).origin;
-    const blogRes = await fetch(`${origin}/api/generate/blog`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        cookie: request.headers.get('cookie') || '',
+    const result = await generateBlogFromCardnews({
+      supabase,
+      designId,
+      format,
+      tone,
+      generateBlog: async ({ topic, format, tone }) => {
+        const blogRes = await fetch(`${origin}/api/generate/blog`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            cookie: request.headers.get('cookie') || '',
+          },
+          body: JSON.stringify({ topic, format, tone }),
+        });
+        const blog = await blogRes.json();
+        if (!blogRes.ok || blog.error) {
+          return {
+            ok: false,
+            error: blog.error || '블로그 생성에 실패했습니다.',
+            status: blogRes.status === 200 ? 500 : blogRes.status,
+          };
+        }
+        return { ok: true, blog };
       },
-      body: JSON.stringify({ topic: source, format, tone }),
     });
-    const blog = await blogRes.json();
-    if (!blogRes.ok || blog.error) {
-      return NextResponse.json(
-        { error: blog.error || '블로그 생성에 실패했습니다.' },
-        { status: blogRes.status === 200 ? 500 : blogRes.status },
-      );
-    }
 
-    // 카드 그림도 같이 넣는다.
-    //
-    // 화면에서 카드뉴스를 골라 만들면 카드가 그림으로 들어가는데, 이 길로
-    // 만든 글은 글만 저장돼서 다시 열면 이미지가 0장이었다. 인스타에 올리며
-    // 이미 그려 둔 그림이 있으면 그걸 그대로 쓰고, 없으면 서버에서 그린다.
-    const slideUrls = await getSlideImageUrls(designId, 120_000);
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    const { design, pages, blog, slideUrls } = result;
 
     // 만든 글을 보관한다. 실패해도 글 자체는 돌려준다 — 다시 만들게 하는 것보다 낫다.
     let blogPostId: string | null = null;
@@ -104,9 +97,9 @@ export async function POST(request: NextRequest) {
       blog: { title: blog.title, body: blog.body, metaDescription: blog.metaDescription, tags: blog.tags },
       // 영상 화면이 바로 쓸 수 있는 재료
       video: {
-        title: buildVideoTitle(pages, design.name),
-        caption: buildVideoCaption(pages, design.name),
-        narration: buildNarration(pages),
+        title: buildVideoTitle(pages as never, design.name),
+        caption: buildVideoCaption(pages as never, design.name),
+        narration: buildNarration(pages as never),
       },
     });
   } catch (e: any) {

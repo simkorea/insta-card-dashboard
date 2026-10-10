@@ -10,6 +10,7 @@ import {
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
 import { withTagLine } from '@/lib/blog/tagLine';
+import { buildZipBaseName, buildManuscriptText, buildImageFileName } from '@/lib/blog/zipManifest';
 import QualityPanel from '@/components/blog/QualityPanel';
 import ManuscriptMetrics from '@/components/blog/ManuscriptMetrics';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
@@ -569,9 +570,7 @@ export default function BlogGeneratorPage() {
       for (let i = 0; i < activeImages.length; i++) {
         const img = activeImages[i];
         const index = images.findIndex(x => x.id === img.id);
-        const label = img.label.trim();
-        const cleanLabel = label ? label.replace(/[\/\\:*?"<>|]/g, '_') : `image_${index + 1}`;
-        const imgFileName = `${index + 1}_${cleanLabel}.jpg`;
+        const imgFileName = buildImageFileName(index, img.label);
 
         try {
           const proxyUrl = img.url.startsWith('http')
@@ -607,31 +606,19 @@ export default function BlogGeneratorPage() {
       const dd = String(today.getDate()).padStart(2, '0');
       const dateStr = `${yyyy}${mm}${dd}`;
 
-      const rawTopic = topic.trim() || result.title.trim() || 'blog';
-      const cleanTopic = rawTopic
-        .replace(/[\r\n]+/g, ' ')           // 줄바꿈을 공백으로
-        .replace(/[\/\\:*?"<>|\[\]]/g, '_')  // 윈도우 금지문자 + 대괄호 제거
-        .replace(/\s+/g, '_')                // 연속 공백을 _ 로
-        .replace(/_+/g, '_')                 // 연속 _ 를 하나로
-        .replace(/^_+|_+$/g, '')             // 앞뒤 _ 제거
-        .substring(0, 30) || 'blog';         // 30자 제한, 비면 'blog'
-      const baseFileName = `${dateStr}_${cleanTopic}`;
+      // 파일 이름과 원고 형식은 lib/blog/zipManifest.ts 가 정한다 —
+      // MCP 도구(cardnews_to_blog)가 같은 함수로 같은 ZIP 구성을 돌려준다.
+      const baseFileName = buildZipBaseName({ dateStr, topic, title: result.title });
 
       const zip = new JSZip();
 
       // 글 내용 구성
-      const txtContent = `[제목]
-${result.title}
-
-[메타설명]
-${result.metaDescription}
-
-[태그]
-${result.tags.map(t => `#${t}`).join(', ')}
-
-[본문]
-${withTagLine(result.body, result.tags)}
-`;
+      const txtContent = buildManuscriptText({
+        title: result.title,
+        metaDescription: result.metaDescription,
+        tags: result.tags,
+        bodyWithTags: withTagLine(result.body, result.tags),
+      });
 
       zip.file(`${baseFileName}.txt`, txtContent);
 
@@ -640,9 +627,7 @@ ${withTagLine(result.body, result.tags)}
       for (let i = 0; i < activeImages.length; i++) {
         const img = activeImages[i];
         const index = images.findIndex(x => x.id === img.id);
-        const label = img.label.trim();
-        const cleanLabel = label ? label.replace(/[\/\\:*?"<>|]/g, '_') : `image_${index + 1}`;
-        const imgFileName = `${index + 1}_${cleanLabel}.jpg`;
+        const imgFileName = buildImageFileName(index, img.label);
 
         try {
           const proxyUrl = img.url.startsWith('http')

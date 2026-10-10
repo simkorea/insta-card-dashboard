@@ -8,6 +8,11 @@ import { extractArticle } from '@/lib/extractArticle';
 import { buildDraftPages } from '@/lib/mcp/buildDraftPages';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { captureDesignSlides } from '@/lib/cardnews/captureSlides';
+import { generateBlogFromCardnews } from '@/lib/cardnews/cardnewsToBlog';
+import { toBlogImageSlots } from '@/lib/cardnews/slideImages';
+import { generateBlogPost } from '@/lib/blog/generateBlogPost';
+import { withTagLine } from '@/lib/blog/tagLine';
+import { buildZipManifest, ymdKst } from '@/lib/blog/zipManifest';
 import { fetchMolitTrades } from '@/lib/aptList/fetchMolit';
 import { findSigungu } from '@/lib/aptList/lawdCodes';
 
@@ -319,6 +324,107 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
               editorUrl: `${siteOrigin()}/cardnews/editor?id=${design.id}`,
               ...(caption !== undefined ? { caption } : {}),
               note: '입력 문구를 AI 수정 없이 그대로 저장했습니다(배경 이미지 없음). render_design으로 렌더하세요.',
+            },
+            null,
+            2
+          )
+        );
+      }
+    );
+
+    // ── cardnews_to_blog ────────────────────────────────────────────────
+    server.registerTool(
+      'cardnews_to_blog',
+      {
+        title: '카드뉴스 → 블로그 원고',
+        description:
+          '승인된 카드뉴스 한 벌(designId)로 네이버 블로그 원고를 만들어 돌려줍니다. 화면의 "카드뉴스로 블로그까지 한 번에"(/api/generate/from-cardnews)와 같은 생성 코드를 쓰되, DB에 저장하지 않고 게시·예약·SNS 업로드도 하지 않습니다. 생성된 글은 손대지 않고 그대로 돌려줍니다. ' +
+          '카드 그림은 이미 그려 둔 것이 있으면 재사용하고, 없으면 서버가 그려 공개 이미지 주소로 돌려줍니다(render_design과 같은 저장소에 PNG 업로드). 그림을 못 그리면 이미지 없이 글만 돌려줍니다. ' +
+          '응답의 zip 항목은 블로그 생성기 화면 "전체 다운로드"가 만드는 ZIP과 같은 구성입니다. 바깥 스크립트는 zip.entries 대로 ZIP을 만들면 됩니다: ' +
+          '(1) 원고 파일 1개 — 이름 zip.manuscriptFileName("YYYYMMDD_주제.txt"), 내용은 zip.manuscriptText 그대로(UTF-8). ' +
+          '원고는 줄 전체가 [제목] / [메타설명] / [태그] / [본문] 인 섹션 머리로 나뉘고, [태그]는 "#a, #b" 쉼표 구분, [본문] 끝에 해시태그 줄이 붙고 파일 끝에 줄바꿈 1개가 있습니다. ' +
+          '(2) 이미지 — 이름 "{슬롯번호}_{라벨}.jpg"(라벨이 없으면 "{슬롯번호}_image_{슬롯번호}.jpg", 예: 1_image_1.jpg), 내용은 images[].url 을 내려받은 것. 슬롯 번호가 표시 순서이며 그림이 없는 슬롯은 번호를 건너뜁니다. 확장자는 .jpg 로 붙이지만 카드 그림은 실제로 PNG 입니다(화면 ZIP도 같음). ' +
+          '(3) ZIP 파일 이름 zip.fileName("YYYYMMDD_주제.zip") — 파일명 앞 8자리가 글 날짜로 읽힙니다. 원고 .txt 는 ZIP 안에 하나만 넣으세요(첫 .txt 를 원고로 읽음). ' +
+          '이 ZIP을 네이버 블로그 업로드 프로그램(publish.py)이 "카드뉴스 신규\\블로그" 폴더에서 읽습니다. ' +
+          'AI 글 생성에 시간(보통 30~90초)과 AI 사용량이 듭니다.',
+        inputSchema: z.object({
+          designId: z.string().uuid().describe('승인된 카드뉴스 디자인 id (list_designs / render_design의 designId)'),
+          format: z
+            .enum(['naver', 'tistory', 'instagram'])
+            .default('naver')
+            .describe('글 형식. 기본 naver (from-cardnews와 같은 뜻)'),
+          tone: z
+            .enum(['professional', 'friendly', 'trendy', 'emotional', 'informative', 'persuasive'])
+            .default('professional')
+            .describe('글 톤. 기본 professional (from-cardnews와 같은 뜻)'),
+        }),
+        annotations: { readOnlyHint: false, destructiveHint: false },
+      },
+      async ({ designId, format, tone }) => {
+        // 원본: src/app/api/generate/from-cardnews/route.ts — 앞부분(읽기→근거→생성→카드 그림)을
+        // src/lib/cardnews/cardnewsToBlog.ts 로 빼서 같은 코드를 쓴다. 저장(blog_posts)과
+        // 영상 재료는 쓰지 않는다. 쿠키가 없어서 /api/generate/blog 를 HTTP로 부르지 않고
+        // 그 본체(src/lib/blog/generateBlogPost.ts)를 직접 부른다.
+        const result = await generateBlogFromCardnews({
+          supabase,
+          designId,
+          format: format ?? 'naver',
+          tone: tone ?? 'professional',
+          generateBlog: async ({ topic, format: f, tone: t }) => {
+            const r = await generateBlogPost({ topic, format: f, tone: t });
+            if (r.status < 200 || r.status >= 300 || r.json?.error) {
+              return {
+                ok: false,
+                error: r.json?.error || '블로그 생성에 실패했습니다.',
+                status: r.status === 200 ? 500 : r.status,
+              };
+            }
+            return { ok: true, blog: r.json };
+          },
+        });
+        if (!result.ok) return fail(`${result.error} (코드 ${result.status})`);
+
+        const { design, blog, slideUrls } = result;
+        const title = blog.title || design.name;
+        const tags = Array.isArray(blog.tags) ? blog.tags : [];
+        const slots = toBlogImageSlots(slideUrls);
+
+        // 원본: src/app/blog-generator/page.tsx (downloadZip) — 이름·원고 형식은
+        // src/lib/blog/zipManifest.ts 로 빼서 화면과 같은 함수를 쓴다.
+        const manifest = buildZipManifest({
+          dateStr: ymdKst(),
+          topic: design.name,
+          title,
+          metaDescription: blog.metaDescription || '',
+          tags,
+          // 화면에서 저장·다운로드할 때와 같게 — 붙여넣으면 태그도 같이 간다
+          bodyWithTags: withTagLine(blog.body || '', tags),
+          slots,
+        });
+
+        return ok(
+          JSON.stringify(
+            {
+              designId: design.id,
+              designName: design.name,
+              format: format ?? 'naver',
+              tone: tone ?? 'professional',
+              // 생성된 그대로 (태그 줄을 붙이거나 다듬지 않음)
+              blog: { title, body: blog.body, metaDescription: blog.metaDescription, tags: blog.tags },
+              images: manifest.images,
+              zip: {
+                fileName: manifest.zipFileName,
+                manuscriptFileName: manifest.manuscriptFileName,
+                manuscriptText: manifest.manuscriptText,
+                entries: [
+                  { name: manifest.manuscriptFileName, kind: 'manuscript', content: 'zip.manuscriptText' },
+                  ...manifest.images.map((im) => ({ name: im.fileName, kind: 'image', sourceUrl: im.url })),
+                ],
+              },
+              saved: false,
+              note:
+                (slideUrls.length === 0 ? '카드 그림을 만들지 못해 이미지 없이 글만 돌려줍니다. ' : '') +
+                'DB(blog_posts)에 저장하지 않았고 게시·예약도 하지 않았습니다.',
             },
             null,
             2
