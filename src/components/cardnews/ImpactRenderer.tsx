@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { readCardBlocks } from '@/lib/cardnews/readCardBlocks';
 
@@ -64,6 +65,42 @@ export function ImpactRenderer({
   const dense = rows.length + Math.min(f.points.length, 4) >= 6;
   const points = f.points.slice(0, dense ? 3 : 4);
 
+  // 글이 칸을 넘치면 통째로 줄인다 — 줄이지 않으면 넘친 줄이 overflow:hidden 에
+  // 조용히 잘려 사라진다(2026-10-10, 4번째 항목 "…현장에서 꼭 확인" 이 통째로 빠짐).
+  // 분양 광고는 마지막 줄이 면책 문구인 경우가 많아 잘리면 안 된다.
+  // HybridRenderer 의 fit 과 같은 방식: 원래 크기로 높이를 재고 넘친 비율만큼 zoom.
+  // zoom 은 레이아웃까지 줄여 줄바꿈 폭이 다시 넓어지므로 폭 보정이 필요 없다.
+  //
+  // 폰트가 늦게 오면 폴백 글꼴로 잰 값이 굳으므로 도착할 때마다 다시 잰다.
+  const [fontTick, setFontTick] = useState(0);
+  useEffect(() => {
+    const fs = document.fonts;
+    if (!fs) return;
+    let alive = true;
+    const bump = () => { if (alive) setFontTick(t => t + 1); };
+    fs.addEventListener('loadingdone', bump);
+    fs.ready.then(bump).catch(() => {});
+    return () => { alive = false; fs.removeEventListener('loadingdone', bump); };
+  }, []);
+
+  // 무한루프가 안 나는 이유: 의존값은 글·배율·폰트뿐이고 setFit 은 그중 무엇도 바꾸지 않는다.
+  const fitRef = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState(1);
+  const fitKey = JSON.stringify([f.headline, f.sub, rows, points, cover, dense]);
+  useLayoutEffect(() => {
+    const el = fitRef.current;
+    const parent = el?.parentElement;
+    if (!el || !parent) return;
+    // 재는 동안만 원래 크기로 되돌리고, 끝나면 반드시 복구한다
+    // (같은 값이면 setFit 이 다시 그리지 않아 '1' 이 DOM 에 남는다).
+    const keep = el.style.zoom;
+    el.style.zoom = '1';
+    const need = el.scrollHeight;
+    const avail = parent.clientHeight;
+    el.style.zoom = keep;
+    setFit(need > avail && avail > 0 ? avail / need : 1);
+  }, [fitKey, scale, fontTick]);
+
   return (
     <div
       style={{
@@ -95,6 +132,7 @@ export function ImpactRenderer({
 
       {cover ? (
         <div style={{ position: 'absolute', left: s(30), right: s(30), top: s(70), bottom: s(70), display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div ref={fitRef} style={{ zoom: fit }}>
           {lead && (
             <div
               style={{
@@ -143,10 +181,12 @@ export function ImpactRenderer({
               {f.sub}
             </div>
           )}
+          </div>
           <div style={{ position: 'absolute', left: 0, bottom: 0, width: s(64), height: s(6), background: GOLD }} />
         </div>
       ) : (
         <div style={{ position: 'absolute', left: s(30), right: s(30), top: s(70), bottom: s(58), overflow: 'hidden' }}>
+          <div ref={fitRef} style={{ zoom: fit }}>
           <div
             style={{
               fontFamily: HEAD,
@@ -250,6 +290,7 @@ export function ImpactRenderer({
               ))}
             </ol>
           )}
+          </div>
         </div>
       )}
 

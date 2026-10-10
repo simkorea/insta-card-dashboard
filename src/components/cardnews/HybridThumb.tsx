@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { HybridRenderer } from './HybridRenderer';
 import { NewspaperRenderer } from './NewspaperRenderer';
+import { ImpactRenderer } from './ImpactRenderer';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
 
 // 보관함·에디터가 각자 다른 페이지 타입을 쓰므로 필요한 필드만 받는다
@@ -30,6 +31,14 @@ export function HybridThumb({ page, index }: { page: ThumbPage | null | undefine
     <div ref={box} className="relative w-full h-full overflow-hidden bg-[#F3F0E7]">
       {w > 0 && (page?.styleVariant === 'hybridPaper' ? (
         <NewspaperRenderer
+          blocks={page?.blocks || []}
+          scale={w / 420}
+          index={index}
+          noteLabel={page?.noteLabel}
+          noteNumber={page?.noteNumber}
+        />
+      ) : page?.styleVariant === 'impact' ? (
+        <ImpactRenderer
           blocks={page?.blocks || []}
           scale={w / 420}
           index={index}

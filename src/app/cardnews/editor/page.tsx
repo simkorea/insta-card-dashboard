@@ -17,6 +17,7 @@ import type { SlideBlock, BrandTone } from '@/lib/cardnews/blocks';
 import { NotebookRenderer } from '@/components/cardnews/NotebookRenderer';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
 import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
+import { ImpactRenderer } from '@/components/cardnews/ImpactRenderer';
 import { HybridThumb } from '@/components/cardnews/HybridThumb';
 import { BlockRenderer } from '@/components/cardnews/BlockRenderer';
 import { SlideFrame } from '@/components/cardnews/SlideFrame';
@@ -105,7 +106,7 @@ interface PageData {
   accentOverride?: string;
   ratio?: string;   // '1:1' | '4:5' | '3:4' | '9:16' | '16:9' — 없으면 4:5
   // notebook=CSS 노트, image=AI가 그린 카드 이미지, hybrid=AI 종이·펜그림 위에 CSS 조판
-  styleVariant?: 'default' | 'notebook' | 'image' | 'hybrid' | 'hybridPaper';
+  styleVariant?: 'default' | 'notebook' | 'image' | 'hybrid' | 'hybridPaper' | 'impact';
   needsReview?: boolean;   // 숫자 검증을 못 넘긴 장
   reviewNote?: string;
   noteLabel?: string;   // 노트 스타일 우하단 배지 윗줄
@@ -4221,7 +4222,7 @@ export default function EditorPage() {
                   className={`relative rounded-xl overflow-hidden cursor-pointer transition-all hover:scale-105 hover:shadow-2xl ${currentPage === idx + 1 ? 'ring-3 ring-primary-400 scale-105' : 'ring-1 ring-white/20'}`}
                   style={{ aspectRatio: '4/5' }}
                 >
-                  {(pg.styleVariant === 'hybrid' || pg.styleVariant === 'hybridPaper')
+                  {(pg.styleVariant === 'hybrid' || pg.styleVariant === 'hybridPaper' || pg.styleVariant === 'impact')
                     ? <HybridThumb page={pg} index={idx} />
                     : <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=300')} alt="" className="w-full h-full object-cover" />}
                   <div className="absolute inset-0" style={{ background: pg.overlay }} />
@@ -4656,9 +4657,19 @@ export default function EditorPage() {
                   noteNumber={pageData.noteNumber}
                 />
               )}
+              {/* 임팩트도 바탕이 CSS라 배경사진·오버레이를 쓰지 않는다 (서버 캡처 CaptureSheet 와 같은 렌더러) */}
+              {pageData.styleVariant === 'impact' && (
+                <ImpactRenderer
+                  blocks={pageData.blocks || []}
+                  scale={canvasW / 420}
+                  index={currentPage - 1}
+                  noteLabel={pageData.noteLabel}
+                  noteNumber={pageData.noteNumber}
+                />
+              )}
 
               {/* Canvas layers */}
-              {pageData.styleVariant !== 'notebook' && pageData.styleVariant !== 'image' && pageData.styleVariant !== 'hybrid' && pageData.styleVariant !== 'hybridPaper' && (() => {
+              {pageData.styleVariant !== 'notebook' && pageData.styleVariant !== 'image' && pageData.styleVariant !== 'hybrid' && pageData.styleVariant !== 'hybridPaper' && pageData.styleVariant !== 'impact' && (() => {
                 const eyebrowBlock = pageData.blocks?.find(b => b.type === 'eyebrow');
                 const eyebrowText = eyebrowBlock && 'text' in eyebrowBlock ? eyebrowBlock.text : undefined;
 
@@ -5122,7 +5133,7 @@ export default function EditorPage() {
                     currentPage === idx + 1 ? 'border-primary-600 shadow-md ring-2 ring-primary-100' : 'border-gray-200 hover:border-gray-400'
                   }`}
                 >
-                  {(pg.styleVariant === 'hybrid' || pg.styleVariant === 'hybridPaper')
+                  {(pg.styleVariant === 'hybrid' || pg.styleVariant === 'hybridPaper' || pg.styleVariant === 'impact')
                     ? <HybridThumb page={pg} index={idx} />
                     : <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=120')} alt={`${pg.id}p`} className="w-full h-full object-cover" loading="lazy" />}
                   <div className="absolute inset-0" style={{ background: pg.overlay }} />
@@ -5420,6 +5431,17 @@ function CardView({ page, bgImage, logo, index = 0 }: { page: PageData; bgImage:
   if (page.styleVariant === 'hybrid') {
     return (
       <HybridRenderer
+        blocks={page.blocks || []}
+        scale={1}
+        index={index}
+        noteLabel={page.noteLabel}
+        noteNumber={page.noteNumber}
+      />
+    );
+  }
+  if (page.styleVariant === 'impact') {
+    return (
+      <ImpactRenderer
         blocks={page.blocks || []}
         scale={1}
         index={index}
@@ -6052,7 +6074,7 @@ function FullscreenEditor({
                 className={`relative flex-shrink-0 rounded-lg overflow-hidden cursor-pointer transition-all ${fsPage === idx + 1 ? 'ring-2 ring-primary-400 ring-offset-2 ring-offset-[#13132a]' : 'opacity-60 hover:opacity-90'}`}
                 style={{ width: 44, height: 55 }}
               >
-                {(pg.styleVariant === 'hybrid' || pg.styleVariant === 'hybridPaper')
+                {(pg.styleVariant === 'hybrid' || pg.styleVariant === 'hybridPaper' || pg.styleVariant === 'impact')
                   ? <HybridThumb page={pg} index={idx} />
                   : <img src={(pageImages[pg.id] ?? pg.bgImage).replace('w=800', 'w=80')} className="w-full h-full object-cover" />}
                 <div className="absolute inset-0" style={{ background: pg.overlay }} />
