@@ -6,6 +6,7 @@ import { toKoreanError } from '@/lib/gemini';
 import { callAI } from '@/lib/ai/openrouter';
 import { extractArticle } from '@/lib/extractArticle';
 import { buildDraftPages } from '@/lib/mcp/buildDraftPages';
+import type { SlideBlock } from '@/lib/cardnews/blocks';
 import { captureDesignSlides } from '@/lib/cardnews/captureSlides';
 import { fetchMolitTrades } from '@/lib/aptList/fetchMolit';
 import { findSigungu } from '@/lib/aptList/lawdCodes';
@@ -252,6 +253,77 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
           console.error('[mcp:generate_cardnews] JSON 파싱 실패. 원본 응답:', text, e);
           return fail('AI 응답 데이터 형식이 올바르지 않습니다.');
         }
+      }
+    );
+
+    // ── save_cardnews_exact ─────────────────────────────────────────────
+    // generate_cardnews(tone:'origin')도 AI가 문구를 바꿨다(2026-10-10, "주요 간선도로로
+    // 연결된 우수한 입지" 등). 분양 광고라 과장 표현이 끼면 안 되므로, 이미 검수된 원고는
+    // AI를 거치지 않고 받은 글자 그대로 저장한다.
+    server.registerTool(
+      'save_cardnews_exact',
+      {
+        title: '카드뉴스 원문 그대로 저장',
+        description:
+          '이미 검수된 카드뉴스 원고를 AI 수정 없이 한 글자도 바꾸지 않고 보관함에 저장합니다. 장마다 headline(제목)·body(본문)·points(항목, 선택)를 주면 그대로 카드에 들어갑니다. 저장 후 render_design으로 이미지를 만드세요. 문구를 새로 써야 하면 generate_cardnews를 쓰세요.',
+        inputSchema: z.object({
+          slides: z
+            .array(
+              z.object({
+                headline: z.string().min(1).max(18),
+                body: z.string().min(1).max(120),
+                points: z.array(z.string().min(1).max(20)).max(4).optional(),
+              })
+            )
+            .min(3)
+            .max(10),
+          caption: z.string().max(500).optional().describe('인스타 캡션. 저장하지 않고 그대로 돌려준다(schedule_post에 넘길 것).'),
+          title: z.string().min(1).max(60).optional().describe('보관함에 보일 이름'),
+          style: z
+            .enum(['note', 'impact'])
+            .optional()
+            .describe('note: 손글씨 노트(기본), impact: 어두운 바탕에 큰 글자'),
+        }),
+        annotations: { readOnlyHint: false, destructiveHint: false },
+      },
+      async ({ slides, caption, title, style }) => {
+        // buildDraftPages 재사용 — 문구를 건드리는 곳은 normalizeHeadlines 뿐인데,
+        // accentText가 없으면 블록을 그대로 돌려준다(normalizeHeadline.ts). 그래서 accentText·eyebrow를
+        // 넣지 않는다(입력에 없는 글자가 카드에 생기지 않게).
+        const cards = slides.map((s) => ({
+          title: s.headline,
+          subtitle: s.body,
+          blocks: [
+            { type: 'headline', text: s.headline },
+            { type: 'sub', text: s.body },
+            ...(s.points?.length ? [{ type: 'checklist', items: s.points }] : []),
+          ] as SlideBlock[],
+        }));
+        const pagesData = buildDraftPages(cards, '4:5', style ?? 'note');
+
+        const name = (title ?? `[MCP] ${slides[0].headline}`).slice(0, 80);
+        const { data: design, error: insErr } = await supabase
+          .from('card_designs')
+          .insert({ name, description: 'source:mcp-exact', pages_data: pagesData })
+          .select('id, name')
+          .single();
+
+        if (insErr) return fail(`저장 실패: ${insErr.message}`);
+
+        return ok(
+          JSON.stringify(
+            {
+              designId: design.id,
+              name: design.name,
+              slides: pagesData.length,
+              editorUrl: `${siteOrigin()}/cardnews/editor?id=${design.id}`,
+              ...(caption !== undefined ? { caption } : {}),
+              note: '입력 문구를 AI 수정 없이 그대로 저장했습니다(배경 이미지 없음). render_design으로 렌더하세요.',
+            },
+            null,
+            2
+          )
+        );
       }
     );
 
