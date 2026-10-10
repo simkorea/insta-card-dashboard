@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSlideImageUrls } from '@/lib/cardnews/slideImages';
 import { pagesToBlogSource } from '@/lib/cardnews/pagesToBlogSource';
+import { checkSlideImageUrls } from '@/lib/blog/slideUrlGuard';
 
 // 카드뉴스 한 벌 → 블로그 글(+카드 그림 주소). 저장은 하지 않는다.
 //
@@ -45,8 +46,11 @@ export async function generateBlogFromCardnews(opts: {
   format: string;
   tone: string;
   generateBlog: (args: GenerateBlogArgs) => Promise<GenerateBlogResult>;
+  // 호출하는 쪽이 이미 그려 둔 그림 주소. 주면 새로 구하지(그리지) 않고 이 주소를 그대로 쓴다.
+  // 안 주면 예전처럼 getSlideImageUrls 가 구한다 (from-cardnews 는 이걸 안 쓴다).
+  slideImageUrls?: string[];
 }): Promise<CardnewsBlogResult> {
-  const { supabase, designId, format, tone, generateBlog } = opts;
+  const { supabase, designId, format, tone, generateBlog, slideImageUrls } = opts;
 
   const { data: design, error: designErr } = await supabase
     .from('card_designs')
@@ -62,6 +66,18 @@ export async function generateBlogFromCardnews(opts: {
     return { ok: false, status: 400, error: '카드 내용이 비어 있습니다.' };
   }
 
+  // 넘어온 그림 주소는 AI 를 부르기 전에 검사한다 — 거절할 거면 비용이 들기 전에 거절해야 한다.
+  // 개수는 슬라이드 수(pages.length)와 같아야 해서 카드뉴스를 읽은 뒤에야 검사할 수 있다.
+  if (slideImageUrls) {
+    const reason = checkSlideImageUrls({
+      urls: slideImageUrls,
+      designId,
+      slideCount: pages.length,
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    });
+    if (reason) return { ok: false, status: 400, error: reason };
+  }
+
   // 카드의 리드 문장·표·체크리스트·출처까지 근거로 넘긴다.
   // 제목만 넘기면 AI가 나머지를 지어낸다 (예전에 그래서 엉뚱한 글이 나왔다).
   const source = pagesToBlogSource(pages);
@@ -74,7 +90,7 @@ export async function generateBlogFromCardnews(opts: {
   // 화면에서 카드뉴스를 골라 만들면 카드가 그림으로 들어가는데, 이 길로
   // 만든 글은 글만 저장돼서 다시 열면 이미지가 0장이었다. 인스타에 올리며
   // 이미 그려 둔 그림이 있으면 그걸 그대로 쓰고, 없으면 서버에서 그린다.
-  const slideUrls = await getSlideImageUrls(designId, 120_000);
+  const slideUrls = slideImageUrls ?? (await getSlideImageUrls(designId, 120_000));
 
   return {
     ok: true,

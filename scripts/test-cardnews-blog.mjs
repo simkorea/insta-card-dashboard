@@ -27,6 +27,7 @@ import {
 } from '../src/lib/blog/zipManifest.ts';
 import { withTagLine } from '../src/lib/blog/tagLine.ts';
 import { parseStructuredBlog, cleanContent } from '../src/lib/blog/blogText.ts';
+import { checkSlideImageUrls } from '../src/lib/blog/slideUrlGuard.ts';
 
 // ── 화면(blog-generator downloadZip)이 예전에 인라인으로 하던 일 ─────────────
 // zipManifest.ts 로 옮기기 전 코드를 그대로 적어 둔 기준(reference)이다.
@@ -250,4 +251,58 @@ print(json.dumps({'title': t, 'body': b, 'tags': g, 'dest': str(dest), 'names': 
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+// ── 7. slideImageUrls 검사 (아무 주소나 받지 않는다) ─────────────────────────
+const SB = 'https://abcdwxyz.supabase.co';
+const DID = 'f93f602c-8729-4e09-b747-3d55acc6fe3c';
+const good = n => Array.from({ length: n }, (_, i) =>
+  `${SB}/storage/v1/object/public/card-images/auto/${DID}_1791369553212_${i + 1}.png`);
+const check = (urls, over = {}) =>
+  checkSlideImageUrls({ urls, designId: DID, slideCount: urls.length, supabaseUrl: SB, ...over });
+
+test('slideImageUrls: 우리 저장소의 이 디자인 그림이면 통과', () => {
+  assert.equal(check(good(6)), null);
+  // 대문자 designId 도 같은 id 로 본다
+  assert.equal(check(good(2), { designId: DID.toUpperCase() }), null);
+});
+
+test('slideImageUrls 거절 ①: 외부 주소·남의 디자인·다른 버킷·http 등은 이유와 함께 거절', () => {
+  const one = u => check([u], { slideCount: 1 });
+  // 외부 호스트
+  assert.match(one(`https://evil.example.com/storage/v1/object/public/card-images/auto/${DID}_1.png`), /우리 Supabase 저장소/);
+  // 우리 호스트인 척 (서브도메인 덧붙임 / @ 로 속이기)
+  assert.match(one(`https://abcdwxyz.supabase.co.evil.com/storage/v1/object/public/card-images/auto/${DID}_1.png`), /우리 Supabase 저장소/);
+  assert.match(one(`https://${'abcdwxyz.supabase.co'}@evil.com/storage/v1/object/public/card-images/auto/${DID}_1.png`), /우리 Supabase 저장소/);
+  assert.match(one(`https://user:pw@abcdwxyz.supabase.co/storage/v1/object/public/card-images/auto/${DID}_1.png`), /로그인 정보/);
+  // http
+  assert.match(one(`http://abcdwxyz.supabase.co/storage/v1/object/public/card-images/auto/${DID}_1.png`), /https/);
+  // 다른 버킷
+  assert.match(one(`${SB}/storage/v1/object/public/other-bucket/auto/${DID}_1.png`), /card-images 버킷/);
+  // 같은 버킷이지만 다른 디자인의 그림
+  assert.match(one(`${SB}/storage/v1/object/public/card-images/auto/00000000-0000-4000-8000-000000000000_1.png`), /designId/);
+  // 상위 경로로 빠져나가기(인코딩 포함), 쿼리, 해시
+  assert.match(one(`${SB}/storage/v1/object/public/card-images/auto/../../x/${DID}_1.png`), /card-images 버킷|상위 경로/);
+  assert.match(one(`${SB}/storage/v1/object/public/card-images/a/%2e%2e/${DID}_1.png`), /인코딩된 경로 문자/);
+  assert.match(one(`${SB}/storage/v1/object/public/card-images/a%2F${DID}_1.png`), /인코딩된 경로 문자/);
+  assert.match(one(`${SB}/storage/v1/object/public/card-images/auto/${DID}_1.png?token=x`), /쿼리/);
+  assert.match(one(`${SB}/storage/v1/object/public/card-images/auto/${DID}_1.png#x`), /쿼리/);
+  // 주소가 아닌 값
+  assert.match(one('not a url'), /형식/);
+  assert.match(one('file:///C:/secret.png'), /https/);
+  // 검증 설정이 없으면 통과시키지 않고 거절한다
+  assert.match(check(good(1), { supabaseUrl: '' }), /검증할 수 없습니다/);
+  // 어느 번째 주소가 문제인지 알려준다
+  const mixed = [...good(2), 'https://evil.example.com/a.png', ...good(1)];
+  assert.match(check(mixed), /slideImageUrls\[2\]/);
+});
+
+test('slideImageUrls 거절 ②: 개수가 슬라이드 수와 다르면 거절(일부만 새로 그리기 없음)', () => {
+  const fewer = check(good(5), { slideCount: 6 });
+  assert.match(fewer, /개수\(5\)가 슬라이드 수\(6\)와 다릅니다/);
+  assert.match(fewer, /일부만 새로 그리는 방식은 지원하지 않습니다/);
+  assert.match(check(good(7), { slideCount: 6 }), /개수\(7\)가 슬라이드 수\(6\)/);
+  assert.match(check([], { slideCount: 6 }), /개수\(0\)/);
+  // 개수가 맞아도 주소가 틀리면 거절 — 개수 검사가 주소 검사를 건너뛰게 하지 않는다
+  assert.match(check([...good(5), 'https://evil.example.com/a.png'], { slideCount: 6 }), /우리 Supabase 저장소/);
 });

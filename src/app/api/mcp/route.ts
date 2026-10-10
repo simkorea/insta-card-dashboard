@@ -339,7 +339,8 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
         title: '카드뉴스 → 블로그 원고',
         description:
           '승인된 카드뉴스 한 벌(designId)로 네이버 블로그 원고를 만들어 돌려줍니다. 화면의 "카드뉴스로 블로그까지 한 번에"(/api/generate/from-cardnews)와 같은 생성 코드를 쓰되, DB에 저장하지 않고 게시·예약·SNS 업로드도 하지 않습니다. 생성된 글은 손대지 않고 그대로 돌려줍니다. ' +
-          '카드 그림은 이미 그려 둔 것이 있으면 재사용하고, 없으면 서버가 그려 공개 이미지 주소로 돌려줍니다(render_design과 같은 저장소에 PNG 업로드). 그림을 못 그리면 이미지 없이 글만 돌려줍니다. ' +
+          '카드 그림: slideImageUrls(render_design이 돌려준 주소)를 넘기면 새로 그리지 않고 그 주소를 그대로 씁니다. 슬라이드 수와 개수가 같아야 하고, 우리 Supabase 저장소(card-images 버킷)의 https 주소이면서 경로에 이 designId가 든 것만 받으며 아니면 AI를 부르기 전에 거절합니다. ' +
+          '안 넘기면 이미 예약하며 그려 둔 그림이 있을 때만 재사용하고, 없으면 서버가 새로 그려 저장소에 PNG를 올립니다(render_design과 같음). 그림을 못 구하면 이미지 없이 글만 돌려줍니다. ' +
           '응답의 zip 항목은 블로그 생성기 화면 "전체 다운로드"가 만드는 ZIP과 같은 구성입니다. 바깥 스크립트는 zip.entries 대로 ZIP을 만들면 됩니다: ' +
           '(1) 원고 파일 1개 — 이름 zip.manuscriptFileName("YYYYMMDD_주제.txt"), 내용은 zip.manuscriptText 그대로(UTF-8). ' +
           '원고는 줄 전체가 [제목] / [메타설명] / [태그] / [본문] 인 섹션 머리로 나뉘고, [태그]는 "#a, #b" 쉼표 구분, [본문] 끝에 해시태그 줄이 붙고 파일 끝에 줄바꿈 1개가 있습니다. ' +
@@ -349,6 +350,11 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
           'AI 글 생성에 시간(보통 30~90초)과 AI 사용량이 듭니다.',
         inputSchema: z.object({
           designId: z.string().uuid().describe('승인된 카드뉴스 디자인 id (list_designs / render_design의 designId)'),
+          slideImageUrls: z
+            .array(z.string())
+            .min(1)
+            .optional()
+            .describe('선택. render_design으로 이미 받은 슬라이드 그림 주소(슬라이드 수와 같은 개수, 순서대로). 주면 새로 그리지 않는다.'),
           format: z
             .enum(['naver', 'tistory', 'instagram'])
             .default('naver')
@@ -360,7 +366,7 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
         }),
         annotations: { readOnlyHint: false, destructiveHint: false },
       },
-      async ({ designId, format, tone }) => {
+      async ({ designId, slideImageUrls, format, tone }) => {
         // 원본: src/app/api/generate/from-cardnews/route.ts — 앞부분(읽기→근거→생성→카드 그림)을
         // src/lib/cardnews/cardnewsToBlog.ts 로 빼서 같은 코드를 쓴다. 저장(blog_posts)과
         // 영상 재료는 쓰지 않는다. 쿠키가 없어서 /api/generate/blog 를 HTTP로 부르지 않고
@@ -370,6 +376,7 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
           designId,
           format: format ?? 'naver',
           tone: tone ?? 'professional',
+          slideImageUrls,
           generateBlog: async ({ topic, format: f, tone: t }) => {
             const r = await generateBlogPost({ topic, format: f, tone: t });
             if (r.status < 200 || r.status >= 300 || r.json?.error) {
@@ -423,7 +430,8 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
               },
               saved: false,
               note:
-                (slideUrls.length === 0 ? '카드 그림을 만들지 못해 이미지 없이 글만 돌려줍니다. ' : '') +
+                (slideUrls.length === 0 ? '카드 그림을 구하지 못해 이미지 없이 글만 돌려줍니다. ' : '') +
+                (slideImageUrls ? '넘겨 받은 그림 주소를 그대로 썼습니다(새로 그리지 않음). ' : '') +
                 'DB(blog_posts)에 저장하지 않았고 게시·예약도 하지 않았습니다.',
             },
             null,
