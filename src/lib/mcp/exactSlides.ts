@@ -32,6 +32,15 @@ export const exactSlideSchema = z.object({
     .describe('숫자표 (최대 3개). 첫 항목이 크게 강조된다.'),
   badges: z.array(z.string().min(1).max(8)).max(3).optional().describe('배지 (최대 3개). points 와 같이 쓸 수 없다.'),
   source: z.string().min(1).max(40).optional().describe("출처 한 줄. 예: '출처: 국토교통부 실거래가'"),
+  photoBgUrl: z
+    .string()
+    .url()
+    .max(2000)
+    .optional()
+    .describe(
+      '배경 사진 주소(https). 받는 출처: images.pexels.com · images.unsplash.com · 우리 card-images(upload_image 결과). ' +
+        '서버가 받아서 우리 저장소(card-images/mcp-bg/)에 다시 올려 고정한다. 이 장은 사진 + 어두운 오버레이 + 글 블록으로 그려진다.'
+    ),
 });
 
 export type ExactSlide = z.infer<typeof exactSlideSchema>;

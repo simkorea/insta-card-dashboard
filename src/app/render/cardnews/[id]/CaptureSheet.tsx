@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
 import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
 import { ImpactRenderer } from '@/components/cardnews/ImpactRenderer';
+import { BlockRenderer } from '@/components/cardnews/BlockRenderer';
 
 // 서버(헤드리스 크롬)가 카드를 캡처할 화면.
 //
@@ -31,7 +32,63 @@ type Page = {
   styleVariant?: string;
   noteLabel?: string;
   noteNumber?: string;
+  // 사진 배경(MCP save_cardnews_exact 의 photoBgUrl 을 서버가 우리 저장소에 올려 고정한 주소)
+  photoBg?: string;
+  overlay?: string;
+  brandTone?: 'gold' | 'sage';
+  blocksOffsetY?: number;
+  titleStyle?: React.ComponentProps<typeof BlockRenderer>['titleStyle'];
+  subtitleStyle?: React.ComponentProps<typeof BlockRenderer>['subtitleStyle'];
+  bulletStyle?: React.ComponentProps<typeof BlockRenderer>['bulletStyle'];
 };
+
+// 사진 배경 카드 — 편집기 CardView(editor/page.tsx)의 기본 분기를 그대로 옮겼다:
+// 사진 + 가독성용 어두운 오버레이 + BlockRenderer.
+// BlockRenderer 는 보호 파일이라 고치지 않고 불러다 쓴다. 편집기 쪽 표시는 따로 정한다.
+// 클래스(Tailwind) 대신 같은 값을 inline 으로 적었다 — 이 화면은 다른 분기들도 inline 이다.
+const PHOTO_OVERLAY = 'linear-gradient(to top, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.40) 100%)';
+
+function PhotoCard({ page }: { page: Page }) {
+  const offsetY = page.blocksOffsetY ?? 70;
+  return (
+    <>
+      {/* crossOrigin 은 일부러 안 둔다 — 캡처에는 필요 없고, CORS 헤더가 없으면 오히려 그림이 안 뜬다 */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={page.photoBg}
+        alt=""
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+      />
+      <div style={{ position: 'absolute', inset: 0, background: page.overlay || PHOTO_OVERLAY }} />
+      <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: `${100 - offsetY}%`,
+            left: 28,
+            right: 28,
+            display: 'flex',
+            flexDirection: 'column',
+            paddingBottom: 40,
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{ pointerEvents: 'none', display: 'flex', flexDirection: 'column', width: '100%', marginTop: 'auto' }}>
+            <BlockRenderer
+              blocks={(page.blocks || []) as never}
+              brandTone={page.brandTone}
+              availableHeight={Math.floor((525 * offsetY) / 100 - 40)}
+              titleStyle={page.titleStyle}
+              subtitleStyle={page.subtitleStyle}
+              bulletStyle={page.bulletStyle}
+            />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
 
 export default function CaptureSheet({ pages }: { pages: Page[] }) {
   // 글꼴이 다 온 뒤에야 카드를 그린다.
@@ -68,6 +125,22 @@ export default function CaptureSheet({ pages }: { pages: Page[] }) {
       setFontsReady(true);
       // 렌더러가 크기를 재고 자리를 잡을 시간을 준다.
       await new Promise(r => setTimeout(r, 900));
+      // 사진 배경 같은 <img> 가 다 받아질 때까지 기다린다(최대 15초).
+      // 이 줄이 없으면 사진이 오기 전에 캡처돼 오버레이와 글자만 찍힌다 —
+      // 렌더 화면은 글꼴이 온 뒤에야 카드를 그리므로 사진은 networkidle 이후에 요청된다.
+      await Promise.race([
+        Promise.all(
+          Array.from(document.images).map(img =>
+            img.complete
+              ? null
+              : new Promise<void>(res => {
+                  img.addEventListener('load', () => res(), { once: true });
+                  img.addEventListener('error', () => res(), { once: true });
+                }),
+          ),
+        ),
+        new Promise(r => setTimeout(r, 15_000)),
+      ]);
       if (!cancelled) document.body.setAttribute('data-capture-ready', '1');
     })();
 
@@ -94,7 +167,9 @@ export default function CaptureSheet({ pages }: { pages: Page[] }) {
             overflow: 'hidden',
           }}
         >
-          {p.styleVariant === 'hybridPaper' ? (
+          {p.photoBg ? (
+            <PhotoCard page={p} />
+          ) : p.styleVariant === 'hybridPaper' ? (
             <NewspaperRenderer blocks={(p.blocks || []) as never} scale={CAPTURE_SCALE} index={i} noteLabel={p.noteLabel} noteNumber={p.noteNumber} />
           ) : p.styleVariant === 'impact' ? (
             <ImpactRenderer blocks={(p.blocks || []) as never} scale={CAPTURE_SCALE} index={i} noteLabel={p.noteLabel} noteNumber={p.noteNumber} />

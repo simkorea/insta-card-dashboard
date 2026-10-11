@@ -7,6 +7,16 @@ import { callAI } from '@/lib/ai/openrouter';
 import { extractArticle } from '@/lib/extractArticle';
 import { buildDraftPages } from '@/lib/mcp/buildDraftPages';
 import { exactSlideSchema, buildExactBlocks, checkExactSlides } from '@/lib/mcp/exactSlides';
+import {
+  checkPhotoUrls,
+  fetchAndPinPhoto,
+  removePinned,
+  decodeUploadImage,
+  uploadMcpImage,
+  mapPexelsPhotos,
+  mapUnsplashPhotos,
+  MAX_BASE64_CHARS,
+} from '@/lib/mcp/photoBg';
 import { captureDesignSlides } from '@/lib/cardnews/captureSlides';
 import { generateBlogFromCardnews } from '@/lib/cardnews/cardnewsToBlog';
 import { toBlogImageSlots } from '@/lib/cardnews/slideImages';
@@ -274,6 +284,7 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
           '선택 칸(주지 않으면 예전과 똑같이 저장): eyebrow(띠지 ≤12자, 예 "① 혜택"), stats(숫자표 최대 3개, value ≤10자·label ≤12자), badges(배지 최대 3개 각 ≤8자), source(출처 ≤40자). 주면 그 자리에 그대로 그려집니다. ' +
           '주의: 노트·신문 카드는 points 가 있으면 badges 를 그리지 않으므로 같은 장에 둘을 같이 주면 거절합니다. stats 와 points 를 같이 주면 points 제목이 "장점"으로 나옵니다(카드 고정 문구). ' +
           '최상위 noteLabel(도장 라벨 ≤8자, 예 "분양노트")·noteNumber(≤10자, 없으면 "No.MMDD" 자동)는 노트·신문 카드 오른쪽 아래 도장이 됩니다. 둘 다 안 주면 도장이 없습니다(impact 는 noteNumber 를 쪽번호로 쓰고 noteLabel 만 라벨 자리에 씁니다). ' +
+          '사진 배경: 장마다 photoBgUrl(https)을 주면 서버가 그 그림을 받아 우리 저장소(card-images/mcp-bg/)에 다시 올려 링크를 고정합니다. 받는 출처는 images.pexels.com · images.unsplash.com · 우리 card-images(upload_image 결과)뿐이며, jpg·png·webp 만, 8MB 이하만 받습니다(리다이렉트는 따라가지 않음). photoBgUrl 이 있는 장은 style 과 상관없이 사진 + 어두운 오버레이 + 글 블록으로 그려지고(노트 도장은 안 보임) 편집기 화면 표시는 아직 지원하지 않습니다. 사진을 찾으려면 search_images, 직접 가진 조감도는 upload_image 로 올리세요. ' +
           'style: note(손글씨 노트, 기본)·paper(신문 지면)·impact(어두운 바탕 큰 글자). 저장 후 render_design으로 이미지를 만드세요. 문구를 새로 써야 하면 generate_cardnews를 쓰세요.',
         inputSchema: z.object({
           slides: z.array(exactSlideSchema).min(3).max(10),
@@ -291,6 +302,25 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
       async ({ slides, caption, title, style, noteLabel, noteNumber }) => {
         const bad = checkExactSlides(slides);
         if (bad) return fail(bad);
+        // 사진 주소는 아무것도 내려받기 전에 전부 검사한다
+        const badPhoto = checkPhotoUrls(slides, process.env.NEXT_PUBLIC_SUPABASE_URL);
+        if (badPhoto) return fail(badPhoto);
+
+        // 사진을 받아 우리 저장소에 고정한다. 같은 주소는 한 번만 받는다.
+        // 중간에 실패하면 이미 올린 것을 지우고 아무것도 저장하지 않는다.
+        const pinned = new Map<string, string>();
+        const pinnedPaths: string[] = [];
+        for (let i = 0; i < slides.length; i++) {
+          const u = slides[i].photoBgUrl;
+          if (!u || pinned.has(u)) continue;
+          const r = await fetchAndPinPhoto({ client: supabase, url: u, index: i });
+          if (!r.ok) {
+            await removePinned(supabase, pinnedPaths);
+            return fail(`slides[${i}].photoBgUrl: ${r.error}`);
+          }
+          pinned.set(u, r.url);
+          pinnedPaths.push(r.path);
+        }
 
         // buildDraftPages 재사용 — 문구를 건드리는 곳은 normalizeHeadlines 뿐인데,
         // accentText가 없으면 블록을 그대로 돌려준다(normalizeHeadline.ts). 그래서 accentText를
@@ -299,6 +329,7 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
           title: s.headline,
           subtitle: s.body,
           blocks: buildExactBlocks(s),
+          photoBg: s.photoBgUrl ? pinned.get(s.photoBgUrl) : undefined,
         }));
         const pagesData = buildDraftPages(cards, '4:5', style ?? 'note', { noteLabel, noteNumber });
 
@@ -309,7 +340,10 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
           .select('id, name')
           .single();
 
-        if (insErr) return fail(`저장 실패: ${insErr.message}`);
+        if (insErr) {
+          await removePinned(supabase, pinnedPaths);
+          return fail(`저장 실패: ${insErr.message}`);
+        }
 
         return ok(
           JSON.stringify(
@@ -319,12 +353,87 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
               slides: pagesData.length,
               editorUrl: `${siteOrigin()}/cardnews/editor?id=${design.id}`,
               ...(caption !== undefined ? { caption } : {}),
-              note: '입력 문구를 AI 수정 없이 그대로 저장했습니다(배경 이미지 없음). render_design으로 렌더하세요.',
+              ...(pinnedPaths.length
+                ? { photoBg: pagesData.map((p, i) => (p.photoBg ? { slide: i + 1, url: p.photoBg } : null)).filter(Boolean) }
+                : {}),
+              note: pinnedPaths.length
+                ? '입력 문구를 AI 수정 없이 그대로 저장했습니다. 사진 배경은 우리 저장소에 올려 고정했습니다(사진 있는 장은 사진+오버레이+글 블록으로 렌더). render_design으로 렌더하세요.'
+                : '입력 문구를 AI 수정 없이 그대로 저장했습니다(배경 이미지 없음). render_design으로 렌더하세요.',
             },
             null,
             2
           )
         );
+      }
+    );
+
+    // ── search_images ───────────────────────────────────────────────────
+    server.registerTool(
+      'search_images',
+      {
+        title: '배경 사진 검색',
+        description:
+          'Pexels 또는 Unsplash 에서 카드 배경으로 쓸 사진을 찾아 [{url, thumb, width, height, credit}] 로 돌려줍니다(세로형 우선). ' +
+          'url 은 save_cardnews_exact 의 slides[i].photoBgUrl 로 그대로 넘길 수 있는 주소입니다. credit 은 "Photo by 이름 on Pexels" 형식의 출처 표기입니다. ' +
+          '사진 권리·적합성(분양 광고에 맞는지)은 호출하는 쪽이 확인하세요. 아무것도 저장하지 않습니다.',
+        inputSchema: z.object({
+          query: z.string().min(1).max(100).describe('검색어. 영어가 결과가 많습니다. 예: modern apartment exterior'),
+          count: z.number().int().min(1).max(10).default(6),
+          source: z.enum(['pexels', 'unsplash']).default('pexels'),
+        }),
+        annotations: { readOnlyHint: true, openWorldHint: true },
+      },
+      async ({ query, count, source }) => {
+        const n = count ?? 6;
+        try {
+          if ((source ?? 'pexels') === 'pexels') {
+            // 원본: src/app/api/pexels/route.ts (GET) — 같은 주소·헤더. 카드가 세로형이라 portrait 로 찾는다.
+            const apiKey = process.env.PEXELS_API_KEY;
+            if (!apiKey) return fail('PEXELS_API_KEY 설정이 없습니다.');
+            const res = await fetch(
+              `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${n}&orientation=portrait`,
+              { headers: { Authorization: apiKey } }
+            );
+            if (!res.ok) return fail(`Pexels 오류(HTTP ${res.status})`);
+            return ok(JSON.stringify(mapPexelsPhotos(await res.json()), null, 2));
+          }
+          // 원본: src/app/api/images/search/route.ts (GET)
+          const accessKey = process.env.UNSPLASH_ACCESS_KEY;
+          if (!accessKey) return fail('UNSPLASH_ACCESS_KEY 설정이 없습니다.');
+          const res = await fetch(
+            `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}&per_page=${n}&orientation=portrait`,
+            { headers: { Authorization: `Client-ID ${accessKey}` } }
+          );
+          if (!res.ok) return fail(`Unsplash 오류(HTTP ${res.status})`);
+          return ok(JSON.stringify(mapUnsplashPhotos(await res.json()), null, 2));
+        } catch (e: unknown) {
+          return fail(`사진 검색 실패: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    );
+
+    // ── upload_image ────────────────────────────────────────────────────
+    server.registerTool(
+      'upload_image',
+      {
+        title: '이미지 올리기(현장 조감도 등)',
+        description:
+          '가진 그림(현장 조감도 등)을 base64 로 받아 우리 저장소(card-images/mcp-uploads/)에 올리고 공개 주소를 돌려줍니다. ' +
+          '그 주소를 save_cardnews_exact 의 slides[i].photoBgUrl 로 쓰면 됩니다. png·jpg·webp 만, 6MB 이하(디코딩 후)이며 파일 이름 확장자와 실제 내용이 같아야 합니다. ' +
+          '주의: 이 서버의 요청 크기 한도(Vercel 약 4.5MB)가 먼저 걸리므로 실제로는 base64 4.5MB(그림 약 3.3MB) 안팎까지만 올라갑니다. 크면 줄여서 올리세요. ' +
+          '이 MCP 연결(Bearer 토큰 인증)로만 쓸 수 있습니다. 공개 upload-to-cdn 과 무관합니다.',
+        inputSchema: z.object({
+          filename: z.string().min(1).max(100).describe('예: site-aerial.jpg (확장자 필수: .png .jpg .jpeg .webp)'),
+          base64: z.string().min(1).max(MAX_BASE64_CHARS).describe('그림 파일의 base64 (data:image/…;base64, 접두사는 있어도 됨)'),
+        }),
+        annotations: { readOnlyHint: false, destructiveHint: false },
+      },
+      async ({ filename, base64 }) => {
+        const dec = decodeUploadImage(filename, base64);
+        if (!dec.ok) return fail(dec.error);
+        const up = await uploadMcpImage({ client: supabase, bytes: dec.bytes, kind: dec.kind, safeName: dec.safeName });
+        if (!up.ok) return fail(up.error);
+        return ok(JSON.stringify({ url: up.url, path: up.path, bytes: dec.bytes.length, contentType: dec.kind.mime }, null, 2));
       }
     );
 

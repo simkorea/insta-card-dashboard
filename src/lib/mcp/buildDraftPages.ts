@@ -25,6 +25,8 @@ type UnifiedCard = {
   brandTone?: string;
   showFrame?: boolean;
   blocks?: SlideBlock[];
+  // 사진 배경(서버가 우리 저장소에 올려 고정한 주소). bgImage 는 '완성 카드 이미지' 칸이라 쓰지 않는다.
+  photoBg?: string;
 };
 
 export type DraftPage = {
@@ -44,6 +46,8 @@ export type DraftPage = {
   styleVariant: 'hybrid' | 'hybridPaper' | 'impact';
   noteLabel?: string;
   noteNumber?: string;
+  // 있으면 서버 렌더(CaptureSheet)가 사진 + 오버레이 + 글 블록으로 그린다
+  photoBg?: string;
   imageKeyword: string;
 };
 
@@ -51,6 +55,9 @@ export type DraftPage = {
 // paper=신문 지면. DB에 저장되는 값(styleVariant)은 note → 'hybrid', impact → 'impact',
 // paper → 'hybridPaper' (서버 렌더 CaptureSheet 가 이미 지원한다).
 export type { DraftStyle };
+
+// 사진 위 글자가 읽히도록 까는 어두운 그라데이션. 값은 generateDraft.ts 의 OVERLAY 와 같다.
+const PHOTO_OVERLAY = 'linear-gradient(to top, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.40) 100%)';
 
 const VARIANT = { note: 'hybrid', impact: 'impact', paper: 'hybridPaper' } as const;
 const BG_LABEL = { note: '노트(빠름)', impact: '노트(빠름)', paper: '신문(빠름)' } as const;
@@ -71,7 +78,7 @@ export function buildDraftPages(
       id: String(i + 1),
       bgImage: '',
       bgLabel: BG_LABEL[style],
-      overlay: '',
+      overlay: card.photoBg ? PHOTO_OVERLAY : '',
       title: card.title || '',
       subtitle: card.subtitle || '',
       accent: tone(brandTone).accent,
@@ -84,6 +91,7 @@ export function buildDraftPages(
       styleVariant: VARIANT[style],
       // 도장 규칙은 resolveStamp 참고 (impact 는 쪽번호, note·paper 는 라벨을 줄 때만)
       ...resolveStamp(style, i, cards.length, stamp),
+      ...(card.photoBg ? { photoBg: card.photoBg } : {}),
       imageKeyword: card.imageKeyword || '',
     };
   });
