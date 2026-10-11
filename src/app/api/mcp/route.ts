@@ -6,7 +6,7 @@ import { toKoreanError } from '@/lib/gemini';
 import { callAI } from '@/lib/ai/openrouter';
 import { extractArticle } from '@/lib/extractArticle';
 import { buildDraftPages } from '@/lib/mcp/buildDraftPages';
-import type { SlideBlock } from '@/lib/cardnews/blocks';
+import { exactSlideSchema, buildExactBlocks, checkExactSlides } from '@/lib/mcp/exactSlides';
 import { captureDesignSlides } from '@/lib/cardnews/captureSlides';
 import { generateBlogFromCardnews } from '@/lib/cardnews/cardnewsToBlog';
 import { toBlogImageSlots } from '@/lib/cardnews/slideImages';
@@ -270,41 +270,37 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
       {
         title: '카드뉴스 원문 그대로 저장',
         description:
-          '이미 검수된 카드뉴스 원고를 AI 수정 없이 한 글자도 바꾸지 않고 보관함에 저장합니다. 장마다 headline(제목)·body(본문)·points(항목, 선택)를 주면 그대로 카드에 들어갑니다. 저장 후 render_design으로 이미지를 만드세요. 문구를 새로 써야 하면 generate_cardnews를 쓰세요.',
+          '이미 검수된 카드뉴스 원고를 AI 수정 없이 한 글자도 바꾸지 않고 보관함에 저장합니다. 장마다 headline(제목, ≤18자)·body(본문, ≤120자)·points(항목 ≤4개 각 ≤20자, 선택)를 주면 그대로 카드에 들어갑니다. ' +
+          '선택 칸(주지 않으면 예전과 똑같이 저장): eyebrow(띠지 ≤12자, 예 "① 혜택"), stats(숫자표 최대 3개, value ≤10자·label ≤12자), badges(배지 최대 3개 각 ≤8자), source(출처 ≤40자). 주면 그 자리에 그대로 그려집니다. ' +
+          '주의: 노트·신문 카드는 points 가 있으면 badges 를 그리지 않으므로 같은 장에 둘을 같이 주면 거절합니다. stats 와 points 를 같이 주면 points 제목이 "장점"으로 나옵니다(카드 고정 문구). ' +
+          '최상위 noteLabel(도장 라벨 ≤8자, 예 "분양노트")·noteNumber(≤10자, 없으면 "No.MMDD" 자동)는 노트·신문 카드 오른쪽 아래 도장이 됩니다. 둘 다 안 주면 도장이 없습니다(impact 는 noteNumber 를 쪽번호로 쓰고 noteLabel 만 라벨 자리에 씁니다). ' +
+          'style: note(손글씨 노트, 기본)·paper(신문 지면)·impact(어두운 바탕 큰 글자). 저장 후 render_design으로 이미지를 만드세요. 문구를 새로 써야 하면 generate_cardnews를 쓰세요.',
         inputSchema: z.object({
-          slides: z
-            .array(
-              z.object({
-                headline: z.string().min(1).max(18),
-                body: z.string().min(1).max(120),
-                points: z.array(z.string().min(1).max(20)).max(4).optional(),
-              })
-            )
-            .min(3)
-            .max(10),
+          slides: z.array(exactSlideSchema).min(3).max(10),
           caption: z.string().max(500).optional().describe('인스타 캡션. 저장하지 않고 그대로 돌려준다(schedule_post에 넘길 것).'),
           title: z.string().min(1).max(60).optional().describe('보관함에 보일 이름'),
           style: z
-            .enum(['note', 'impact'])
+            .enum(['note', 'impact', 'paper'])
             .optional()
-            .describe('note: 손글씨 노트(기본), impact: 어두운 바탕에 큰 글자'),
+            .describe('note: 손글씨 노트(기본), paper: 신문 지면, impact: 어두운 바탕에 큰 글자'),
+          noteLabel: z.string().min(1).max(8).optional().describe('노트 도장 라벨. 예: 분양노트'),
+          noteNumber: z.string().min(1).max(10).optional().describe("노트 도장 번호. 없으면 noteLabel 을 줄 때 'No.MMDD' 자동"),
         }),
         annotations: { readOnlyHint: false, destructiveHint: false },
       },
-      async ({ slides, caption, title, style }) => {
+      async ({ slides, caption, title, style, noteLabel, noteNumber }) => {
+        const bad = checkExactSlides(slides);
+        if (bad) return fail(bad);
+
         // buildDraftPages 재사용 — 문구를 건드리는 곳은 normalizeHeadlines 뿐인데,
-        // accentText가 없으면 블록을 그대로 돌려준다(normalizeHeadline.ts). 그래서 accentText·eyebrow를
-        // 넣지 않는다(입력에 없는 글자가 카드에 생기지 않게).
+        // accentText가 없으면 블록을 그대로 돌려준다(normalizeHeadline.ts). 그래서 accentText를
+        // 넣지 않는다(입력에 없는 글자가 카드에 생기지 않게). 블록 변환은 exactSlides.ts.
         const cards = slides.map((s) => ({
           title: s.headline,
           subtitle: s.body,
-          blocks: [
-            { type: 'headline', text: s.headline },
-            { type: 'sub', text: s.body },
-            ...(s.points?.length ? [{ type: 'checklist', items: s.points }] : []),
-          ] as SlideBlock[],
+          blocks: buildExactBlocks(s),
         }));
-        const pagesData = buildDraftPages(cards, '4:5', style ?? 'note');
+        const pagesData = buildDraftPages(cards, '4:5', style ?? 'note', { noteLabel, noteNumber });
 
         const name = (title ?? `[MCP] ${slides[0].headline}`).slice(0, 80);
         const { data: design, error: insErr } = await supabase
