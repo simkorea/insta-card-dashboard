@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
     await supabase
       .from('sns_accounts')
       .upsert(
-        { user_id: user.id, platform: 'instagram', access_token: accessToken, platform_user_id: igUserId, username },
+        { user_id: user.id, platform: 'instagram', access_token: accessToken, platform_user_id: igUserId, username, updated_at: new Date().toISOString(), extra: { refreshed_at: new Date().toISOString(), expires_at: new Date(Date.now() + (Number(longData.expires_in) || 5184000) * 1000).toISOString() } },
         { onConflict: 'user_id,platform' }
       );
 

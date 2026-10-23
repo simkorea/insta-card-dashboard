@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { scheduleTodayNewsCardnews } from '@/lib/newsCardnews/autoSchedule';
 import { saveBriefingAsBlog } from '@/lib/blog/saveBriefingAsBlog';
 import { recordRun } from '@/lib/automation/recordRun';
+import { refreshInstagramToken } from '@/lib/instagram/refreshToken';
 import { composeCaption } from '@/lib/cardnews/composeCaption';
 import { cleanupOrphans } from '@/lib/storage/cardImages';
 
@@ -244,6 +245,17 @@ export async function GET(request: NextRequest) {
   {
     const r = blog as { ok?: boolean; skipped?: boolean; reason?: string; error?: string; title?: string };
     await recordRun('blog', Boolean(r?.ok), r?.error ?? r?.reason ?? r?.title, elapsed());
+  }
+
+  // ── 2.5 인스타 토큰 갱신 (60일 만료 전에 미리 새로 받는다) ─────────────────
+  try {
+    const t = await refreshInstagramToken(supabase);
+    if (t.status !== 'skipped') {
+      await recordRun('token', t.status === 'refreshed', t.status === 'refreshed' ? `토큰 갱신, 만료 ${t.expiresAt.slice(0, 10)}` : t.reason, elapsed());
+    }
+    if (t.status === 'failed') console.error('[Cron:Instagram] 토큰 갱신 실패:', t.reason);
+  } catch (e) {
+    console.error('[Cron:Instagram] 토큰 갱신 예외:', e instanceof Error ? e.message : e);
   }
 
   // ── 3. 발행 ──────────────────────────────────────────────────────────

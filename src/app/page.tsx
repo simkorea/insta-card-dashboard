@@ -69,6 +69,7 @@ const STEP_LABEL: Record<string, string> = {
   blog: '블로그',
   publish: '인스타 발행',
   cleanup: '이미지 정리',
+  token: '인스타 토큰 갱신',
 };
 
 export default function DashboardPage() {

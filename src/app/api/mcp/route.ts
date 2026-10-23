@@ -25,6 +25,7 @@ import { withTagLine } from '@/lib/blog/tagLine';
 import { buildZipManifest, ymdKst } from '@/lib/blog/zipManifest';
 import { fetchMolitTrades } from '@/lib/aptList/fetchMolit';
 import { findSigungu } from '@/lib/aptList/lawdCodes';
+import { listSites, getSite, factsBlock, unknownNumbers } from '@/lib/sites/siteFacts';
 
 // 준형 혼자 쓰는 1단계 MCP 서버. 인증은 고정 비밀 토큰(Bearer) 하나뿐이다.
 // 문서: docs/mcp-phase1-prompt.md
@@ -707,6 +708,39 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
             2
           )
         );
+      }
+    );
+
+    // ── get_site_facts / check_numbers ──────────────────────────────────
+    // 대표 승인 소재집(site_facts). 광고 문구의 숫자·혜택은 이 자료에만 근거한다.
+    server.registerTool(
+      'get_site_facts',
+      {
+        title: '현장 승인 자료 조회',
+        description: 'slug 를 생략하면 근거 자료가 있는 현장 목록을, 주면 그 현장의 승인 자료 전문을 돌려줍니다.',
+        inputSchema: z.object({ slug: z.string().optional() }),
+        annotations: { readOnlyHint: true },
+      },
+      async ({ slug }) => {
+        if (!slug) return ok(JSON.stringify(await listSites(), null, 2));
+        const site = await getSite(slug);
+        return site ? ok(factsBlock(site)) : fail('근거 자료가 없는 현장입니다.');
+      }
+    );
+
+    server.registerTool(
+      'check_numbers',
+      {
+        title: '문구 숫자 검증',
+        description: '문구 속 숫자·단위가 해당 현장 승인 자료에 있는지 검사합니다. unknown 이 비어 있어야 통과입니다.',
+        inputSchema: z.object({ slug: z.string(), text: z.string().max(20000) }),
+        annotations: { readOnlyHint: true },
+      },
+      async ({ slug, text }) => {
+        const site = await getSite(slug);
+        if (!site) return fail('근거 자료가 없는 현장입니다.');
+        const unknown = unknownNumbers(text, site);
+        return ok(JSON.stringify({ pass: unknown.length === 0, unknown }));
       }
     );
 
