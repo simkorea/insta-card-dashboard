@@ -320,6 +320,12 @@ export default function CardNewsPage() {
 
   // 9단계 정밀 제작 관련 상태
   const [step9Input, setStep9Input] = useState('');
+  // 근거 자료가 있는 현장(대표 승인 소재집). 고르면 주제 추천이 그 자료에만 근거한다.
+  const [sites, setSites] = useState<{ slug: string; name: string }[]>([]);
+  const [step9Site, setStep9Site] = useState('');
+  useEffect(() => {
+    fetch('/api/sites').then(r => (r.ok ? r.json() : null)).then(j => { if (j?.sites) setSites(j.sites); }).catch(() => {});
+  }, []);
   const [step9Category, setStep9Category] = useState('');
   const [step9Recency, setStep9Recency] = useState<'today' | 'week' | 'month' | 'evergreen'>('evergreen');
   const [step9Topics, setStep9Topics] = useState<string[]>([]);
@@ -1122,8 +1128,8 @@ export default function CardNewsPage() {
   };
 
   const handleSuggestTopics = async () => {
-    if (!step9Input.trim() && !step9Category) {
-      alert('자유 입력 또는 카테고리를 선택해주세요.');
+    if (!step9Input.trim() && !step9Category && !step9Site) {
+      alert('자유 입력, 카테고리 또는 현장을 선택해주세요.');
       return;
     }
     setIsSuggestingTopics(true);
@@ -1132,7 +1138,7 @@ export default function CardNewsPage() {
       const res = await fetch('/api/generate/topic-suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: step9Input, category: step9Category, recency: step9Recency }),
+        body: JSON.stringify({ input: step9Input, category: step9Category, recency: step9Recency, siteSlug: step9Site || undefined }),
       });
       const data = await res.json();
       if (data.topics) setStep9Topics(data.topics);
@@ -1323,6 +1329,7 @@ export default function CardNewsPage() {
         body.slideCount = slideCountType === 'auto' ? 'auto' : slideCountNumber;
         body.ratio = selectedRatio;
         body.genStyle = genStyle;
+        if (step9Site) body.siteSlug = step9Site;
       } else {
         body.slideCount = quickSlideAuto ? 'auto' : slideCountNumber;
       }
@@ -1334,6 +1341,10 @@ export default function CardNewsPage() {
       });
       const data = await res.json();
       
+      if (Array.isArray(data.unverifiedNumbers) && data.unverifiedNumbers.length > 0) {
+        alert(`승인 자료에 없는 숫자가 들어갔어요: ${data.unverifiedNumbers.join(', ')}
+발행 전에 해당 카드를 확인해 주세요.`);
+      }
       if (data.cardNews) {
         const validThemes = ['business', 'cafe', 'lifestyle', 'travel', 'fashion', 'food', 'education'];
         if (data.themeKey && validThemes.includes(data.themeKey)) {
@@ -2946,6 +2957,22 @@ export default function CardNewsPage() {
                         className="w-full p-3 border border-gray-200 rounded-xl text-sm focus:border-emerald-500 outline-none"
                       />
                     </div>
+                    {/* 현장 근거 선택 */}
+                    {sites.length > 0 && (
+                      <div>
+                        <span className="text-xs text-gray-400 mb-2 block">현장 선택 (대표 승인 자료에만 근거해 추천)</span>
+                        <div className="flex flex-wrap gap-2">
+                          {sites.map(st => (
+                            <button
+                              key={st.slug}
+                              type="button"
+                              onClick={() => setStep9Site(step9Site === st.slug ? '' : st.slug)}
+                              className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${step9Site === st.slug ? 'bg-amber-50 border-amber-400 text-amber-700' : 'border-gray-200 text-gray-500 hover:border-amber-300'}`}
+                            >{st.name.replace(/\s*\(.*\)$/, '')}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {/* 카테고리 버튼 */}
                     <div>
                       <span className="text-xs text-gray-400 mb-2 block">또는 카테고리만 선택</span>

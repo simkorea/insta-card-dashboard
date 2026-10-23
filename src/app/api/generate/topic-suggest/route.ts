@@ -1,12 +1,34 @@
-import { generateWithRetry, toKoreanError } from '@/lib/gemini';
+import { generateWithRetry, callWithFallback, toKoreanError } from '@/lib/gemini';
 import { NextResponse } from 'next/server';
+import { getSite, factsBlock, unknownNumbers } from '@/lib/sites/siteFacts';
 
 export async function POST(request: Request) {
   try {
-    const { input, category, recency } = await request.json().catch(() => ({}));
+    const { input, category, recency, siteSlug } = await request.json().catch(() => ({}));
 
-    if (!input && !category) {
+    if (!input && !category && !siteSlug) {
       return NextResponse.json({ error: 'input 또는 category 필요' }, { status: 400 });
+    }
+
+
+    // 현장을 고르면 승인 자료에만 근거해 주제를 뽑는다 (자료에 없는 숫자·혜택 금지)
+    if (siteSlug) {
+      const site = await getSite(String(siteSlug));
+      if (!site) return NextResponse.json({ error: '근거 자료가 없는 현장입니다.' }, { status: 404 });
+      const gp = `당신은 부동산 분양 SNS 카드뉴스 기획자입니다. 아래 [현장 근거]에 적힌 사실만으로 카드뉴스 주제 6개를 제안하세요.
+${factsBlock(site)}
+
+[지침]
+1. 근거에 없는 숫자·할인·혜택·입지 정보를 절대 만들지 않는다. 숫자는 근거에 적힌 그대로만 쓴다.
+2. 서로 다른 각도로 (교통 / 규모·브랜드 / 생활 인프라 / 계약조건 / 자금계획 / 실수요자 질문 등).
+3. 카드뉴스 표지 제목처럼 구체적이고 이목을 끄는 한 줄.${input ? `
+4. 추가 요청: ${input}` : ''}
+4. JSON 배열(문자열 6개)로만 응답.`;
+      let g = await callWithFallback({ prompt: gp, model: 'anthropic/claude-haiku-4.5', maxTokens: 4000, json: true });
+      g = g.includes('```') ? g.split('```')[1].replace(/^json/, '').trim() : g.trim();
+      const all: string[] = JSON.parse(g);
+      const topics = all.filter(t => unknownNumbers(t, site).length === 0);
+      return NextResponse.json({ topics, dropped: all.length - topics.length });
     }
 
     const now = new Date();

@@ -3,12 +3,23 @@ import { callAI } from '@/lib/ai/openrouter';
 import { extractArticle } from '@/lib/extractArticle';
 import { normalizeHeadlines } from '@/lib/cardnews/normalizeHeadline';
 import { NextResponse } from 'next/server';
+import { getSite, factsBlock, unknownNumbers, type SiteFacts } from '@/lib/sites/siteFacts';
 
 export async function POST(request: Request) {
   try {
-    const { url, originalText, templateTitle, slideCount, ratio, genStyle, extraInstruction, outputLanguage } = await request.json();
+    const { url, originalText, templateTitle, slideCount, ratio, genStyle, extraInstruction, outputLanguage, siteSlug } = await request.json();
 
     let inputContent = originalText || '';
+    // 현장을 골랐으면 대표 승인 자료만 근거로 쓴다 — 자료에 없는 숫자·혜택은 만들지 않는다
+    let site: SiteFacts | null = null;
+    if (siteSlug) {
+      site = await getSite(String(siteSlug));
+      if (site) inputContent += `
+
+${factsBlock(site)}
+
+[근거 규칙] 위 [현장 근거]에 없는 숫자·할인·혜택·입지 정보는 절대 쓰지 말 것. 숫자는 근거에 적힌 그대로만 사용.`;
+    }
     let sourceMode: 'url' | 'text' = originalText ? 'text' : 'url';
 
     if (url && !originalText) {
@@ -155,6 +166,7 @@ ${sourceFidelityBlock}${languageInstruction}${extraInstructionBlock}
           Array.isArray(c?.blocks) ? { ...c, blocks: normalizeHeadlines(c.blocks) } : c
         );
       }
+      if (site) data.unverifiedNumbers = unknownNumbers(JSON.stringify(data.cardNews ?? []), site);
       return NextResponse.json(data);
     } catch {
       console.error('[unified] JSON 파싱 실패. 원본 응답:', text);

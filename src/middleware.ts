@@ -25,6 +25,7 @@ const PUBLIC_API_PATHS = [
 // 인증이 필요한 API 경로 prefix
 const PROTECTED_API_PREFIXES = [
   '/api/generate',
+  '/api/sites',
   '/api/analyze',
   '/api/upload',
   '/api/designs',

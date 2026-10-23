@@ -1,0 +1,16 @@
+feature,area,priority,original,clone,notes
+콘텐츠 기획(소재 추천),제작,must,yes,no,우리 앱엔 없음. 근거를 공고문/승인소재로 제한
+링크 변환(URL→제작),제작,should,yes,partial,reference-research·blog 일부 있음 확인 필요
+카드뉴스 제작,제작,must,yes,yes,완성
+블로그 제작,제작,must,yes,yes,완성 (cardnews_to_blog)
+영상 제작,제작,could,yes,no,범위 제외 권장(shorts는 별도 스킬)
+Threads·X 텍스트 변환,제작,should,yes,partial,social-post 페이지/ upload/sns 에 threads·x 발행 있음
+콘텐츠 자동화(승인 후 반복),운영,must,yes,partial,autoSchedule 크론 있음. 샘플 승인·일시정지 UI 없음
+예약 발행,운영,must,yes,yes,calendar + cron
+콘텐츠 관리 캘린더/실패 확인,운영,should,yes,partial,calendar 있음. 상태 필터·실패 목록 확인 필요
+성과 비교,운영,should,yes,partial,insights 있음. 콘텐츠별 비교·발행시간 추천 확인 필요
+자동 DM(댓글 키워드),운영,must,yes,yes,dm-automation + webhook 있음
+댓글 관리/AI 답글,운영,must,yes,yes,comments + templates
+링크 페이지,운영,could,yes,no,분양 상담 랜딩으로 대체 가능
+MCP 연결,계정,must,yes,yes,2b8412a
+결제·크레딧·플랜,계정,skip,yes,no,1인 운영이라 불필요
