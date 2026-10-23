@@ -4,6 +4,7 @@ import { scheduleTodayNewsCardnews } from '@/lib/newsCardnews/autoSchedule';
 import { saveBriefingAsBlog } from '@/lib/blog/saveBriefingAsBlog';
 import { recordRun } from '@/lib/automation/recordRun';
 import { composeCaption } from '@/lib/cardnews/composeCaption';
+import { cleanupOrphans } from '@/lib/storage/cardImages';
 
 // scheduled_posts·sns_accounts 는 서버 전용이다 (service role).
 // 여기서 바꾼 것은 키뿐이다 — 발행 로직·순서·시간은 그대로다.
@@ -176,6 +177,7 @@ export const maxDuration = 300;
 const RENDER_BUDGET_MS = 110_000;  // 카드 그리기에 줄 시간
 const PUBLISH_CUTOFF_MS = 200_000; // 이 시각을 넘기면 남은 발행은 다음으로 미룬다
 const BLOG_CUTOFF_MS = 200_000;    // 이 시각을 넘겼으면 블로그는 건너뛴다
+const CLEANUP_CUTOFF_MS = 250_000; // 이 시각을 넘겼으면 저장공간 정리는 다음으로 미룬다
 
 export async function GET(request: NextRequest) {
   const startTime = Date.now();
@@ -333,11 +335,34 @@ export async function GET(request: NextRequest) {
     elapsed(),
   );
 
+  // ── 4. 저장공간 정리 ────────────────────────────────────────────────
+  //
+  // 어디에서도 쓰이지 않는 그림(실패·중복 렌더링)을 지운다. 맨 마지막에 둔다 —
+  // 정리가 실패하거나 느려도 발행에는 영향이 없어야 한다. 발행 후 일정 기간이 지난
+  // 그림은 여기서 지우지 않고 대시보드에서 사람에게 물어본다(lib/storage/cardImages.ts).
+  let cleanup: unknown;
+  if (elapsed() > CLEANUP_CUTOFF_MS) {
+    cleanup = { ok: false, error: `시간이 모자라 건너뜀 (${(elapsed() / 1000).toFixed(1)}s 경과)` };
+  } else {
+    const t0 = Date.now();
+    try {
+      const r = await cleanupOrphans();
+      cleanup = { ok: true, ...r };
+      await recordRun('cleanup', r.failed === 0, `안 쓰는 그림 ${r.removed}개(${r.mb}MB) 삭제${r.failed ? `, 실패 ${r.failed}` : ''}`, Date.now() - t0);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      cleanup = { ok: false, error: msg };
+      console.error('[Cron:Instagram] 저장공간 정리 실패:', msg);
+      await recordRun('cleanup', false, msg, Date.now() - t0);
+    }
+  }
+
   console.log(`[Cron:Instagram] === Cron 실행 종료 === 성공: ${successCount} | 실패: ${failCount} | 이월: ${remainingCount} | 총 ${elapsed()}ms`);
 
   return NextResponse.json({
     autoCard,
     blog,
+    cleanup,
     processed: results.length,
     total: posts?.length ?? 0,
     remaining: remainingCount,

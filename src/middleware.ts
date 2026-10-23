@@ -57,6 +57,7 @@ const PROTECTED_API_PREFIXES = [
   '/api/ai-designer',
   '/api/news-draft',
   '/api/apt-list',
+  '/api/storage',   // 저장공간 정리 — 파일을 지우므로 로그인한 사람만
 ];
 
 export async function middleware(request: NextRequest) {

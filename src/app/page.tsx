@@ -9,6 +9,7 @@ import {
 import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { HybridThumb } from '@/components/cardnews/HybridThumb';
 import { pickEvergreen } from '@/lib/cardnews/evergreenTopics';
+import StorageCleanupCard from '@/components/StorageCleanupCard';
 
 const QUICK_ACTIONS = [
   { href: '/cardnews', icon: <PenTool size={18} />, label: '카드뉴스', desc: 'AI 슬라이드 제작', color: 'from-violet-500 to-purple-600' },
@@ -67,6 +68,7 @@ const STEP_LABEL: Record<string, string> = {
   cardnews: '카드뉴스',
   blog: '블로그',
   publish: '인스타 발행',
+  cleanup: '이미지 정리',
 };
 
 export default function DashboardPage() {
@@ -640,6 +642,9 @@ export default function DashboardPage() {
           )}
         </div>
       )}
+
+      {/* 발행한 지 일주일 지난 카드 그림이 있으면 지울지 물어본다 (없으면 안 보인다) */}
+      <StorageCleanupCard />
 
       {/* ── 언제 올려도 되는 주제 ──────────────────────────────────────────
           위의 '오늘의 소재'는 오늘 기사라 며칠 지나면 올릴 이유가 사라진다.

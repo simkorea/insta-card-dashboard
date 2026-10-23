@@ -112,15 +112,32 @@ export async function scheduleTodayNewsCardnews(budgetMs = 120_000): Promise<Aut
   // 서로 다른 초안이라 중복 검사를 둘 다 통과해 두 건이 발행됐다.
   //
   // 계정에 하루 두 번 올라가는 것이 사고다. 초안이 몇 개든 하루 한 건으로 막는다.
+  //
+  // 실패(failed)도 "오늘 이미 시도함"으로 센다. 예전에는 pending·published 만 세서,
+  // 인스타 토큰이 만료돼 발행이 실패하던 2026-09-23~26 에 이 크론이 실행될 때마다
+  // 같은 카드를 처음부터 다시 그려 올렸다(한 시간에 8~9장씩, 나흘에 약 1GB).
+  // 그 때문에 Supabase 무료 저장공간(1GB)을 넘겨 서비스가 막혔다.
   const { data: todayPosts } = await supabase
     .from('scheduled_posts')
-    .select('id, status, design_id, design_name')
+    .select('id, status, design_id, design_name, error_message')
     .gte('created_at', startIso)
-    .in('status', ['pending', 'published'])
+    .in('status', ['pending', 'published', 'failed'])
+    .order('created_at', { ascending: false })
     .limit(5);
 
   const already = (todayPosts ?? [])[0];
   if (already) {
+    if (already.status === 'failed') {
+      return {
+        ok: true,
+        skipped: true,
+        designId: design.id,
+        reason:
+          `오늘 이미 '${already.design_name}' 발행을 시도했으나 실패했습니다` +
+          `(${String(already.error_message || '원인 미상').slice(0, 80)}). ` +
+          '다시 그리지 않습니다 — 원인을 고친 뒤 대시보드에서 직접 다시 올려주세요.',
+      };
+    }
     const sameDesign = already.design_id === design.id;
     return {
       ok: true,

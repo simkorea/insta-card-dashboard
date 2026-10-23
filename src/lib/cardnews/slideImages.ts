@@ -46,11 +46,15 @@ export async function getSlideImageUrls(
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
+  // 일주일이 지난 그림은 저장공간 정리로 지워졌을 수 있다. 그 주소를 그대로 쓰면
+  // 깨진 그림이 블로그에 들어가므로, 최근 것만 재사용하고 아니면 새로 그린다.
+  const reuseSince = new Date(Date.now() - 6 * 24 * 3600 * 1000).toISOString();
   const { data: existing } = await supabase
     .from('scheduled_posts')
     .select('slide_image_urls')
     .eq('design_id', designId)
     .not('slide_image_urls', 'is', null)
+    .gte('created_at', reuseSince)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
