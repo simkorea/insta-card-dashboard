@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { scheduleTodayNewsCardnews } from '@/lib/newsCardnews/autoSchedule';
 import { saveBriefingAsBlog } from '@/lib/blog/saveBriefingAsBlog';
 import { recordRun } from '@/lib/automation/recordRun';
-import { refreshInstagramToken } from '@/lib/instagram/refreshToken';
+import { refreshSnsToken } from '@/lib/instagram/refreshToken';
 import { composeCaption } from '@/lib/cardnews/composeCaption';
 import { cleanupOrphans } from '@/lib/storage/cardImages';
 
@@ -178,6 +178,10 @@ export const maxDuration = 300;
 const RENDER_BUDGET_MS = 110_000;  // 카드 그리기에 줄 시간
 const PUBLISH_CUTOFF_MS = 200_000; // 이 시각을 넘기면 남은 발행은 다음으로 미룬다
 const BLOG_CUTOFF_MS = 200_000;    // 이 시각을 넘겼으면 블로그는 건너뛴다
+// 자동 카드뉴스·블로그는 한국 시각 이 시각 이후에만 만든다. 누가 한밤중에 이 주소를 불러도
+// 자정에 올라가지 않게 하려는 것이다. 손으로 누르는 '지금 발행'(?force=1)은 예외.
+// (발행 대기 중인 예약 글은 시각과 상관없이 예정 시각이 지나면 올라간다.)
+const AUTO_FROM_HOUR_KST = 9;
 const CLEANUP_CUTOFF_MS = 250_000; // 이 시각을 넘겼으면 저장공간 정리는 다음으로 미룬다
 
 export async function GET(request: NextRequest) {
@@ -195,13 +199,28 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const force = request.nextUrl.searchParams.get('force') === '1';
+  const kstHour = new Date(now.getTime() + 9 * 3600 * 1000).getUTCHours();
+  const autoAllowed = force || kstHour >= AUTO_FROM_HOUR_KST;
+
+  // 크론은 하루 한 번이어야 하는데 매시간 불리는 일이 있었다. 누가 부르는지 알 수 있게
+  // Vercel 크론이 아닌 호출은 하루 한 번 기록해 둔다.
+  const ua = request.headers.get('user-agent') ?? '';
+  if (!force && !/vercel-cron/i.test(ua)) {
+    const since = new Date(Date.now() - 23 * 3600 * 1000).toISOString();
+    const { count } = await supabase.from('automation_runs').select('*', { count: 'exact', head: true }).eq('step', 'ping').gte('created_at', since);
+    if (!count) await recordRun('ping', true, `호출자 UA=${ua.slice(0, 60) || '없음'} IP=${(request.headers.get('x-forwarded-for') ?? '').split(',')[0].slice(0, 40)}`, 0);
+  }
+
   // ── 1. 오늘 카드뉴스 초안 → 그림 → 발행 줄 ───────────────────────────
   let autoCard: unknown;
   // 블로그에도 같은 카드를 그림으로 넣는다. 방금 인스타용으로 그린 것을
   // 그대로 쓰므로 두 번 그리지 않는다.
   let autoDesignId: string | undefined;
   try {
-    const r = await scheduleTodayNewsCardnews(RENDER_BUDGET_MS);
+    const r = autoAllowed
+      ? await scheduleTodayNewsCardnews(RENDER_BUDGET_MS)
+      : ({ ok: true, skipped: true, reason: `이른 시각(${kstHour}시) — ${AUTO_FROM_HOUR_KST}시 이후에 만듭니다` } as Awaited<ReturnType<typeof scheduleTodayNewsCardnews>>);
     autoCard = r;
     if (r.ok) autoDesignId = r.designId;
     if (!r.ok) console.error('[Cron:Instagram] 카드뉴스 자동 등록 실패:', r.error);
@@ -214,7 +233,8 @@ export async function GET(request: NextRequest) {
   }
   {
     const r = autoCard as { ok?: boolean; skipped?: boolean; reason?: string; error?: string; name?: string };
-    await recordRun('cardnews', Boolean(r?.ok), r?.error ?? r?.reason ?? r?.name, elapsed());
+    // 이미 끝난 일을 다시 확인만 한 호출은 기록하지 않는다(매시 호출돼도 목록이 길어지지 않게)
+    if (!(r?.skipped && !/실패/.test(r.reason ?? ''))) await recordRun('cardnews', Boolean(r?.ok), r?.error ?? r?.reason ?? r?.name, elapsed());
   }
 
   // ── 2. 블로그 저장 ───────────────────────────────────────────────────
@@ -226,7 +246,9 @@ export async function GET(request: NextRequest) {
   // 순서를 바꿔도 그림은 붙는다. 카드는 1번에서 이미 그려 두었고 블로그는
   // 그 주소를 그대로 물려받는다. 블로그는 20초짜리라 발행을 늦추지도 않는다.
   let blog: unknown;
-  if (elapsed() > BLOG_CUTOFF_MS) {
+  if (!autoAllowed) {
+    blog = { ok: true, skipped: true, reason: '이른 시각' };
+  } else if (elapsed() > BLOG_CUTOFF_MS) {
     blog = { ok: false, error: `시간이 모자라 건너뜀 (${(elapsed() / 1000).toFixed(1)}s 경과)` };
     console.warn('[Cron:Instagram] 블로그 저장 건너뜀 — 남은 시간 부족');
   } else {
@@ -244,18 +266,20 @@ export async function GET(request: NextRequest) {
   }
   {
     const r = blog as { ok?: boolean; skipped?: boolean; reason?: string; error?: string; title?: string };
-    await recordRun('blog', Boolean(r?.ok), r?.error ?? r?.reason ?? r?.title, elapsed());
+    if (!(r?.skipped && !/실패/.test(r.reason ?? ''))) await recordRun('blog', Boolean(r?.ok), r?.error ?? r?.reason ?? r?.title, elapsed());
   }
 
-  // ── 2.5 인스타 토큰 갱신 (60일 만료 전에 미리 새로 받는다) ─────────────────
-  try {
-    const t = await refreshInstagramToken(supabase);
-    if (t.status !== 'skipped') {
-      await recordRun('token', t.status === 'refreshed', t.status === 'refreshed' ? `토큰 갱신, 만료 ${t.expiresAt.slice(0, 10)}` : t.reason, elapsed());
+  // ── 2.5 SNS 토큰 갱신 (60일 만료 전에 미리 새로 받는다) ─────────────────
+  for (const platform of ['instagram', 'threads'] as const) {
+    try {
+      const t = await refreshSnsToken(supabase, platform);
+      if (t.status !== 'skipped') {
+        await recordRun('token', t.status === 'refreshed', t.status === 'refreshed' ? `${platform} 토큰 갱신, 만료 ${t.expiresAt.slice(0, 10)}` : `${platform}: ${t.reason}`, elapsed());
+      }
+      if (t.status === 'failed') console.error(`[Cron:Instagram] ${platform} 토큰 갱신 실패:`, t.reason);
+    } catch (e) {
+      console.error(`[Cron:Instagram] ${platform} 토큰 갱신 예외:`, e instanceof Error ? e.message : e);
     }
-    if (t.status === 'failed') console.error('[Cron:Instagram] 토큰 갱신 실패:', t.reason);
-  } catch (e) {
-    console.error('[Cron:Instagram] 토큰 갱신 예외:', e instanceof Error ? e.message : e);
   }
 
   // ── 3. 발행 ──────────────────────────────────────────────────────────
@@ -338,7 +362,8 @@ export async function GET(request: NextRequest) {
   }
 
 
-  await recordRun(
+  const nothingToPublish = !(posts && posts.length);
+  if (!nothingToPublish) await recordRun(
     'publish',
     failCount === 0 && successCount > 0,
     successCount > 0
@@ -360,7 +385,7 @@ export async function GET(request: NextRequest) {
     try {
       const r = await cleanupOrphans();
       cleanup = { ok: true, ...r };
-      await recordRun('cleanup', r.failed === 0, `안 쓰는 그림 ${r.removed}개(${r.mb}MB) 삭제${r.failed ? `, 실패 ${r.failed}` : ''}`, Date.now() - t0);
+      if (r.removed > 0 || r.failed > 0) await recordRun('cleanup', r.failed === 0, `안 쓰는 그림 ${r.removed}개(${r.mb}MB) 삭제${r.failed ? `, 실패 ${r.failed}` : ''}`, Date.now() - t0);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       cleanup = { ok: false, error: msg };

@@ -21,7 +21,7 @@ export async function POST() {
 
   const startedAt = Date.now();
   try {
-    const res = await fetch(`${siteOrigin()}/api/cron/instagram`, {
+    const res = await fetch(`${siteOrigin()}/api/cron/instagram?force=1`, {
       headers: { authorization: `Bearer ${secret}` },
       cache: 'no-store',
     });

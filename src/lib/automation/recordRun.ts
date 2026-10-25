@@ -8,7 +8,7 @@ import { createClient } from '@supabase/supabase-js';
 //
 // 기록이 실패해도 본 작업은 계속 간다 — 기록하려다 발행을 멈추면 본말전도다.
 
-export type RunStep = 'briefing' | 'cardnews' | 'blog' | 'publish' | 'cleanup' | 'token';
+export type RunStep = 'briefing' | 'cardnews' | 'blog' | 'publish' | 'cleanup' | 'token' | 'ping';
 
 /** 한국 날짜 (YYYY-MM-DD) */
 function kstDate(): string {
