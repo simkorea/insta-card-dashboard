@@ -24,6 +24,9 @@ function kstDayRangeUtc(now = new Date()) {
   return { startIso: new Date(dayStartUtcMs).toISOString() };
 }
 
+// 인스타는 태그를 많이 달수록 좋지 않다 — 계정 주제에 맞는 5개만.
+const AUTO_HASHTAGS = '#분양 #청약 #아파트분양 #분양정보 #부동산뉴스';
+
 export type AutoScheduleResult =
   | { ok: true; skipped: true; reason: string; designId?: string }
   | { ok: true; skipped: false; designId: string; name: string; slides: number; postId: string }
@@ -169,7 +172,11 @@ export async function scheduleTodayNewsCardnews(budgetMs = 120_000): Promise<Aut
   }
 
   // 5) 발행 대기 줄에 넣는다. 시각은 지금 — 이 크론이 곧바로 이어서 올린다.
-  const caption = buildVideoCaption(pages as never, design.name);
+  // 팔로워를 모으는 게 목표다: 저장·팔로우를 부르는 한 줄과, 분양·청약 검색에 걸리는 태그 5개.
+  const caption = `${buildVideoCaption(pages as never, design.name)}
+
+🔖 저장해두고 매일 아침 분양·청약 소식 확인하세요
+➕ 팔로우하면 놓치지 않아요`;
   const { data: post, error: insErr } = await supabase
     .from('scheduled_posts')
     .insert({
@@ -179,7 +186,7 @@ export async function scheduleTodayNewsCardnews(budgetMs = 120_000): Promise<Aut
       slide_image_urls: shot.urls.slice(0, 10),
       caption,
       // hashtags 는 text 컬럼이다. 배열을 넣으면 '[]' 로 저장돼 캡션 끝에 붙었다.
-      hashtags: '',
+      hashtags: AUTO_HASHTAGS,
       scheduled_at: new Date().toISOString(),
       status: 'pending',
     })

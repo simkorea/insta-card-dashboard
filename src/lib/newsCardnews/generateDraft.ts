@@ -1,3 +1,4 @@
+import { recentTerms, isRecentTopic } from '@/lib/newsCardnews/recentTopics';
 import { callWithFallback } from '@/lib/gemini';
 import { createClient } from '@supabase/supabase-js';
 import type { SlideBlock } from '@/lib/cardnews/blocks';
@@ -102,20 +103,25 @@ function scoreNews(n: NewsItem): number {
   return score;
 }
 
-function pickRelevantNews(items: NewsItem[], limit: number): NewsItem[] {
+function pickRelevantNews(items: NewsItem[], limit: number, recent: Set<string> = new Set()): NewsItem[] {
   const scored = items
     .filter(n => n && typeof n.title === 'string' && n.title.trim())
     .map(n => ({ n, s: scoreNews(n) }))
     .filter(x => x.s >= MIN_SCORE)
     .sort((a, b) => b.s - a.s);
 
+  // 최근 며칠 계속 나온 소재(recent)는 뒤로 미룬다. 새 소재만으로 장수가 모자랄 때만 채워 넣는다.
+  const fresh = scored.filter(x => !isRecentTopic(x.n.title, recent));
+  const stale = scored.filter(x => isRecentTopic(x.n.title, recent));
   const out: NewsItem[] = [];
-  for (const { n } of scored) {
-    if (out.length >= limit) break;
+  const add = (n: NewsItem) => {
+    if (out.length >= limit) return;
     // 제목 앞부분이 겹치는 유사 기사는 한 건만
-    if (out.some(o => o.title.slice(0, 12) === n.title.slice(0, 12))) continue;
+    if (out.some(o => o.title.slice(0, 12) === n.title.slice(0, 12))) return;
     out.push(n);
-  }
+  };
+  for (const { n } of fresh) add(n);
+  if (out.length < Math.min(limit, 6)) for (const { n } of stale) add(n);
   return out;
 }
 
@@ -226,7 +232,9 @@ export async function generateNewsCardnewsDraft(opts?: {
   const cap = Math.max(totalCap - EDGE_SLIDES, 1);
   // 내용이 얇은 카드는 아래에서 버린다. 그만큼 미리 더 골라두지 않으면
   // 장수가 줄어든다 — 쓸 만한 기사가 있는 날은 채워서 나가게 한다.
-  const picked = pickRelevantNews(rawItems, cap + OVERPICK);
+  const recent = await recentTerms();
+  const picked = pickRelevantNews(rawItems, cap + OVERPICK, recent);
+  if (recent.size) console.log(`[NewsCardnews] 최근 반복 소재(뒤로 미룸): ${[...recent].join(', ')}`);
   const hasItems = picked.length >= MIN_SLIDES;
   console.log(`[NewsCardnews] 수집 ${rawItems.length}건 → 사용 ${picked.length}건 (기사 최대 ${cap}장 + 표지·마무리)`);
 
@@ -275,7 +283,7 @@ ${toneBlock}
 
 반드시 아래 JSON 구조로만 응답하세요 (코드블록 없이):
 {
-  "title": "이 카드뉴스 세트의 제목 (20자 이내)",
+  "title": "이 카드뉴스 세트의 제목 (20자 이내, 날짜·요일은 쓰지 말 것)",
   "cards": [
     { "page": 1, "title": "슬라이드 제목", "body": "요약 텍스트", "imageKeyword": "Unsplash 검색용 영어 키워드",
       "blocks": [ { "type": "eyebrow", "text": "TODAY" }, { "type": "headline", "text": "핵심 제목", "accentText": "강조어" } ] }
@@ -468,7 +476,11 @@ ${sourceBlock}`;
   // 카드는 7장인 상태가 나왔다 — 같은 카드의 배지는 7가지로 맞아 더 이상해 보였다.
   // '선'과 '가지'만 바꾼다. '2천451세대'처럼 기사 안의 수치는 건드리지 않는다.
   const articleCount = articlePages.length;
+  // 제목 앞의 날짜("27일", "10월 27일", "10/27")는 뗀다. AI가 기사 속 날짜를 제목에 넣으면
+  // 오늘 날짜(label)와 어긋난 채 두 번 찍혔다 — 날짜는 시스템이 붙인다.
   const coverHeadline = (parsed.title || `${label} 부동산 뉴스`)
+    .replace(/^\s*(\d{1,2}\s*월\s*)?\d{1,2}\s*일\s*/, '')
+    .replace(/^\s*\d{1,2}\/\d{1,2}\s*/, '')
     .replace(/(\d+)\s*(선|가지)(?![가-힣])/g, (m, num, unit) =>
       Number(num) === articleCount ? m : `${articleCount}${unit}`);
   const coverBadges = ['오늘의 핵심', `${articleCount}가지`, '저장 추천'];
