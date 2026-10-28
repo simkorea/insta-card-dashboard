@@ -25,6 +25,7 @@ import { withTagLine } from '@/lib/blog/tagLine';
 import { buildZipManifest, ymdKst } from '@/lib/blog/zipManifest';
 import { fetchMolitTrades } from '@/lib/aptList/fetchMolit';
 import { findSigungu } from '@/lib/aptList/lawdCodes';
+import { buildIgReport } from '@/lib/instagram/report';
 import { listSites, getSite, factsBlock, unknownNumbers } from '@/lib/sites/siteFacts';
 
 // 준형 혼자 쓰는 1단계 MCP 서버. 인증은 고정 비밀 토큰(Bearer) 하나뿐이다.
@@ -709,6 +710,19 @@ ${impactInstruction}${sourceFidelityBlock}${languageInstruction}
           )
         );
       }
+    );
+
+    // ── ig_report ────────────────────────────────────────────────────────
+    // 인스타 관리 점검표(계정·최근 게시물 반응·발행 기록·자동 작업 실패·토큰 만료). 읽기 전용, 토큰은 응답에 없다.
+    server.registerTool(
+      'ig_report',
+      {
+        title: '인스타 점검표',
+        description: '최근 며칠의 팔로워·반응·발행 성공/실패·자동 작업 실패·토큰 만료를 한 번에 조회합니다. 인스타 관리 점검에 쓰세요.',
+        inputSchema: z.object({ days: z.number().int().min(1).max(30).optional() }),
+        annotations: { readOnlyHint: true },
+      },
+      async ({ days }) => ok(JSON.stringify(await buildIgReport(supabase, days ?? 7), null, 2))
     );
 
     // ── get_site_facts / check_numbers ──────────────────────────────────
