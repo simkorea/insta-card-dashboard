@@ -70,6 +70,7 @@ export async function callWithFallback(opts: {
   system?: string;
   maxTokens?: number;
   json?: boolean;
+  freeFirst?: boolean;
 }): Promise<string> {
   const errors: string[] = [];
   const fail = (who: string, e: unknown) => {
@@ -78,26 +79,26 @@ export async function callWithFallback(opts: {
     console.warn(`[AI] ${who} 실패 → 다음 공급자로: ${msg.slice(0, 200)}`);
   };
 
-  try {
-    return await callAI(opts);
-  } catch (e) { fail(opts.model, e); }
-
-  try {
-    return await generateWithRetry(opts.prompt, {
+  const attempts: [string, () => Promise<string>][] = [
+    [opts.model, () => callAI(opts)],
+    ['Gemini', () => generateWithRetry(opts.prompt, {
       systemInstruction: opts.system,
       generationConfig: {
         maxOutputTokens: Math.max(16384, (opts.maxTokens ?? 0) * 2),
         thinkingConfig: { thinkingBudget: 0 },
         ...(opts.json ? { responseMimeType: 'application/json' } : {}),
       },
-    });
-  } catch (e) { fail('Gemini', e); }
+    })],
+    ['Groq', () => callGroq({ prompt: opts.prompt, system: opts.system, maxTokens: opts.maxTokens, jsonMode: opts.json })],
+  ];
+  // freeFirst: 캡션처럼 짧고 틀려도 사람이 고칠 글은 무료 등급(Groq)부터 쓴다.
+  if (opts.freeFirst) attempts.unshift(attempts.pop()!);
 
-  try {
-    return await callGroq({ prompt: opts.prompt, system: opts.system, maxTokens: opts.maxTokens, jsonMode: opts.json });
-  } catch (e) { fail('Groq', e); }
+  for (const [who, run] of attempts) {
+    try { return await run(); } catch (e) { fail(who, e); }
+  }
 
-  throw new Error(`AI 공급자 셋 다 실패 — ${errors.join(' / ')}`);
+  throw new Error(`AI 공급자 모두 실패 — ${errors.join(' / ')}`);
 }
 
 // Accepts the same input types as model.generateContent():

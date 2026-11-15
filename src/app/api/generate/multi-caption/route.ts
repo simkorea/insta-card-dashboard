@@ -1,4 +1,4 @@
-import { generateWithRetry, toKoreanError } from '@/lib/gemini';
+import { callWithFallback, toKoreanError } from '@/lib/gemini';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -54,7 +54,7 @@ ${platformInstructions}
   ${resultKeys}
 }`;
 
-    let text = await generateWithRetry(prompt);
+    let text = await callWithFallback({ prompt, model: 'anthropic/claude-haiku-4.5', maxTokens: 4000, json: true, freeFirst: true });
     if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
     else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
 

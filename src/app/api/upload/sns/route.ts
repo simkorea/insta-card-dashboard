@@ -38,7 +38,8 @@ async function uploadToThreads(
   if (!account?.access_token || !account?.platform_user_id) {
     return { success: false, error: 'Threads 계정이 연동되지 않았습니다. SNS 설정에서 먼저 연동하세요.' };
   }
-  const { access_token: token, platform_user_id: userId } = account;
+  const { access_token: token } = account;
+  const userId = 'me'; // 저장된 ID 대신 me — 토큰을 새로 받아도 ID 가 어긋나지 않는다
   const headers = { 'Content-Type': 'application/json' };
 
   // Meta는 imgur 등 일부 도메인을 차단 → 프록시 URL 사용

@@ -1,4 +1,4 @@
-import { generateWithRetry, toKoreanError } from '@/lib/gemini';
+import { callWithFallback, toKoreanError } from '@/lib/gemini';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const maxDuration = 60;
@@ -50,7 +50,7 @@ ${industry ? `- 업종: ${industry}` : ''}
   "hashtags": ["태그1", "태그2", "태그3", ...]
 }`;
 
-    let text = (await generateWithRetry(prompt)).trim();
+    let text = (await callWithFallback({ prompt, model: 'anthropic/claude-haiku-4.5', maxTokens: 4000, json: true, freeFirst: true })).trim();
     if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
     else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
 

@@ -1,4 +1,4 @@
-import { generateWithRetry, toKoreanError } from '@/lib/gemini';
+import { callWithFallback, toKoreanError } from '@/lib/gemini';
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -50,7 +50,7 @@ ${slideText}
 - 마지막에 팔로우/저장 유도 문구 포함
 - 해시태그는 인기 태그와 틈새 태그를 균형있게`;
 
-    let text = await generateWithRetry(prompt);
+    let text = await callWithFallback({ prompt, model: 'anthropic/claude-haiku-4.5', maxTokens: 4000, json: true, freeFirst: true });
     if (text.includes('```json')) text = text.split('```json')[1].split('```')[0].trim();
     else if (text.includes('```')) text = text.split('```')[1].split('```')[0].trim();
 
