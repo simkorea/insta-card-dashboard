@@ -6,8 +6,12 @@ import { createSupabaseBrowser } from '@/lib/supabase-browser';
 import { loadCaption } from '@/lib/cardnews/captionStore';
 import { buildNarration, type NarrationLength } from '@/lib/cardnews/narration';
 import { buildVideoTitle, buildVideoCaption } from '@/lib/cardnews/videoMeta';
-import { HybridRenderer } from '@/components/cardnews/HybridRenderer';
-import { NewspaperRenderer } from '@/components/cardnews/NewspaperRenderer';
+import {
+  VideoSlide, hasPhotoBackdrop,
+  CARD_W, SHORTS_BAND, FRAME_BAND,
+} from '@/components/video/VideoSlide';
+import { planCaption, drawCaption, drawCaptionBand, type CaptionPlan } from '@/lib/video/caption';
+import { GOOGLE_FONTS_URL } from '@/lib/cardnews/fonts';
 
 /**
  * 녹화 형식을 고른다. MP4(H.264)를 먼저 시도하는 이유:
@@ -30,98 +34,6 @@ function pickRecorderType(): { mimeType: string; ext: string } {
   return { mimeType: '', ext: 'webm' };
 }
 
-// ─── 슬라이드 렌더러 (영상 캡처용) ──────────────────────────────────────────
-function SlideFrame({ page, width, height }: { page: any; width: number; height: number }) {
-  const s = width / 420;
-  // 손글씨 노트·신문 카드는 그림 한 장이 카드 전체다.
-  // 이런 장은 (1) 잘리면 안 되고 (2) 어둡게 덮으면 글씨가 안 보이고
-  // (3) 위에 텍스트를 또 얹으면 같은 말이 두 번 나온다.
-  //
-  // notebook(AI가 통째로 그린 카드)도 그림이 곧 카드다. 예전에는 image만
-  // 봐서 이 장들이 아래 어두운 갈래로 떨어졌다.
-  const isWholeImage = Boolean(page.bgImage)
-    && (page.styleVariant === 'image' || page.styleVariant === 'notebook');
-
-  // 노트·신문 하이브리드 카드는 저장된 그림이 없다 — 글자를 그때그때 조판한다.
-  // 이 갈래가 없어서 bgImage가 빈 채로 아래 어두운 갈래에 떨어졌고,
-  // 영상이 까만 화면에 제목만 뜨는 채로 만들어졌다.
-  const isHybrid = page.styleVariant === 'hybrid' || page.styleVariant === 'hybridPaper';
-  if (isHybrid) {
-    // 카드 기준 캔버스는 420×525(4:5). 고른 비율에 맞춰 통째로 줄이고
-    // 남는 자리는 종이색으로 둔다 — 잘라내면 글이 날아간다.
-    const CARD_W = 420;
-    const CARD_H = 525;
-    const k = Math.min(width / CARD_W, height / CARD_H);
-    return (
-      <div
-        data-hybrid="1"
-        style={{ width, height, position: 'relative', overflow: 'hidden', flexShrink: 0, background: '#F3F1EA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-      >
-        <div style={{ width: CARD_W * k, height: CARD_H * k, position: 'relative', overflow: 'hidden' }}>
-          {page.styleVariant === 'hybridPaper' ? (
-            <NewspaperRenderer blocks={page.blocks || []} scale={k} index={0} noteLabel={page.noteLabel} noteNumber={page.noteNumber} />
-          ) : (
-            <HybridRenderer blocks={page.blocks || []} scale={k} index={0} noteLabel={page.noteLabel} noteNumber={page.noteNumber} />
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (isWholeImage) {
-    // 고른 비율과 카드 비율이 다르면 잘라내지 않고 여백을 둔다(레터박스).
-    // 예전에는 cover라서 9:16을 고르면 카드 좌우가 잘려나갔다.
-    return (
-      <div style={{ width, height, position: 'relative', overflow: 'hidden', flexShrink: 0, background: '#F3F1EA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={page.bgImage} alt="" crossOrigin="anonymous"
-          style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' }} />
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ width, height, position: 'relative', overflow: 'hidden', flexShrink: 0, background: '#111' }}>
-      {page.bgImage && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={page.bgImage} alt="" crossOrigin="anonymous"
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-      )}
-      <div style={{ position: 'absolute', inset: 0, background: page.overlay ?? 'rgba(0,0,0,0.4)' }} />
-      <div style={{ position: 'absolute', inset: 0 }}>
-        {page.layout === 'center' && (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', padding: '0 40px', textAlign: 'center' }}>
-            {page.title && <h1 style={{ fontSize: `${(page.titleStyle?.fontSize ?? 38) * s}px`, fontWeight: page.titleStyle?.fontWeight ?? '900', fontFamily: page.titleStyle?.fontFamily ?? 'Noto Sans KR', color: page.titleStyle?.color ?? '#fff', lineHeight: 1.2, whiteSpace: 'pre-line', margin: 0, maxWidth: '100%', wordBreak: 'keep-all', overflowWrap: 'break-word' }}>{page.title}</h1>}
-            {page.subtitle && <p style={{ fontSize: `${(page.subtitleStyle?.fontSize ?? 14) * s}px`, fontWeight: page.subtitleStyle?.fontWeight ?? '400', fontFamily: page.titleStyle?.fontFamily ?? 'Noto Sans KR', color: page.subtitleStyle?.color ?? '#e5e7eb', lineHeight: 1.6, whiteSpace: 'pre-line', marginTop: 16, maxWidth: '100%', wordBreak: 'keep-all', overflowWrap: 'break-word' }}>{page.subtitle}</p>}
-          </div>
-        )}
-        {(page.layout === 'bottom-left' || page.layout === 'bottom-left-list') && (
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', padding: `0 ${32 * s}px ${40 * s}px`, gap: 20 * s }}>
-            {page.title && <h2 style={{ fontSize: `${(page.titleStyle?.fontSize ?? 24) * s}px`, fontWeight: '900', fontFamily: page.titleStyle?.fontFamily ?? 'Noto Sans KR', color: page.titleStyle?.color ?? (page.accent || '#ffd700'), lineHeight: 1.2, margin: 0, maxWidth: '100%', wordBreak: 'keep-all', overflowWrap: 'break-word' }}>{page.title}</h2>}
-            {page.bullets && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 * s }}>
-                {page.bullets.map((b: string, i: number) => (
-                  <p key={i} style={{ fontSize: `${(page.bulletStyle?.fontSize ?? 14) * s}px`, color: page.bulletStyle?.color ?? '#fff', lineHeight: 1.6, margin: 0 }}
-                    dangerouslySetInnerHTML={{ __html: `• ${b.replace(/<b>(.*?)<\/b>/g, `<b style="color:${page.accent || '#ffd700'}">$1</b>`)}` }} />
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-      {(page.elements || []).map((elem: any) => {
-        const pxSize = (elem.size / 100) * width;
-        const textW = elem.type === 'text' ? ((elem.width ?? 80) / 100) * width : pxSize;
-        return (
-          <div key={elem.id} style={{ position: 'absolute', left: `${elem.x}%`, top: `${elem.y}%`, width: elem.type === 'text' ? textW : pxSize, height: elem.type === 'text' ? 'auto' : pxSize, opacity: elem.opacity, zIndex: 15, transform: 'translate(-50%,-50%)', pointerEvents: 'none' }}>
-            {elem.type === 'emoji' && <span style={{ fontSize: pxSize, lineHeight: 1 }}>{elem.emoji}</span>}
-            {elem.type === 'text' && elem.text && <p style={{ fontSize: `${(elem.fontSize ?? 16) * s}px`, fontWeight: elem.fontWeight ?? '400', fontFamily: elem.fontFamily ?? 'Noto Sans KR', textAlign: elem.textAlign ?? 'left', color: elem.color, lineHeight: 1.4, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 }}>{elem.text}</p>}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 const TRANSITIONS = [
   { id: 'none',  label: '없음' },
@@ -167,7 +79,9 @@ export default function VideoGeneratorPage() {
   // 영상이 길면 파일이 커져 저장소 한도(무료 50MB)에 걸린다.
   // 길이와 속도를 줄이는 게 화질을 낮추는 것보다 먼저다 — 글씨가 안 뭉개진다.
   const [narrationLen, setNarrationLen] = useState<NarrationLength>('normal');
-  const [narrationRate, setNarrationRate] = useState(1);
+  // 쇼츠 템포에 맞춰 기본을 살짝 빠르게. 1.15배면 같은 대본이 약 13% 짧아진다
+  // (파일 용량과 지루함 둘 다 줄어든다). 화면에서 언제든 되돌릴 수 있다.
+  const [narrationRate, setNarrationRate] = useState(1.15);
   const [voiceBusy, setVoiceBusy] = useState('');
   const [voiceError, setVoiceError] = useState('');
   // 슬라이드별 음성 (base64 mp3). 길이는 슬라이드 유지 시간을 정하는 데 쓴다.
@@ -186,6 +100,11 @@ export default function VideoGeneratorPage() {
   const [duration, setDuration] = useState(2.5);
   const [transition, setTransition] = useState('fade');
   const [ratio, setRatio] = useState('4:5');
+  // 쇼츠 릴스 모드 — 배경을 흐리게 깔고 카드를 띄운 뒤, 아래에 자막 띠를 비운다.
+  // 세로 영상은 자막이 카드 본문을 덮으면 카드가 통째로 못 읽힌다.
+  const [shortsMode, setShortsMode] = useState(false);
+  // 배경만 천천히 줌인(Ken Burns). 글자는 고정이라 흔들리지 않는다.
+  const [kenBurns, setKenBurns] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isExporting, setIsExporting] = useState(false);
@@ -200,11 +119,27 @@ export default function VideoGeneratorPage() {
   const [exportError, setExportError] = useState('');
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 슬라이드별 캡처 — fg 는 완성 화면(또는 고정될 글자), bg 는 움직일 배경
   const captureRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const bgCaptureRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const videoElRef = useRef<HTMLVideoElement | null>(null);
 
   const ratioInfo = RATIOS.find(r => r.id === ratio) ?? RATIOS[0];
   const pages: any[] = selectedDesign?.pages_data ?? [];
+  // 자막이 실제로 화면에 들어가는 영상인가 — 쇼츠 모드의 아래 자막 띠를 비울지 정한다.
+  const captionsActive = subtitleOn && narrationOn && narration.some(t => Boolean(t && t.trim()));
+
+  // 카드 글꼴(Jua·Do Hyeon·Noto Sans KR)을 미리 받아 둔다.
+  // 이 화면은 글꼴을 싣지 않아서, 노트·신문 카드가 기본 글꼴로 조판되고
+  // 그 모습 그대로 영상에 구워지고 있었다. 편집기·서버 촬영과 같은 그림을 쓰려면 필요하다.
+  useEffect(() => {
+    if (document.getElementById('cardnews-fonts')) return;
+    const link = document.createElement('link');
+    link.id = 'cardnews-fonts';
+    link.rel = 'stylesheet';
+    link.href = GOOGLE_FONTS_URL;
+    document.head.appendChild(link);
+  }, []);
 
   // 자동 로드
   useEffect(() => {
@@ -236,25 +171,38 @@ export default function VideoGeneratorPage() {
 
   const proxyUrl = (url: string) => `/api/proxy-image?url=${encodeURIComponent(url)}`;
 
-  const captureEl = async (el: HTMLDivElement): Promise<HTMLCanvasElement> => {
-    // 하이브리드 카드는 html2canvas로 뜨면 안 된다.
-    // 형광펜과 펜 그림이 mix-blend-mode(곱하기)로 얹혀 있는데 html2canvas는
-    // 이걸 무시해서, 노란 칠이 글자를 덮고 그림이 불투명한 덩어리로 찍힌다.
-    // html-to-image는 이 합성을 그대로 살린다(편집기·블로그 전환도 이걸 쓴다).
-    if (el.dataset.hybrid === '1') {
-      const { toCanvas } = await import('html-to-image');
-      await document.fonts?.ready;
-      return toCanvas(el, { pixelRatio: 2, cacheBust: false, skipFonts: false });
-    }
+  /**
+   * 화면 한 장을 캔버스로 뜬다.
+   *
+   *   sharp(hybrid)  — 종이·펜 그림, 글래스 패널(backdrop-filter)은 html2canvas 가
+   *                    합성을 살리지 못한다. html-to-image 로 실제 화면을 그대로 굽는다.
+   *   transparent    — 배경과 글자를 따로 뜰 때. 모서리 밖은 투명해야 한다.
+   *
+   * 이미지는 우리 프록시로 바꿔 받는다 — 원본 도메인이 CORS 헤더를 주지 않으면
+   * 캔버스가 오염되어 녹화가 통째로 깨진다.
+   */
+  const captureEl = async (
+    el: HTMLDivElement,
+    opts: { transparent?: boolean; pixelRatio?: number } = {},
+  ): Promise<HTMLCanvasElement> => {
+    const sharp = el.dataset.hybrid === '1' || Boolean(opts.transparent);
+    // 1.5배면 충분하다 — 내보내는 캔버스가 이미 420의 2배(840)이고,
+    // 줌인은 최대 1.085배라 1260px 원본을 840px로 줄여 그린다(더 선명하다).
+    // 2배로 뜨면 장당 20MB씩 잡아 장수가 많을 때 브라우저가 버티지 못한다.
+    const pixelRatio = opts.pixelRatio ?? 1.5;
 
-    const h2c = (await import('html2canvas')).default;
     const imgs = el.querySelectorAll<HTMLImageElement>('img');
     const origSrcs: string[] = [];
     imgs.forEach(img => {
-      origSrcs.push(img.src);
-      if (img.src && !img.src.startsWith('data:') && !img.src.startsWith('blob:')) {
-        img.src = proxyUrl(img.src);
-      }
+      const src = img.getAttribute('src') || '';
+      origSrcs.push(src);
+      if (!src || src.startsWith('data:') || src.startsWith('blob:')) return;
+      // 다른 사이트 그림만 프록시를 거친다. 우리 사이트 자산(노트 종이·펜 그림)을
+      // 프록시에 넣으면 서버가 자기 자신을 부르다 실패해 카드가 통째로 비어 버린다.
+      let crossOrigin = false;
+      try { crossOrigin = new URL(src, window.location.href).origin !== window.location.origin; }
+      catch { crossOrigin = false; }
+      if (crossOrigin) img.src = proxyUrl(src);
     });
     await new Promise<void>(r => {
       let loaded = 0;
@@ -264,9 +212,24 @@ export default function VideoGeneratorPage() {
         else { img.onload = img.onerror = () => { if (++loaded === imgs.length) r(); }; }
       });
     });
-    const canvas = await h2c(el, { scale: 2, useCORS: false, allowTaint: false, logging: false });
-    imgs.forEach((img, i) => { img.src = origSrcs[i]; });
-    return canvas;
+
+    try {
+      if (sharp) {
+        const { toCanvas } = await import('html-to-image');
+        await document.fonts?.ready;
+        return await toCanvas(el, { pixelRatio, cacheBust: false, skipFonts: false });
+      }
+      const h2c = (await import('html2canvas')).default;
+      return await h2c(el, {
+        scale: pixelRatio,
+        useCORS: false,
+        allowTaint: false,
+        logging: false,
+        backgroundColor: opts.transparent ? null : '#111111',
+      });
+    } finally {
+      imgs.forEach((img, i) => { if (origSrcs[i]) img.setAttribute('src', origSrcs[i]); });
+    }
   };
 
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -287,18 +250,25 @@ export default function VideoGeneratorPage() {
       canvas.height = EXPORT_H;
       const ctx = canvas.getContext('2d')!;
 
-      // 2. 각 슬라이드 캡처
-      const slideCanvases: HTMLCanvasElement[] = [];
+      // 2. 슬라이드 캡처
+      //
+      //    배경과 앞면을 따로 뜬다. 줌인은 배경에만 걸어야 글씨가 흔들리지 않는다.
+      //    (쇼츠 모드는 배경이 흐린 사진, 앞면이 카드라 이미 두 겹이다.)
+      //    종이·그림 카드는 나눌 배경이 없어 한 장으로 뜬다.
+      const needSplit = (page: any) => shortsMode || hasPhotoBackdrop(page);
+      const caps: { bg: HTMLCanvasElement | null; fg: HTMLCanvasElement }[] = [];
       for (let i = 0; i < pages.length; i++) {
         setExportProgress(`슬라이드 캡처 중... (${i + 1}/${pages.length})`);
-        const el = captureRefs.current[i];
-        if (el) {
-          const captured = await captureEl(el);
-          slideCanvases.push(captured);
-        }
+        const fgEl = captureRefs.current[i];
+        if (!fgEl) continue;
+        const bgEl = needSplit(pages[i]) ? bgCaptureRefs.current[i] : null;
+        // 배경은 흐리게 깔리는 그림이라 원본 해상도가 필요 없다 — 장당 메모리를 아낀다
+        const bg = bgEl ? await captureEl(bgEl, { pixelRatio: 1 }) : null;
+        const fg = await captureEl(fgEl, { transparent: Boolean(bg) });
+        caps.push({ bg, fg });
       }
 
-      if (slideCanvases.length === 0) throw new Error('슬라이드 캡처 실패');
+      if (caps.length === 0) throw new Error('슬라이드 캡처 실패');
 
       // 3. MediaRecorder 셋업
       const { mimeType, ext } = pickRecorderType();
@@ -307,7 +277,7 @@ export default function VideoGeneratorPage() {
       // 내레이션이 있으면 소리 트랙을 같이 녹음한다.
       // 오디오는 별도 파일로 합치지 않고 MediaRecorder에 트랙으로 물린다 —
       // 브라우저 안에서 끝나므로 서버에 ffmpeg 같은 걸 두지 않아도 된다.
-      const useVoice = narrationOn && voiceClips.length === slideCanvases.length;
+      const useVoice = narrationOn && voiceClips.length === caps.length;
       let audioCtx: AudioContext | null = null;
       let buffers: (AudioBuffer | null)[] = [];
       if (useVoice) {
@@ -336,8 +306,8 @@ export default function VideoGeneratorPage() {
       const SLIDE_FRAMES = transition === 'slide' ? 20 : 0;
       const holdSecOf = (i: number) =>
         useVoice ? Math.max(duration, (voiceClips[i]?.sec || 0) + 0.35) : duration;
-      const totalSec = slideCanvases.reduce((s, _, i) => s + holdSecOf(i), 0)
-        + (slideCanvases.length * (FADE_FRAMES + SLIDE_FRAMES)) / 30;
+      const totalSec = caps.reduce((s, _, i) => s + holdSecOf(i), 0)
+        + (caps.length * (FADE_FRAMES + SLIDE_FRAMES)) / 30;
       const TARGET_BYTES = 42 * 1024 * 1024;   // 50MB 한도 아래로 여유를 둔다
       const audioBits = useVoice ? 64_000 : 0;
       const videoBitsPerSecond = Math.max(
@@ -358,40 +328,64 @@ export default function VideoGeneratorPage() {
 
       const drawFrame = () => new Promise<void>(r => requestAnimationFrame(() => { r(); }));
 
-      // 자막을 화면 아래에 태운다. 카드 위에 얹히므로 검은 띠를 깔아 읽히게 한다.
-      const drawSubtitle = (text: string) => {
-        if (!subtitleOn || !text) return;
-        const pad = Math.round(EXPORT_W * 0.06);
-        const size = Math.round(EXPORT_W * 0.042);
-        ctx.font = `700 ${size}px "Noto Sans KR", sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        // 폭에 맞춰 줄바꿈 (한국어라 글자 단위로 끊는다)
-        const maxW = EXPORT_W - pad * 2;
-        const lines: string[] = [];
-        let line = '';
-        for (const ch of text) {
-          if (ctx.measureText(line + ch).width > maxW && line) { lines.push(line); line = ch; }
-          else line += ch;
+      // 자막 계획을 미리 세운다 — 글자 폭을 재는 일은 장당 한 번이면 된다.
+      const S = EXPORT_W / CARD_W;            // 420 좌표 → 캔버스 픽셀
+      const bandH = SHORTS_BAND * S;          // 쇼츠에서 비워 둔 자막 띠
+      const bandTop = EXPORT_H - bandH;
+      const captionPlans: (CaptionPlan | null)[] = caps.map((_, i) => {
+        if (!subtitleOn) return null;
+        const text = narrationOn ? (narration[i] || '') : '';
+        if (!text.trim()) return null;
+        return planCaption(ctx, text, {
+          maxWidth: EXPORT_W - 48 * S,
+          baseSize: Math.round((shortsMode ? 34 : 28) * S),
+          maxLines: 3,
+        });
+      });
+
+      // 줌인 폭. 쇼츠는 배경이 흐려 있어 조금 더 움직여도 글씨가 상하지 않는다.
+      const zoomAmount = kenBurns ? (shortsMode ? 0.085 : 0.045) : 0;
+      const easeInOut = (t: number) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, t)));
+
+      /**
+       * 한 장을 그린다.
+       * bg 가 있으면 bg(사진·흐린 배경)만 줌인하고 fg(카드·글자)는 제자리에 둔다 —
+       * 글씨가 흔들리거나 뭉개지지 않는다. bg 가 없으면 화면 전체가 천천히 커진다.
+       */
+      const drawSlide = (i: number, zoom: number, dx = 0) => {
+        const c = caps[i];
+        if (!c) return;
+        ctx.save();
+        ctx.translate(dx, 0);
+        ctx.translate(EXPORT_W / 2, EXPORT_H / 2);
+        ctx.scale(zoom, zoom);
+        ctx.translate(-EXPORT_W / 2, -EXPORT_H / 2);
+        ctx.drawImage(c.bg ?? c.fg, 0, 0, EXPORT_W, EXPORT_H);
+        ctx.restore();
+        if (c.bg) {
+          ctx.save();
+          ctx.translate(dx, 0);
+          ctx.drawImage(c.fg, 0, 0, EXPORT_W, EXPORT_H);
+          ctx.restore();
         }
-        if (line) lines.push(line);
-        const shown = lines.slice(-3);
-        const lh = Math.round(size * 1.35);
-        const boxH = lh * shown.length + Math.round(size * 0.8);
-        const boxY = EXPORT_H - boxH - Math.round(EXPORT_H * 0.045);
-        ctx.fillStyle = 'rgba(0,0,0,0.62)';
-        ctx.fillRect(0, boxY, EXPORT_W, boxH);
-        ctx.fillStyle = '#fff';
-        shown.forEach((l, i) => {
-          ctx.fillText(l, EXPORT_W / 2, boxY + Math.round(size * 0.4) + lh * i + lh / 2);
+      };
+
+      /** 자막 — 어두운 그라데이션을 깔고 그 위에 굵은 흰 글씨(+숫자는 노랑). */
+      const drawSubtitleAt = (i: number, progress: number) => {
+        const plan = captionPlans[i];
+        if (!plan) return;
+        drawCaptionBand(ctx, EXPORT_W, EXPORT_H, shortsMode ? bandTop : EXPORT_H - FRAME_BAND * S);
+        drawCaption(ctx, plan, {
+          centerX: EXPORT_W / 2,
+          bottomY: EXPORT_H - (shortsMode ? 52 : 26) * S,
+          progress,
+          color: '#FFFFFF',
+          accent: '#FFD54A',
         });
       };
 
-      for (let i = 0; i < slideCanvases.length; i++) {
-        setExportProgress(`영상 인코딩 중... (${i + 1}/${slideCanvases.length}장)`);
-        const curr = slideCanvases[i];
-        const next = slideCanvases[(i + 1) % slideCanvases.length];
-        const line = narrationOn ? (narration[i] || '') : '';
+      for (let i = 0; i < caps.length; i++) {
+        setExportProgress(`영상 인코딩 중... (${i + 1}/${caps.length}장)`);
 
         // 이 장의 음성을 틀고, 말이 끝날 때까지 화면을 붙잡는다.
         // 설정한 초보다 음성이 길면 음성에 맞춘다 — 짧게 두면 말이 잘린다.
@@ -407,22 +401,23 @@ export default function VideoGeneratorPage() {
           }
         }
 
-        // 슬라이드 유지
+        // 슬라이드 유지 — 머무는 동안 배경이 천천히 다가온다
         const holdFrames = Math.round(holdSec * FPS) - FADE_FRAMES - SLIDE_FRAMES;
         for (let f = 0; f < holdFrames; f++) {
-          ctx.drawImage(curr, 0, 0, EXPORT_W, EXPORT_H);
-          drawSubtitle(line);
+          const p = holdFrames > 1 ? f / (holdFrames - 1) : 1;
+          drawSlide(i, 1 + zoomAmount * easeInOut(p));
+          drawSubtitleAt(i, p);
           await drawFrame();
           await sleep(FRAME_MS);
         }
 
-        // 페이드 전환
-        if (transition === 'fade' && i < slideCanvases.length - 1) {
+        // 페이드 전환 — 다음 장은 줌 초기 상태에서 시작한다
+        if (transition === 'fade' && i < caps.length - 1) {
           for (let f = 0; f < FADE_FRAMES; f++) {
             const alpha = f / FADE_FRAMES;
-            ctx.drawImage(curr, 0, 0, EXPORT_W, EXPORT_H);
+            drawSlide(i, 1 + zoomAmount);
             ctx.globalAlpha = alpha;
-            ctx.drawImage(next, 0, 0, EXPORT_W, EXPORT_H);
+            drawSlide((i + 1) % caps.length, 1);
             ctx.globalAlpha = 1;
             await drawFrame();
             await sleep(FRAME_MS);
@@ -430,11 +425,11 @@ export default function VideoGeneratorPage() {
         }
 
         // 슬라이드 전환
-        if (transition === 'slide' && i < slideCanvases.length - 1) {
+        if (transition === 'slide' && i < caps.length - 1) {
           for (let f = 0; f < SLIDE_FRAMES; f++) {
             const offset = Math.round((f / SLIDE_FRAMES) * EXPORT_W);
-            ctx.drawImage(curr, -offset, 0, EXPORT_W, EXPORT_H);
-            ctx.drawImage(next, EXPORT_W - offset, 0, EXPORT_W, EXPORT_H);
+            drawSlide(i, 1 + zoomAmount * 0.5, -offset);
+            drawSlide((i + 1) % caps.length, 1, EXPORT_W - offset);
             await drawFrame();
             await sleep(FRAME_MS);
           }
@@ -466,7 +461,7 @@ export default function VideoGeneratorPage() {
     // 내레이션 관련 값을 빠뜨리면 이 함수가 옛 값(대본 없음·음성 없음)을 붙잡은 채
     // 굳어, 음성을 만들어 두고 눌러도 소리 없는 20초짜리가 나온다. 실제로 겪었다.
   }, [selectedDesign, pages, duration, transition, ratio, ratioInfo,
-      narration, narrationOn, subtitleOn, voiceClips]);
+      narration, narrationOn, subtitleOn, voiceClips, shortsMode, kenBurns]);
 
   /**
    * 방금 만든 영상을 저장소에 올리고 발행 화면으로 넘긴다.
@@ -850,9 +845,9 @@ export default function VideoGeneratorPage() {
                           className={`rounded-xl overflow-hidden border-2 transition-all text-left ${isSelected ? 'border-pink-500 shadow-md' : 'border-gray-100 hover:border-gray-300'}`}
                         >
                           <div className="relative h-20 bg-gray-800 overflow-hidden">
-                            {fp?.bgImage && (
+                            {(fp?.bgImage || fp?.photoBg) && (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img src={fp.bgImage.replace('w=800', 'w=120')} alt="" className="w-full h-full object-cover" />
+                              <img src={(fp.bgImage || fp.photoBg).replace('w=800', 'w=120')} alt="" className="w-full h-full object-cover" />
                             )}
                             <div style={{ position: 'absolute', inset: 0, background: fp?.overlay || 'rgba(0,0,0,0.4)' }} />
                             {isSelected && (
@@ -907,7 +902,15 @@ export default function VideoGeneratorPage() {
                   {/* Slide preview */}
                   <div className="flex justify-center">
                     <div style={{ width: ratioInfo.w, height: ratioInfo.h, overflow: 'hidden', borderRadius: 12, boxShadow: '0 8px 32px rgba(0,0,0,0.15)' }}>
-                      <SlideFrame page={pages[currentSlide]} width={ratioInfo.w} height={ratioInfo.h} />
+                      <VideoSlide
+                        page={pages[currentSlide]}
+                        width={ratioInfo.w}
+                        height={ratioInfo.h}
+                        mode={shortsMode ? 'shorts' : 'frame'}
+                        index={currentSlide}
+                        captionBand={captionsActive}
+                        subtitle={captionsActive ? (narration[currentSlide] || '') : ''}
+                      />
                     </div>
                   </div>
 
@@ -965,13 +968,13 @@ export default function VideoGeneratorPage() {
                 </div>
 
                 {/* Ratio */}
-                <div>
+                <div className="mb-5">
                   <label className="block text-xs font-bold text-gray-600 mb-2">비율</label>
                   <div className="space-y-1.5">
                     {RATIOS.map(r => (
                       <button
                         key={r.id}
-                        onClick={() => setRatio(r.id)}
+                        onClick={() => { setRatio(r.id); setShortsMode(r.id === '9:16'); }}
                         className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs border-2 transition-all ${ratio === r.id ? 'border-pink-500 bg-pink-50 text-pink-700 font-bold' : 'border-gray-100 text-gray-600 hover:border-gray-200'}`}
                       >
                         <span>{r.label}</span>
@@ -979,6 +982,34 @@ export default function VideoGeneratorPage() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* 쇼츠 릴스 모드 · 배경 줌인 */}
+                <div className="space-y-2.5 pt-4 border-t border-gray-100">
+                  <button
+                    onClick={() => setShortsMode(v => !v)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs border-2 transition-all ${shortsMode ? 'border-pink-500 bg-pink-50 text-pink-700 font-bold' : 'border-gray-100 text-gray-600 hover:border-gray-200'}`}
+                  >
+                    <span className="text-left">
+                      쇼츠 릴스 모드
+                      <span className="block text-[10px] font-normal opacity-60 mt-0.5">카드를 띄우고 아래에 자막 자리를 비워 둡니다</span>
+                    </span>
+                    <span className={`w-8 h-4 rounded-full shrink-0 relative transition-colors ${shortsMode ? 'bg-pink-500' : 'bg-gray-200'}`}>
+                      <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${shortsMode ? 'left-4' : 'left-0.5'}`} />
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => setKenBurns(v => !v)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs border-2 transition-all ${kenBurns ? 'border-pink-500 bg-pink-50 text-pink-700 font-bold' : 'border-gray-100 text-gray-600 hover:border-gray-200'}`}
+                  >
+                    <span className="text-left">
+                      배경 줌인 (Ken Burns)
+                      <span className="block text-[10px] font-normal opacity-60 mt-0.5">머무는 동안 배경이 천천히 다가옵니다</span>
+                    </span>
+                    <span className={`w-8 h-4 rounded-full shrink-0 relative transition-colors ${kenBurns ? 'bg-pink-500' : 'bg-gray-200'}`}>
+                      <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${kenBurns ? 'left-4' : 'left-0.5'}`} />
+                    </span>
+                  </button>
                 </div>
               </div>
 
@@ -1167,7 +1198,7 @@ export default function VideoGeneratorPage() {
               <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
                 <p className="text-xs font-bold text-blue-700 mb-2">💡 사용 팁</p>
                 <ul className="text-[11px] text-blue-600 space-y-1 leading-relaxed">
-                  <li>• 릴스/스토리: 9:16 비율 권장</li>
+                  <li>• 릴스·쇼츠는 9:16 + 쇼츠 릴스 모드를 고르면 자막이 카드를 덮지 않습니다</li>
                   <li>• 피드 업로드: 4:5 또는 1:1</li>
                   <li>• 슬라이드당 2-3초가 최적</li>
                   <li>• 만든 뒤 &lsquo;바로 발행하기&rsquo;로 릴스·쇼츠·틱톡에 올릴 수 있습니다</li>
@@ -1179,11 +1210,35 @@ export default function VideoGeneratorPage() {
           {/* 오프스크린 고해상도 렌더 (캡처용) */}
           {selectedDesign && (
             <div style={{ position: 'fixed', left: '-9999px', top: 0, pointerEvents: 'none', zIndex: -1 }}>
-              {pages.map((page: any, i: number) => (
-                <div key={i} ref={el => { captureRefs.current[i] = el; }}>
-                  <SlideFrame page={page} width={ratioInfo.w * 2} height={ratioInfo.h * 2} />
-                </div>
-              ))}
+              {pages.map((page: any, i: number) => {
+                const split = shortsMode || hasPhotoBackdrop(page);
+                // 글래스 패널·형광펜 합성은 html-to-image 로 떠야 한다(backdrop-filter·mix-blend)
+                const sharp = Boolean(page.blocks?.length)
+                  || page.styleVariant === 'hybrid' || page.styleVariant === 'hybridPaper'
+                  || page.styleVariant === 'impact' || page.styleVariant === 'notebook';
+                return (
+                  <div key={i}>
+                    {split && (
+                      <div ref={el => { bgCaptureRefs.current[i] = el; }}>
+                        <VideoSlide page={page} width={ratioInfo.w * 2} height={ratioInfo.h * 2} mode={shortsMode ? 'shorts' : 'frame'} index={i} layer="bg" />
+                      </div>                    )}
+                    <div
+                      ref={el => { captureRefs.current[i] = el; }}
+                      data-hybrid={sharp ? '1' : undefined}
+                    >
+                      <VideoSlide
+                        page={page}
+                        width={ratioInfo.w * 2}
+                        height={ratioInfo.h * 2}
+                        mode={shortsMode ? 'shorts' : 'frame'}
+                        index={i}
+                        captionBand={captionsActive}
+                        layer={split ? 'fg' : 'all'}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </>
@@ -1298,9 +1353,9 @@ export default function VideoGeneratorPage() {
                           className={`rounded-xl overflow-hidden border-2 transition-all text-left ${isSelected ? 'border-pink-500 shadow-md' : 'border-gray-100 hover:border-gray-300'}`}
                         >
                           <div className="relative h-20 bg-gray-800 overflow-hidden">
-                            {fp?.bgImage && (
+                            {(fp?.bgImage || fp?.photoBg) && (
                               // eslint-disable-next-line @next/next/no-img-element
-                              <img src={fp.bgImage.replace('w=800', 'w=120')} alt="" className="w-full h-full object-cover" />
+                              <img src={(fp.bgImage || fp.photoBg).replace('w=800', 'w=120')} alt="" className="w-full h-full object-cover" />
                             )}
                             <div style={{ position: 'absolute', inset: 0, background: fp?.overlay || 'rgba(0,0,0,0.4)' }} />
                             {isSelected && (
