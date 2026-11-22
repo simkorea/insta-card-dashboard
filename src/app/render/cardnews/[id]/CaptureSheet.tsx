@@ -34,6 +34,8 @@ type Page = {
   noteNumber?: string;
   // 사진 배경(MCP save_cardnews_exact 의 photoBgUrl 을 서버가 우리 저장소에 올려 고정한 주소)
   photoBg?: string;
+  // 편집기 사진 카드(피클 '분양 분석' 표지 등)의 배경. 편집기 CardView 는 styleVariant 가 없으면 이 사진으로 그린다
+  bgImage?: string;
   overlay?: string;
   brandTone?: 'gold' | 'sage';
   blocksOffsetY?: number;
@@ -48,14 +50,27 @@ type Page = {
 // 클래스(Tailwind) 대신 같은 값을 inline 으로 적었다 — 이 화면은 다른 분기들도 inline 이다.
 const PHOTO_OVERLAY = 'linear-gradient(to top, rgba(0,0,0,0.88) 55%, rgba(0,0,0,0.40) 100%)';
 
-function PhotoCard({ page }: { page: Page }) {
+// 2026-11-22: 사진 카드 글자가 □(NO GLYPH)로 찍혔다. BlockRenderer 는 글꼴을 따로 정하지 않아
+// body(Inter, 라틴 전용)를 물려받는데, 서버 크롬(Vercel Linux)에는 한글 시스템 글꼴이 없다.
+// 다른 렌더러처럼 위에서 불러온 Noto Sans KR 을 이 카드에 지정한다(PC 화면은 맑은 고딕으로 대신 그려져 안 보였다).
+const PHOTO_FONT = '"Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
+
+// 편집기 CardView 와 같은 분기: 이 스타일들은 자기 바탕을 그리고, 나머지(스타일 없음)는 bgImage 사진 카드다.
+const OWN_BACKGROUND = new Set(['hybrid', 'hybridPaper', 'impact', 'notebook', 'image']);
+function photoOf(p: Page): string | undefined {
+  if (p.photoBg) return p.photoBg;
+  if (p.bgImage && !OWN_BACKGROUND.has(p.styleVariant ?? '')) return p.bgImage;
+  return undefined;
+}
+
+function PhotoCard({ page, photo }: { page: Page; photo: string }) {
   const offsetY = page.blocksOffsetY ?? 70;
   return (
-    <>
+    <div style={{ position: 'absolute', inset: 0, fontFamily: PHOTO_FONT }}>
       {/* crossOrigin 은 일부러 안 둔다 — 캡처에는 필요 없고, CORS 헤더가 없으면 오히려 그림이 안 뜬다 */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={page.photoBg}
+        src={photo}
         alt=""
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
       />
@@ -86,7 +101,7 @@ function PhotoCard({ page }: { page: Page }) {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -167,8 +182,8 @@ export default function CaptureSheet({ pages }: { pages: Page[] }) {
             overflow: 'hidden',
           }}
         >
-          {p.photoBg ? (
-            <PhotoCard page={p} />
+          {photoOf(p) ? (
+            <PhotoCard page={p} photo={photoOf(p)!} />
           ) : p.styleVariant === 'hybridPaper' ? (
             <NewspaperRenderer blocks={(p.blocks || []) as never} scale={CAPTURE_SCALE} index={i} noteLabel={p.noteLabel} noteNumber={p.noteNumber} />
           ) : p.styleVariant === 'impact' ? (

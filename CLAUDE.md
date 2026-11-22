@@ -76,6 +76,8 @@ Supabase Postgres, 스키마는 저장소 루트의 수동 SQL 파일로 관리 
 
 ### 내보내기/렌더링
 
+- **서버 렌더 사진 카드(2026-11-22)**: `src/app/render/cardnews/[id]/CaptureSheet.tsx`의 `PhotoCard`는 `photoBg`(MCP save_cardnews_exact) 또는 스타일 없는 장의 `bgImage`(편집기 사진 카드·피클 분양 분석 표지)를 그린다. 글꼴 `Noto Sans KR`을 직접 지정한다 — 빼면 Vercel 서버 크롬에 한글 글꼴이 없어 글자가 □로 찍힌다(PC에서는 맑은 고딕이 대신 그려 안 보임). 헤르메스(루나 카드뉴스 표지)가 MCP로 이 경로를 쓰므로 지우지 말 것.
+
 슬라이드 → 이미지/PDF 변환은 클라이언트에서 `html-to-image` / `html2canvas` + `jspdf` + `jszip`로 처리 (렌더링된 `BlockRenderer` DOM 대상, 서버 사이드 아님).
 
 ### SNS 연동 & 스케줄링
