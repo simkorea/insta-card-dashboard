@@ -1,4 +1,5 @@
 'use client';
+import { loadFullDesign } from '@/lib/cardnews/loadDesign';
 import { useState, useEffect, useRef } from 'react';
 import { ImagePlus, ChevronLeft, Search, RefreshCw, MessageSquare, Settings, ChevronUp, ChevronDown, UploadCloud, Trash2, Pencil, Loader2, Calendar, Clock, Copy, Check, X, Send, RefreshCcw, Images, Sparkles, Wand2, Globe, Lock, Download, Upload, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -712,7 +713,9 @@ export default function CardNewsPage() {
     setDeletingTemplateId(null);
   };
 
-  const handleOpenDesign = (design: any) => {
+  const handleOpenDesign = async (list: any) => {
+    let design = list;
+    try { design = await loadFullDesign(list); } catch (e: any) { alert(e?.message || '불러오지 못했습니다.'); return; }
     localStorage.setItem('editingDesign', JSON.stringify(design.pages_data));
     localStorage.setItem('editingDesignId', String(design.id));
     localStorage.removeItem('cardNewsData');
@@ -930,7 +933,9 @@ export default function CardNewsPage() {
     return urls;
   };
 
-  const handleOpenScheduleModal = async (design: any) => {
+  const handleOpenScheduleModal = async (list: any) => {
+    let design = list;
+    try { design = await loadFullDesign(list); } catch (e: any) { alert(e?.message || '불러오지 못했습니다.'); return; }
     setSchedulingDesign(design);
     setCapturedSlideUrls([]);
     setScheduleCaption('');
@@ -2031,7 +2036,7 @@ export default function CardNewsPage() {
                 {designs.map((design) => {
                   const pages: any[] = Array.isArray(design.pages_data) ? design.pages_data : [];
                   const firstPage = pages[0] || null;
-                  const slideCount = pages.length;
+                  const slideCount = design.pages_count ?? pages.length;
                   const createdAt = design.created_at
                     ? new Date(design.created_at).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' })
                     : '';
@@ -2122,7 +2127,7 @@ export default function CardNewsPage() {
                               예약 발행
                             </button>
                             <button
-                              onClick={() => { setDownloadingDesign(design); setShowDownloadModal(true); }}
+                              onClick={() => { loadFullDesign(design).then(full => { setDownloadingDesign(full); setShowDownloadModal(true); }).catch((e: any) => alert(e?.message || '불러오지 못했습니다.')); }}
                               className="flex items-center justify-center w-9 h-9 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
                               title="다운로드"
                             >

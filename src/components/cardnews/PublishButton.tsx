@@ -35,12 +35,15 @@ export function PublishButton({
   designId,
   designName,
   pages,
+  loadPages,
   onDone,
   className = '',
 }: {
   designId: string;
   designName: string;
   pages: PageLike[];
+  /** 목록에는 표지만 있을 때, 누르면 모든 장을 읽어 온다 */
+  loadPages?: () => Promise<PageLike[]>;
   onDone?: () => void;
   className?: string;
 }) {
@@ -49,12 +52,20 @@ export function PublishButton({
   const [staging, setStaging] = useState(false);
   const refs = useRef<Record<number, HTMLDivElement | null>>({});
 
-  const hybridPages = pages
+  const [loaded, setLoaded] = useState<PageLike[] | null>(null);
+  const allPages = loaded ?? pages;
+  const hybridPages = allPages
     .map((p, i) => ({ p, i }))
     .filter(({ p }) => !p.bgImage?.trim());
 
   const run = async () => {
     if (busy) return;
+    let pages = allPages;
+    if (loadPages && !loaded) {
+      setBusy('불러오는 중…');
+      try { pages = await loadPages(); setLoaded(pages); } catch (e: any) { setBusy(''); alert(e?.message || '카드뉴스를 불러오지 못했습니다.'); return; }
+      setBusy('');
+    }
     const caption =
       loadCaption(designId) || buildVideoCaption(pages as any, designName);
 

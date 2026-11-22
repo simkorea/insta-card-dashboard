@@ -1,5 +1,6 @@
 'use client';
 
+import { loadFullDesign } from '@/lib/cardnews/loadDesign';
 import { useState, useEffect } from 'react';
 import { FileText, Loader2, Calendar, Hash, FolderOpen, Archive, Layout, Trash2, X, ChevronLeft, ChevronRight, Pencil, ImageOff } from 'lucide-react';
 import { HybridThumb } from '@/components/cardnews/HybridThumb';
@@ -23,6 +24,7 @@ interface CardDesign {
   name: string;
   description?: string;
   pages_data: any[];
+  pages_count?: number;
   created_at: string;
 }
 
@@ -44,6 +46,15 @@ export default function ArchivePage() {
   // 여러 개를 골라 한꺼번에 예약하기 위한 선택 상태.
   // 예약은 그림을 미리 올려둬야 해서 한 번에 다섯 개까지만 받는다(BulkScheduleBar 주석 참고).
   const [selected, setSelected] = useState<string[]>([]);
+  // 여러 개 예약은 모든 장이 필요하다 — 고른 것만 본문을 한 건씩 읽어 둔다
+  const [fullById, setFullById] = useState<Record<string, CardDesign>>({});
+  useEffect(() => {
+    for (const id of selected) {
+      const d = designs.find(x => String(x.id) === id);
+      if (!d || fullById[id]) continue;
+      loadFullDesign(d).then(full => setFullById(prev => ({ ...prev, [id]: full }))).catch(() => {});
+    }
+  }, [selected, designs]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleSelect = (id: string) => {
     setSelected(prev => {
       if (prev.includes(id)) return prev.filter(x => x !== id);
@@ -138,7 +149,9 @@ export default function ArchivePage() {
     }
   };
 
-  const handleCardNewsClick = (design: CardDesign) => {
+  const handleCardNewsClick = async (list: CardDesign) => {
+    let design = list;
+    try { design = await loadFullDesign(list); } catch (e: any) { alert(e?.message || '불러오지 못했습니다.'); return; }
     localStorage.setItem('editingDesign', JSON.stringify(design.pages_data));
     localStorage.setItem('editingDesignId', String(design.id));
     localStorage.removeItem('cardNewsData');
@@ -151,8 +164,8 @@ export default function ArchivePage() {
   const pageTitle = (page: any): string =>
     page?.title || page?.blocks?.find((b: any) => b.type === 'headline')?.text || '';
 
-  const openPreview = (design: CardDesign) => {
-    setPreview(design);
+  const openPreview = async (design: CardDesign) => {
+    try { setPreview(await loadFullDesign(design)); } catch (e: any) { alert(e?.message || '불러오지 못했습니다.'); return; }
     setPreviewPage(0);
   };
 
@@ -351,7 +364,7 @@ export default function ArchivePage() {
             {!isDesignsLoading && !designsError && designs.length > 0 && (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">
                 {designs.slice(0, designLimit).map((design) => {
-                  const pagesCount = design.pages_data?.length || 0;
+                  const pagesCount = design.pages_count ?? design.pages_data?.length ?? 0;
                   const cover = design.pages_data?.[0];
                   const coverImage = pageImage(cover);
                   return (
@@ -436,6 +449,7 @@ export default function ArchivePage() {
                           designId={String(design.id)}
                           designName={design.name}
                           pages={design.pages_data || []}
+                          loadPages={() => loadFullDesign(design).then(d => d.pages_data || [])}
                           className="w-full py-2 bg-primary-600 text-white hover:bg-primary-700 active:scale-[0.99]"
                         />
                       </div>
@@ -567,8 +581,8 @@ export default function ArchivePage() {
       {/* 여러 개를 골랐을 때만 뜨는 예약 막대 */}
       {activeTab === 'cardnews' && selected.length > 0 && (
         <BulkScheduleBar
-          designs={designs.filter(d => selected.includes(String(d.id))).map(d => ({
-            id: String(d.id), name: d.name, pages_data: d.pages_data || [],
+          designs={designs.filter(d => selected.includes(String(d.id)) && fullById[String(d.id)]).map(d => ({
+            id: String(d.id), name: d.name, pages_data: fullById[String(d.id)].pages_data || [],
           }))}
           onClear={() => setSelected([])}
           onDone={() => { setSelected([]); fetchDesigns(); }}

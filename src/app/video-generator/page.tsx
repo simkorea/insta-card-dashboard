@@ -1,4 +1,5 @@
 'use client';
+import { loadFullDesign } from '@/lib/cardnews/loadDesign';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Film, Play, Pause, Download, RefreshCw, ChevronLeft, ChevronRight, Loader2, Check, AlertCircle, Wand2, Copy, Upload, Plus, Trash2, Send } from 'lucide-react';
@@ -161,7 +162,9 @@ export default function VideoGeneratorPage() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isPlaying, duration, pages.length]);
 
-  const handleSelectDesign = (design: any) => {
+  const handleSelectDesign = async (list: any) => {
+    let design = list;
+    try { design = await loadFullDesign(list); } catch (e: any) { alert(e?.message || '불러오지 못했습니다.'); return; }
     setSelectedDesign(design);
     setCurrentSlide(0);
     setIsPlaying(false);
@@ -856,7 +859,7 @@ export default function VideoGeneratorPage() {
                               </div>
                             )}
                             <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                              {d.pages_data?.length ?? 0}장
+                              {d.pages_count ?? d.pages_data?.length ?? 0}장
                             </div>
                           </div>
                           <div className="px-2 py-1.5 bg-white">
@@ -1364,7 +1367,7 @@ export default function VideoGeneratorPage() {
                               </div>
                             )}
                             <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full">
-                              {d.pages_data?.length ?? 0}장
+                              {d.pages_count ?? d.pages_data?.length ?? 0}장
                             </div>
                           </div>
                           <div className="px-2 py-1.5 bg-white">

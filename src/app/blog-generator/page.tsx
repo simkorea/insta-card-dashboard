@@ -1,4 +1,5 @@
 'use client';
+import { loadFullDesign } from '@/lib/cardnews/loadDesign';
 import { useState, KeyboardEvent, useEffect, useRef } from 'react';
 import JSZip from 'jszip';
 import {
@@ -118,6 +119,7 @@ type SavedDesign = {
   name: string;
   created_at: string;
   pages_data: DesignPage[];
+  pages_count?: number;
 };
 type DesignPage = {
   id?: string | number;
@@ -366,10 +368,11 @@ export default function BlogGeneratorPage() {
   // 그림이 두 갈래다. 사진 배경 카드는 bgImage 주소가 그대로 있지만,
   // 노트·신문 카드는 브라우저가 그때그때 그리므로 저장된 파일이 없다.
   // 후자는 화면 밖에 한 번 그려서 캡처한다.
-  const applyDesign = async (d: SavedDesign) => {
-    setPickedDesignId(d.id);
+  const applyDesign = async (list: SavedDesign) => {
+    setPickedDesignId(list.id);
     setPickingBusy(true);
     try {
+      const d = await loadFullDesign(list);
       const pages = Array.isArray(d.pages_data) ? d.pages_data : [];
       setTopic(pagesToBlogSource(pages));
 
@@ -985,7 +988,7 @@ export default function BlogGeneratorPage() {
                 ) : (
                   <div className="max-h-[340px] overflow-y-auto space-y-1.5 pr-1">
                     {designs.map(d => {
-                      const n = Array.isArray(d.pages_data) ? d.pages_data.length : 0;
+                      const n = d.pages_count ?? (Array.isArray(d.pages_data) ? d.pages_data.length : 0);
                       const picked = pickedDesignId === d.id;
                       return (
                         <button

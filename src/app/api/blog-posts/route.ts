@@ -46,7 +46,8 @@ export async function GET() {
   try {
     const { data, error } = await supabase
       .from('blog_posts')
-      .select('*')
+      // 목록은 본문(body)·그림 데이터(images_data)를 읽지 않는다 — 168건이면 15MB 라 느려진다. 글을 열 때 /[id] 로 읽는다.
+      .select('id, title, meta_description, tags, topic, format, briefing_id, created_at, updated_at')
       .order('created_at', { ascending: false });
 
     if (error) {
