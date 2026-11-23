@@ -1,4 +1,5 @@
 import { callAI } from "@/lib/ai/openrouter";
+import { isFresh } from "./freshness";
 import { fetchAdPerformance, adSectionMarkdown } from "@/lib/metaAds/fetchInsights";
 import { createClient } from "@supabase/supabase-js";
 import { generateNewsCardnewsDraft } from "@/lib/newsCardnews/generateDraft";
@@ -29,7 +30,7 @@ function cleanText(text: string): string {
     .trim();
 }
 
-type NewsItem = { title: string; link: string; description: string };
+type NewsItem = { title: string; link: string; description: string; pubDate?: string };
 
 // 국토교통부 RSS(https://www.molit.go.kr/rss/rss.jsp)는 2026-07 무렵부터 자기 자신으로
 // 무한 307 리다이렉트를 돌려주어 사실상 폐기됨 → 매번 타임아웃만 소모해서 제거했다.
@@ -65,10 +66,12 @@ async function fetchRssItems(url: string, label: string): Promise<NewsItem[]> {
         if (!titleMatch) continue;
         const linkMatch = itemContent.match(/<link>([\s\S]*?)<\/link>/i);
         const descMatch = itemContent.match(/<description>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/description>/i);
+        const dateMatch = itemContent.match(/<(?:pubDate|dc:date|date)>([\s\S]*?)<\/(?:pubDate|dc:date|date)>/i);
         items.push({
           title: cleanText(titleMatch[1]),
           link: linkMatch ? cleanText(linkMatch[1]) : "",
           description: descMatch ? cleanText(descMatch[1]) : "",
+          pubDate: dateMatch ? cleanText(dateMatch[1]) : "",
         });
       }
       console.log(`[Briefing] ${label}: ${items.length}건 수집 (시도 ${attempt})`);
@@ -145,8 +148,27 @@ export async function runDailyBriefing(opts?: {
     const collected = (await Promise.all(RSS_SOURCES.map(src => fetchRssItems(src.url, src.label)))).flat();
     console.log(`[Briefing] 전체 수집 ${collected.length}건`);
 
+    // 오래된 기사와 이미 쓴 기사를 뺀다. JTBC RSS 가 2024-10-29 에서 멈춘 채 같은 기사를 계속 내줘서
+    // 옛 기사가 37일 동안 매일 브리핑에 들어갔다. 날짜가 최근 2일을 넘으면 빼고, 최근 14일 브리핑에
+    // 이미 실린 링크도 뺀다(오늘 브리핑을 다시 만드는 경우는 오늘 것을 빼고 본다).
+    const { data: pastBriefings } = await supabase
+      .from("briefings")
+      .select("news_items")
+      .neq("date", briefingDate)
+      .order("created_at", { ascending: false })
+      .limit(14);
+    const seenLinks = new Set<string>();
+    for (const b of pastBriefings ?? []) {
+      for (const n of (Array.isArray(b.news_items) ? b.news_items : []) as { link?: string }[]) {
+        if (n?.link) seenLinks.add(n.link);
+      }
+    }
+    const nowMs = Date.now();
+    const pool = collected.filter(it => isFresh(it.pubDate, nowMs) && !(it.link && seenLinks.has(it.link)));
+    console.log(`[Briefing] 오래됐거나 이미 쓴 기사 ${collected.length - pool.length}건 제외 → ${pool.length}건`);
+
     const newsItems: NewsItem[] = [];
-    for (const item of collected) {
+    for (const item of pool) {
       const hasKeyword = KEYWORDS.some(k => item.title.includes(k) || item.description.includes(k));
       const hasExclude = EXCLUDE_KEYWORDS.some(k => item.title.includes(k));
       if (!hasKeyword || hasExclude) continue;
@@ -157,7 +179,7 @@ export async function runDailyBriefing(opts?: {
 
     // 부동산 기사가 너무 적으면 일반 경제 기사로 최소 5건까지 보강
     if (newsItems.length < 5) {
-      for (const item of collected) {
+      for (const item of pool) {
         if (newsItems.length >= 5) break;
         if (!newsItems.some(n => n.title === item.title)) newsItems.push(item);
       }
