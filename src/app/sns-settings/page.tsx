@@ -98,9 +98,22 @@ const PLATFORMS = [
     label: 'X (Twitter)',
     color: 'from-gray-900 to-black',
     abbr: 'X',
-    oauth: false,
-    comingSoon: true,
-    guide: null,
+    oauth: true,
+    authPath: '/api/x/auth',
+    guide: {
+      title: 'X 연동 준비물',
+      steps: [
+        { step: '1', text: 'X 개발자 콘솔(console.x.com) → Apps → 내 앱 → Keys에서 OAuth 2.0 Client ID / Client Secret을 확인합니다.' },
+        { step: '2', text: 'Vercel 프로젝트 Settings → Environment Variables에 X_CLIENT_ID, X_CLIENT_SECRET을 등록합니다.' },
+        { step: '3', text: 'X 앱의 User authentication settings에서 Callback URL에 https://insta-card-dashboard.vercel.app/api/x/callback 을 등록하고, 권한을 Read and write로 설정합니다.' },
+        { step: '4', text: '아래 "연동하기"를 눌러 X 계정으로 로그인하고 권한을 허용합니다.' },
+      ],
+      note: '⚠️ X API는 2026년 2월부터 종량제(PPU)입니다. 게시 1건당 약 $0.015(링크 포함 시 $0.200)가 차감되고, console.x.com → Credits에서 크레딧을 충전해야 실제 발행이 됩니다. 사진은 한 게시물에 4장, 영상은 1개까지 올라갑니다.',
+      links: [
+        { label: 'X 개발자 콘솔', url: 'https://console.x.com' },
+        { label: 'X API 미디어 업로드 문서', url: 'https://docs.x.com/x-api/media/media-upload' },
+      ],
+    },
     fields: [],
   },
   {
@@ -232,6 +245,10 @@ function SnsSettingsContent() {
     // 유튜브는 실패 원인이 여러 가지(리디렉션 미등록·범위 누락·채널 없음)라
     // "다시 시도"만 알리면 고칠 수가 없다. 서버가 보낸 이유를 그대로 보여준다.
     else if (ytStatus === 'error') showToast(`YouTube 연동 실패: ${searchParams.get('msg') || '알 수 없는 오류'}`, false);
+
+    const xStatus = searchParams.get('x');
+    if (xStatus === 'connected') showToast(`X @${searchParams.get('user') || ''} 연동 완료!`);
+    else if (xStatus === 'error') showToast(`X 연동 실패: ${searchParams.get('msg') || '알 수 없는 오류'}`, false);
   }, [searchParams]);
 
   useEffect(() => {

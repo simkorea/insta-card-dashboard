@@ -6777,7 +6777,7 @@ const PLATFORMS = [
   { id: 'threads', label: 'Threads', icon: '🧵', note: '' },
   { id: 'youtube', label: 'YouTube', icon: '▶️', note: '동영상 전용' },
   { id: 'tiktok', label: 'TikTok', icon: '🎵', note: '영상 전용 — 릴스·쇼츠 업로드에서' },
-  { id: 'x', label: 'X', icon: '✕', note: '준비 중' },
+  { id: 'x', label: 'X', icon: '✕', note: '' },
 ] as const;
 
 function SnsUploadModal({

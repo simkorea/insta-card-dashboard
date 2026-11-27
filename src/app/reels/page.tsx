@@ -24,6 +24,7 @@ const PLATFORMS = [
   { id: 'instagram', label: '인스타그램 릴스', hint: '세로 9:16 · 3초~15분' },
   { id: 'youtube', label: '유튜브 쇼츠', hint: '세로 9:16 · 3분 이하면 쇼츠로 분류' },
   { id: 'tiktok', label: '틱톡', hint: '세로 9:16 · 문구가 게시글로 들어갑니다' },
+  { id: 'x', label: 'X (트위터)', hint: '영상 1개 · 문구 280자(한글 약 140자)' },
 ] as const;
 
 const PRIVACY = [

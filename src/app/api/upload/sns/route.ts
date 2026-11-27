@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServer } from '@/lib/supabase-server';
 import { uploadShortToYoutube } from '@/lib/youtube/upload';
 import { uploadVideoToTikTok, fetchTikTokStatus } from '@/lib/tiktok/upload';
+import { uploadToX } from '@/lib/x/upload';
 import { createClient } from '@supabase/supabase-js';
 
 /** 틱톡 토큰 저장용. RLS를 우회해야 하는 쓰기라 service role로 만든다. */
@@ -598,9 +599,47 @@ export async function POST(req: NextRequest) {
               });
             }
             break;
-          case 'x':
-            results.x = { success: false, error: 'X(Twitter) 연동은 준비 중입니다.' };
+          case 'x': {
+            const acc = accounts.x;
+            if (finishContainerId || checkPublishId) {
+              results.x = { success: false, error: 'X는 이어서 발행하는 방식이 없습니다. 발행을 다시 눌러주세요.' };
+            } else if (!acc?.access_token) {
+              results.x = { success: false, error: 'X 계정이 연동되지 않았습니다. SNS 설정에서 먼저 연동하세요.' };
+            } else if (!videoUrl && !imageUrls?.length) {
+              results.x = { success: false, error: 'X에 올릴 이미지나 영상이 없습니다.' };
+            } else {
+              results.x = await uploadToX({
+                account: acc,
+                imageUrls,
+                videoUrl,
+                caption,
+                // X 액세스 토큰은 2시간이면 만료된다. 갱신본이 오면 바로 저장한다.
+                onTokenRefresh: async ({ accessToken, refreshToken, expiresAt }) => {
+                  const svc = serviceClient();
+                  if (!svc) return;
+                  // extra를 통째로 덮으면 scope가 사라지므로 현재 값을 읽어 합친다
+                  const { data: cur } = await svc
+                    .from('sns_accounts')
+                    .select('extra')
+                    .eq('user_id', user.id)
+                    .eq('platform', 'x')
+                    .maybeSingle();
+                  const extra = { ...((cur?.extra as Record<string, string>) || {}) };
+                  if (expiresAt) extra.expires_at = expiresAt;
+                  await svc
+                    .from('sns_accounts')
+                    .update({
+                      access_token: accessToken,
+                      ...(refreshToken ? { refresh_token: refreshToken } : {}),
+                      extra,
+                    })
+                    .eq('user_id', user.id)
+                    .eq('platform', 'x');
+                },
+              });
+            }
             break;
+          }
         }
       })
     );
